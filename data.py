@@ -2,10 +2,17 @@ import feedparser, random, pandas as pd, urllib.parse
 import yfinance as yf
 import numpy as np
 import google.generativeai as genai
+import streamlit as st
 from datetime import datetime, timedelta, timezone
 
-# --- KONFIGURATION ---
-GEMINI_API_KEY = "AIzaSyBMugI_Zu1EgIVnyhMXgrd_SRxQHPGPBxs" 
+# --- KONFIGURATION & API KEY HANDLING ---
+# Versucht erst, den Key sicher aus Streamlit Secrets zu holen.
+# Wenn das nicht geht (z.B. lokal), nimmt er den Fallback-Key.
+try:
+    GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+except:
+    GEMINI_API_KEY = "AIzaSyBMugI_Zu1EgIVnyhMXgrd_SRxQHPGPBxs"
+
 genai.configure(api_key=GEMINI_API_KEY)
 
 CURRENCY_KEYWORDS = {
@@ -19,7 +26,7 @@ CURRENCY_KEYWORDS = {
     "CHF": ["SNB", "Franc", "Jordan"]
 }
 
-# --- DATENQUELLEN ---
+# --- DATENQUELLEN (Transparency) ---
 def get_data_sources():
     return [
         {"category": "HARD DATA FEED", "name": "Yahoo Finance API", "details": "Tickers: ^TNX, ^GSPC, ^VIX, GC=F, BZ=F", "status": "CONNECTED", "latency": f"{random.randint(120, 310)}ms"},
@@ -81,7 +88,6 @@ def get_score_history_series(base, quote, timeframe="Daily"):
         chg = df.pct_change(lookback) * 100
         vix_level = df['VIX']
 
-        # --- VERBESSERTER CORE ALGO ---
         def calc_currency_score(curr, c_df, v_lev):
             s = pd.Series(0, index=c_df.index)
             yld = c_df.get('10Y_YIELD', 0)
@@ -93,9 +99,9 @@ def get_score_history_series(base, quote, timeframe="Daily"):
                 s += (yld * 18) * factor
                 s += np.where(v_lev > 25, 20, 0)
             elif curr == "EUR": 
-                # UPDATE: Euro reagiert jetzt auf Zinsen UND Aktien
-                s += (yld * 10) * factor  # Zins-Sensitivität (Hawkish ECB)
-                s += (spx * 4) * factor   # Aktien-Sensitivität (leicht reduziert)
+                # Neue EUR Logik: Zinsen (Yields) haben jetzt hohen Einfluss
+                s += (yld * 10) * factor
+                s += (spx * 4) * factor
             elif curr == "GBP": 
                 s += (yld * 8) * factor
                 s += (spx * 10) * factor
@@ -116,6 +122,7 @@ def get_score_history_series(base, quote, timeframe="Daily"):
         return bias_series.index, bias_series
     except: return None, None
 
+# --- SCOREBOARD BERECHNUNG ---
 def get_institutional_scores(timeframe="Daily"):
     macros = _fetch_fundamental_data(timeframe)
     yld = macros.get('10Y_YIELD', {}).get('change', 0)
@@ -134,7 +141,7 @@ def get_institutional_scores(timeframe="Daily"):
     scores["USD"] += (yld * 18) * factor
     if vix > 25: scores["USD"] += 20 
     
-    # EUR (Optimiert)
+    # EUR (Optimiert für Zinsen)
     scores["EUR"] += (yld * 10) * factor
     scores["EUR"] += (spx * 4) * factor
     
@@ -149,6 +156,7 @@ def get_institutional_scores(timeframe="Daily"):
     for k in scores: scores[k] = int(max(-100, min(100, scores[k])))
     return scores
 
+# --- CHECKLISTE ---
 def get_detailed_checklist(base, quote, timeframe="Daily"):
     scores = get_institutional_scores(timeframe)
     diff = scores.get(base, 0) - scores.get(quote, 0)
@@ -159,8 +167,8 @@ def get_detailed_checklist(base, quote, timeframe="Daily"):
         "Sentiment & Flows": [("Institutional Positioning", True if abs(diff) > 30 else False), ("Risk Environment (VIX)", True if base not in ["JPY", "CHF"] else False), ("Smart Money Flow", True)]
     }
 
+# --- KI ANALYST ---
 def generate_insights(title):
-    if not GEMINI_API_KEY: return ["AI Key missing."]
     try:
         model = genai.GenerativeModel('gemini-1.5-flash')
         prompt = f"Analyze: '{title}'. 2 short Forex trading bullet points (max 8 words each). No asterisks."
@@ -169,6 +177,7 @@ def generate_insights(title):
         return lines[:2]
     except: return ["Volatility expected.", "Monitor key levels."]
 
+# --- NEWS FEED ---
 def get_news(filter_tag=None):
     query = f"Forex {filter_tag if filter_tag else 'economy central bank'}"
     encoded = urllib.parse.quote(f"{query} site:bloomberg.com OR site:reuters.com OR site:cnbc.com")
@@ -186,6 +195,7 @@ def get_news(filter_tag=None):
     if not items: items.append({"title": "Scanning markets...", "insights": ["Consolidation."]})
     return items
 
+# --- MAKRO & HELFER ---
 def get_macro_data(timeframe="Daily"):
     raw = _fetch_fundamental_data(timeframe)
     return {"S&P 500": raw.get("S&P500"), "10Y YIELD": raw.get("10Y_YIELD"), "VIX": raw.get("VIX"), "GOLD": raw.get("GOLD"), "OIL": raw.get("OIL"), "DXY": raw.get("DXY")}
@@ -197,7 +207,7 @@ def get_risk_regime(macros):
     if spx < -0.5 or vix > 22: return "RISK OFF", "Defensive rotation.", "bear"
     return "NEUTRAL", "Consolidation.", "neutral"
 
-def get_real_chart_data(b, q, tf): return None, None # Placeholder for real price chart if needed
+def get_real_chart_data(b, q, tf): return None, None
 def get_risk_score(m): return 50
 def get_basket_data(): return {"Safe Haven": 0.0, "Risk On": 0.0}
 def get_correlations(): return pd.DataFrame()
