@@ -6,7 +6,7 @@ import {
   STATIONS, STATION_MAP, STAFF, STAFF_MAP, SHOP, ROOMS,
   T2_REQ, MILESTONE_STEP, fmt, fmtTime, costOf, milestoneMult, nextMilestone,
 } from './data.js';
-import { playSfx } from './sfx.js';
+import { playSfx, setMusic } from './sfx.js';
 
 const $ = sel => document.querySelector(sel);
 const el = (tag, cls, html) => {
@@ -424,10 +424,16 @@ function openQuestModal() {
 function openSettingsModal() {
   openModal('⚙️ Einstellungen', body => {
     body.innerHTML = `
+      <button class="btn-flat" id="set-music">${G.state.settings.music ? '🎵 Musik: an' : '🎵 Musik: aus'}</button>
       <button class="btn-flat" id="set-sound">${G.state.settings.sound ? '🔊 Sound: an' : '🔇 Sound: aus'}</button>
       <button class="btn-flat danger" id="set-reset">🗑️ Spielstand löschen</button>
       <p class="modal-text small">„Airport“ Club Simulator · Spielstand wird automatisch lokal gespeichert.<br>
       Ruf-Sterne: ${G.state.fame} ⭐ · Insgesamt verdient: ${fmt(G.state.lifetime)} €</p>`;
+    body.querySelector('#set-music').addEventListener('click', e => {
+      setMusic(!G.state.settings.music);
+      G.save();
+      e.target.textContent = G.state.settings.music ? '🎵 Musik: an' : '🎵 Musik: aus';
+    });
     body.querySelector('#set-sound').addEventListener('click', e => {
       G.state.settings.sound = !G.state.settings.sound;
       G.save();
@@ -540,8 +546,11 @@ export function initUI() {
 // Feedback vom Canvas (Taps)
 export function canvasFeedback(fb) {
   if (fb.type === 'tap') {
-    floatText({ x: fb.x, y: fb.y - 10 }, '+' + fmt(fb.gain) + ' €', 'float-money');
+    floatText({ x: fb.x, y: fb.y - 10 }, '+🔥 Hype', 'float-buy');
     playSfx('tap');
+  } else if (fb.type === 'collect') {
+    floatText({ x: fb.x, y: fb.y - 10 }, '+' + fmt(fb.amount) + ' €', 'float-money');
+    playSfx('buy');
   } else if (fb.type === 'celeb') {
     floatText({ x: fb.x, y: fb.y - 10 }, '🌟 +' + fmt(fb.money) + ' €' + (fb.gems ? ' +' + fb.gems + '💎' : ''), 'float-celeb');
     playSfx('chest');

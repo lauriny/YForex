@@ -31,6 +31,7 @@ export const state = {
   stations: freshStations(),
   staff: {},               // id -> Stufe
   t2Unlocked: false,
+  stationCash: {},         // id -> aufgelaufener, einsammelbarer Umsatz
   boostUntil: 0,
   boostCdUntil: 0,
   hype: 0,
@@ -41,7 +42,7 @@ export const state = {
   questsDone: {},          // "phase:i" -> true
   midChestClaimed: false,
   stats: { drops: 0, celebs: 0, boostsUsed: 0, chests: 0, prestiges: 0 },
-  settings: { sound: true },
+  settings: { sound: true, music: true },
   createdAt: Date.now(),
 };
 
@@ -204,16 +205,43 @@ export function startBoost(force = false) {
   return true;
 }
 
+// ---- Stations-Kassen (Gäste kaufen → Geld liegt am Stand) -------------------
+// Ein Kauf legt ~12–25 Sekunden Stations-Einkommen in die Kasse (gedeckelt).
+export function depositAtStation(id) {
+  const income = stationIncome(id) * globalMult();
+  if (income <= 0) return 0;
+  const amount = income * (12 + Math.random() * 13);
+  const cap = income * 120; // max. 2 Minuten Stations-Einkommen pro Kasse
+  const cur = state.stationCash[id] || 0;
+  const add = Math.min(amount, Math.max(0, cap - cur));
+  if (add <= 0) return 0;
+  state.stationCash[id] = cur + add;
+  return add;
+}
+
+export function collectStation(id) {
+  const amount = state.stationCash[id] || 0;
+  if (amount <= 0) return 0;
+  state.stationCash[id] = 0;
+  addMoney(amount, 'collect');
+  emit('collect', { id, amount });
+  save();
+  return amount;
+}
+
 // ---- Hype & DROP ----------------------------------------------------------
-export function tapHype(mult = 1) {
-  // Aktives Tippen: kleiner Sofort-Verdienst + Hype
-  const gain = Math.max(0.5, incomePerSec() * 0.6) * mult;
-  addMoney(gain, 'tap');
+// Hype füllt sich von allein (DJ-Stufe & Ausbau beschleunigen das).
+// Tippen auf den Club gibt nur einen kleinen Extra-Schub — kein Tipp-Zwang.
+export function hypeFillSeconds() {
+  return Math.max(35, 90 - (state.stations.dj || 0) * 0.8 - totalLevels() * 0.02);
+}
+
+export function tapHype() {
   if (!dropActive()) {
     state.hype = Math.min(100, state.hype + HYPE_PER_TAP);
     if (state.hype >= 100) triggerDrop();
   }
-  return gain;
+  return 0;
 }
 
 export function triggerDrop() {
@@ -352,6 +380,7 @@ export function doPrestige() {
   state.stations = freshStations();
   state.staff = {};
   state.t2Unlocked = false;
+  state.stationCash = {};
   state.hype = 0;
   state.boostUntil = 0; state.boostCdUntil = 0; state.dropUntil = 0;
   state.celeb = null;
@@ -374,9 +403,10 @@ export function tick(now) {
 
   addMoney(incomePerSec() * dt);
 
-  // Hype fällt langsam ab
-  if (!dropActive() && state.hype > 0) {
-    state.hype = Math.max(0, state.hype - HYPE_DECAY * dt);
+  // Hype füllt sich automatisch → regelmäßiger DROP ohne Tippen
+  if (!dropActive()) {
+    state.hype += (100 / hypeFillSeconds()) * dt;
+    if (state.hype >= 100) triggerDrop();
   }
 
   // Promi-Gast

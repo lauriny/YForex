@@ -4,6 +4,7 @@
 import * as G from './game.js';
 import { initCanvas, renderFrame, setTapFeedback } from './render.js';
 import { initUI, updateHUD, offlinePopup, canvasFeedback } from './ui.js';
+import { startMusic, pauseAudio } from './sfx.js';
 
 // Spielstand laden (liefert ggf. Offline-Einnahmen)
 const offline = G.load();
@@ -27,9 +28,14 @@ function loop(now) {
 }
 requestAnimationFrame(loop);
 
-// Speichern, wenn die App in den Hintergrund geht
+// Musik startet mit der ersten Berührung (Browser-Autoplay-Regel)
+document.addEventListener('pointerdown', () => startMusic(), { once: true });
+
+// Speichern & Audio pausieren, wenn die App in den Hintergrund geht
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'hidden') G.save();
+  const hidden = document.visibilityState === 'hidden';
+  if (hidden) G.save();
+  pauseAudio(hidden);
 });
 window.addEventListener('pagehide', () => G.save());
 

@@ -3,7 +3,11 @@
 //  (Cartoon-Tycoon-Look: Gebäude mit aufgeschnittenem Dach,
 //   Wände/Möbel mit Tiefe, Gäste mit echtem Verhalten)
 // ============================================================
-import { state, totalLevels, dropActive, tapCeleb, tapHype } from './game.js';
+import {
+  state, totalLevels, dropActive, tapCeleb, tapHype,
+  depositAtStation, collectStation,
+} from './game.js';
+import { fmt } from './data.js';
 
 let canvas, ctx, W = 0, H = 0, DPR = 1;
 let particles = [];
@@ -32,6 +36,25 @@ const L = {
   sofaR1:{ x: 0.72, y: 0.11, w: 0.17, h: 0.05 },
   sofaR2:{ x: 0.72, y: 0.215, w: 0.17, h: 0.05 },
   sofaL: { x: 0.10, y: 0.24, w: 0.16, h: 0.05 },
+};
+
+// Wo der Geld-Pin jeder Station schwebt
+const CASH_PINS = {
+  einlass:    { x: 0.50, y: 0.775 },
+  garderobe:  { x: 0.815, y: 0.655 },
+  bar:        { x: 0.148, y: 0.50 },
+  shots:      { x: 0.852, y: 0.47 },
+  vipEinlass: { x: 0.725, y: 0.40 },
+  second:     { x: 0.52, y: 0.155 },
+  champus:    { x: 0.19, y: 0.115 },
+  tables:     { x: 0.505, y: 0.30 },
+  chill:      { x: 0.805, y: 0.20 },
+};
+
+// Gäste-Aktivität → Station, deren Kasse gefüllt wird
+const ACT_STATION = {
+  bar: 'bar', shots: 'shots', ward: 'garderobe',
+  champ: 'champus', sofa: 'tables', vipdance: 'second',
 };
 
 const GUEST_COLORS = ['#e74c8b', '#4f9cf7', '#f7b32b', '#42d6a4', '#b06df7', '#f76d4f', '#4fd7f7', '#95e04a'];
@@ -76,14 +99,24 @@ function onTap(e) {
       return;
     }
   }
+  // Geld-Pins an den Stationen einsammeln
+  for (const [id, pin] of Object.entries(CASH_PINS)) {
+    if ((state.stationCash[id] || 0) < 1) continue;
+    if (Math.hypot((x - pin.x) * W, (y - pin.y) * H + 14) < 30) {
+      const amount = collectStation(id);
+      if (amount > 0 && onTapFeedback) onTapFeedback({ type: 'collect', x: e.clientX, y: e.clientY, amount });
+      return;
+    }
+  }
   // Tap auf gesperrtes Terminal 2 → Freischalt-Dialog
   if (!state.t2Unlocked && y < L.split && y > L.bld.y && x > L.bld.x && x < L.bld.x + L.bld.w) {
     if (onTapFeedback) onTapFeedback({ type: 'locked' });
     return;
   }
-  const gain = tapHype();
-  particles.push({ x, y, vy: -0.06, life: 1, txt: '💶', size: 13 });
-  if (onTapFeedback) onTapFeedback({ type: 'tap', x: e.clientX, y: e.clientY, gain });
+  // Sonst: kleiner Hype-Schub (rein optional, kein Tipp-Zwang)
+  tapHype();
+  particles.push({ x, y, vy: -0.06, life: 0.8, txt: '🔥', size: 12 });
+  if (onTapFeedback) onTapFeedback({ type: 'tap', x: e.clientX, y: e.clientY });
 }
 
 // ============================================================
@@ -127,6 +160,7 @@ function spawnGuest(celeb = false) {
     pushActivity(g, celeb || (vip && Math.random() < 0.75) ? (vip ? 'vipdance' : 'dance') : 'dance');
   }
   guests.push(g);
+  depositAtStation('einlass'); // Eintritt landet in der Einlass-Kasse
   return g;
 }
 
@@ -187,6 +221,7 @@ function pushActivity(g, act) {
       break;
   }
   g.mode = 'walk';
+  if (g.y > L.split && ty < L.split) g.paysVip = true; // geht hoch in den VIP
   g.path = routeTo(g, tx, ty);
 }
 
@@ -256,6 +291,7 @@ function updateGuests(dt) {
           if (g.act === 'leave' ) { guests.splice(i, 1); continue; }
           g.mode = 'act';
           g.actT = actDuration(g.act);
+          if (g.paysVip) { depositAtStation('vipEinlass'); g.paysVip = false; }
           if (g.act === 'bar') g.drink = pick(DRINKS_T1);
           if (g.act === 'shots') g.drink = '🥃';
           if (g.act === 'champ' || g.act === 'sofa') g.drink = pick(DRINKS_T2);
@@ -272,6 +308,11 @@ function updateGuests(dt) {
         g.alpha = inWC ? 0.25 : 1;
       } else g.alpha = 1;
       if (g.actT <= 0) {
+        // Kauf abgeschlossen → Umsatz landet in der Stations-Kasse
+        const stId = g.act === 'sofa'
+          ? (Math.random() < 0.5 ? 'tables' : 'chill')
+          : ACT_STATION[g.act];
+        if (stId) depositAtStation(stId);
         g.drink = null;
         g.alpha = 1;
         if (g.celeb) pushActivity(g, 'dance');
@@ -695,6 +736,44 @@ function drawT2Lock(t) {
   ctx.fillText('Zum Freischalten antippen', W / 2, (b.y + (L.split - b.y) * 0.82) * H);
 }
 
+// ---------------- Geld-Pins ----------------
+function drawCashPins(t) {
+  let idx = 0;
+  for (const [id, pin] of Object.entries(CASH_PINS)) {
+    idx++;
+    const amount = state.stationCash[id] || 0;
+    if (amount < 1) continue;
+    const bounce = Math.sin(t * 3 + idx) * 2.5;
+    const px = pin.x * W, py = pin.y * H - 16 + bounce;
+    const label = fmt(amount);
+    ctx.font = `800 ${Math.max(9, W * 0.024)}px system-ui, sans-serif`;
+    const tw = ctx.measureText(label).width;
+    const bw = tw + 24, bh = 17;
+    // Zeiger-Spitze
+    ctx.fillStyle = '#2ea84a';
+    ctx.beginPath();
+    ctx.moveTo(px, py + bh / 2 + 7);
+    ctx.lineTo(px - 5, py + bh / 2 - 1);
+    ctx.lineTo(px + 5, py + bh / 2 - 1);
+    ctx.closePath();
+    ctx.fill();
+    // Pill
+    ctx.fillStyle = '#38c95c';
+    rr(px - bw / 2, py - bh / 2, bw, bh, bh / 2); ctx.fill();
+    ctx.strokeStyle = '#1d7a33';
+    ctx.lineWidth = 2;
+    rr(px - bw / 2, py - bh / 2, bw, bh, bh / 2); ctx.stroke();
+    // Inhalt
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'left';
+    ctx.font = `${11}px sans-serif`;
+    ctx.fillText('💶', px - bw / 2 + 5, py + 4);
+    ctx.font = `800 ${Math.max(9, W * 0.024)}px system-ui, sans-serif`;
+    ctx.fillText(label, px - bw / 2 + 19, py + 3.5);
+    ctx.textAlign = 'center';
+  }
+}
+
 // ---------------- Partikel ----------------
 export function spawnMoneyParticle(nx, ny) {
   particles.push({ x: nx, y: ny, vy: -0.06, life: 1, txt: '💶', size: 13 });
@@ -765,6 +844,9 @@ export function renderFrame(now) {
       ctx.stroke();
     }
   }
+
+  // Geld-Pins über den Stationen (Umsätze einsammeln)
+  drawCashPins(t);
 
   // VIP-Etage gesperrt → Overlay über allem in T2
   if (!state.t2Unlocked) drawT2Lock(t);
