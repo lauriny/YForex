@@ -196,7 +196,7 @@ function onTap(e) {
     if ((state.stationCash[stId] || 0) < 1) continue;
     const a = A[anchorId];
     if (roomV && a.room !== lastFocusRoom) continue;
-    const s = roomV ? (() => { const p = detailProj(a.x, a.y); return { x: p.x, y: p.y - dTileW() * 0.5 }; })() : iso(a.x, a.y, 1.15);
+    const s = roomV ? (() => { const p = detailProj(a.x, a.y); return { x: p.x, y: p.y - dTileW() * 1.05 }; })() : iso(a.x, a.y, 1.15);
     if (Math.hypot(mx - s.x, my - s.y) < (roomV ? 40 : 30)) {
       const amount = collectStation(stId);
       if (amount > 0 && onTapFeedback) onTapFeedback({ type: 'collect', x: e.clientX, y: e.clientY, amount });
@@ -895,24 +895,54 @@ function dLabel(wx, wy, txt, color, px = 11) {
   ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillText(txt, p.x + 1, p.y + 1);
   ctx.fillStyle = color; ctx.fillText(txt, p.x, p.y);
 }
+// erhöhte, beleuchtete 3D-Tanzfläche (Kacheln mit Kante + Sockel)
 function dTiles(wx, wy, ww, wd, cols, rows, palette, t, beat) {
   const a = detailProj(wx, wy), b = detailProj(wx + ww, wy + wd);
-  const cw = (b.x - a.x) / cols, ch = (b.y - a.y) / rows;
+  const W0 = b.x - a.x, H0 = b.y - a.y;
+  const cw = W0 / cols, ch = H0 / rows;
+  const lift = Math.max(6, ch * 0.55);
+  // Bodenschatten + Sockel-Seitenwand (Plattform-Höhe)
+  ctx.fillStyle = 'rgba(0,0,0,0.32)';
+  ctx.beginPath(); ctx.ellipse(a.x + W0 / 2, b.y + lift * 0.7, W0 * 0.6, H0 * 0.3, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = '#0f0b22';
+  ctx.beginPath(); ctx.roundRect(a.x - 3, b.y - 6, W0 + 6, lift, 8); ctx.fill();
+  const bev = Math.max(2.5, ch * 0.18);
   for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) {
     const pulse = 0.5 + 0.5 * Math.sin(beat + i + j);
-    let col;
-    if (palette === 'vip') col = `hsl(${42 + ((i + j) % 3) * 8}, 88%, ${34 + pulse * 22}%)`;
-    else if (palette === 'roof') col = `hsl(${(t * 30 + (i + j) * 24) % 360}, 70%, ${30 + pulse * 18}%)`;
-    else col = `hsl(${((i + j) * 55 + t * 90) % 360}, 85%, ${dropActive() ? 52 + pulse * 16 : 37 + pulse * 13}%)`;
-    ctx.fillStyle = col;
-    ctx.beginPath(); ctx.roundRect(a.x + i * cw + 1.5, a.y + j * ch + 1.5, cw - 3, ch - 3, 4); ctx.fill();
+    let hue, light;
+    if (palette === 'vip') { hue = 42 + ((i + j) % 3) * 8; light = 34 + pulse * 22; }
+    else if (palette === 'roof') { hue = (t * 30 + (i + j) * 24) % 360; light = 30 + pulse * 18; }
+    else { hue = ((i + j) * 55 + t * 90) % 360; light = dropActive() ? 52 + pulse * 16 : 37 + pulse * 13; }
+    const tx = a.x + i * cw + 1.5, ty = a.y + j * ch + 1.5, tw = cw - 3, th = ch - 3;
+    ctx.fillStyle = `hsl(${hue},72%,${Math.max(10, light - 24)}%)`;               // dunkle Kante (Höhe)
+    ctx.beginPath(); ctx.roundRect(tx, ty + th - bev, tw, bev + 2.5, 3); ctx.fill();
+    ctx.fillStyle = `hsl(${hue},88%,${light}%)`;                                  // Oberseite
+    ctx.beginPath(); ctx.roundRect(tx, ty, tw, th - bev * 0.5, 3); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.25)';                                     // Glanz
+    ctx.beginPath(); ctx.roundRect(tx + 2, ty + 2, tw - 4, th * 0.24, 2); ctx.fill();
   }
-  ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.roundRect(a.x - 2, a.y - 2, b.x - a.x + 4, b.y - a.y + 4, 8); ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,0.28)'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.roundRect(a.x - 3, a.y - 3, W0 + 6, H0 + 6, 8); ctx.stroke();
+}
+// weicher Bodenschatten unter einem Möbel-Footprint
+function dShadow(wx, wy, ww, wd) {
+  const a = detailProj(wx, wy), b = detailProj(wx + ww, wy + wd);
+  ctx.fillStyle = 'rgba(0,0,0,0.26)';
+  ctx.beginPath(); ctx.ellipse((a.x + b.x) / 2, b.y - 1, (b.x - a.x) * 0.58, (b.y - a.y) * 0.42 + 3, 0, 0, 7); ctx.fill();
+}
+// extrudierter 3D-Block (Deckel angehoben um z, Frontfläche zeigt Höhe)
+function dBox(wx, wy, ww, wd, z, top, front, stroke, rad = 6) {
+  const a = detailProj(wx, wy), b = detailProj(wx + ww, wy + wd);
+  const x = a.x, y = a.y, w = b.x - a.x, h = b.y - a.y;
+  ctx.fillStyle = front;
+  ctx.beginPath(); ctx.roundRect(x, y + h - z, w, z + rad, rad); ctx.fill();
+  ctx.fillStyle = top;
+  ctx.beginPath(); ctx.roundRect(x, y - z, w, h, rad); ctx.fill();
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.roundRect(x, y - z, w, h, rad); ctx.stroke(); }
 }
 function dPerson(wx, wy, o) {
   const p = detailProj(wx, wy);
-  drawPersonAt(p.x, p.y, dPersonScale() * (o.s || 1), o);
+  drawPersonAt(p.x, p.y - (o.groundZ || 0), dPersonScale() * (o.s || 1), o);
 }
 
 const FLOORCOL = { t1: '#463a72', klo: '#46586a', t2: '#3d1f42', roof: '#12203a' };
@@ -947,88 +977,106 @@ function drawRoomDetail(id, t, beat) {
   ctx.fillStyle = '#e8d5b8'; roundRectP(fx, fy, fw, fh, 22); ctx.fill();
   ctx.fillStyle = '#d9c39f'; roundRectP(fx, fy + fh - 13, fw, 13, 10); ctx.fill();
   ctx.fillStyle = FLOORCOL[id] || '#463a72'; roundRectP(pad.x - 6, pad.top - 6, W - 2 * pad.x + 12, H - pad.top - pad.bot + 12, 12); ctx.fill();
+  // 3D-Rückwand (Höhe hinten) + Schlagschatten auf den Boden
+  const u = dTileW();
+  const wallH = u * 1.15;
+  ctx.fillStyle = '#c9b39a'; roundRectP(pad.x - 6, pad.top - 6, W - 2 * pad.x + 12, wallH, 10); ctx.fill();
+  ctx.fillStyle = '#b89f82'; ctx.fillRect(pad.x - 6, pad.top - 6 + wallH - 4, W - 2 * pad.x + 12, 4);
+  const wsh = ctx.createLinearGradient(0, pad.top - 6 + wallH, 0, pad.top - 6 + wallH + u * 0.9);
+  wsh.addColorStop(0, 'rgba(0,0,0,0.33)'); wsh.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = wsh; ctx.fillRect(pad.x - 6, pad.top - 6 + wallH, W - 2 * pad.x + 12, u * 0.9);
 
   if (id === 't1') {
-    // Dancefloor zentral (v2-Kacheln)
     const fl = { x: 2.7, y: 9.4, w: 4.7, d: 4.5 };
     dTiles(fl.x, fl.y, fl.w, fl.d, 6, 6, 'main', t, beat);
-    dLabel(fl.x + fl.w / 2, fl.y - 0.3, 'DANCEFLOOR', 'rgba(255,255,255,0.45)', 10);
-    // DJ-Lichtkegel (additiv) über den Floor
+    dLabel(fl.x + fl.w / 2, fl.y - 0.35, 'DANCEFLOOR', 'rgba(255,255,255,0.5)', 10);
+    // DJ-Lichtkegel (additiv)
     ctx.save(); ctx.globalCompositeOperation = 'lighter';
     const djp = detailProj(4.5, 8.5), fb = detailProj(fl.x + fl.w / 2, fl.y + fl.d);
     for (let i = 0; i < 3; i++) { const ang = Math.sin(t * (0.7 + i * 0.3) + i * 2) * 0.5;
       ctx.fillStyle = `hsla(${(t * 60 + i * 120) % 360},90%,65%,${dropActive() ? 0.14 : 0.07})`;
-      ctx.beginPath(); ctx.moveTo(djp.x, djp.y);
+      ctx.beginPath(); ctx.moveTo(djp.x, djp.y - u * 0.5);
       ctx.lineTo(djp.x + Math.sin(ang) * W * 0.26 - W * 0.13, fb.y);
       ctx.lineTo(djp.x + Math.sin(ang) * W * 0.26 + W * 0.13, fb.y);
       ctx.closePath(); ctx.fill(); }
     ctx.restore();
-    // DJ-Pult + Boxen + DJ
-    for (const bx of [2.35, 6.1]) { dRect(bx, 7.25, 0.55, 1.25, '#141024', '#0d0a1c', 5);
-      const p = detailProj(bx + 0.27, 7.87); ctx.fillStyle = `rgba(170,130,255,${0.4 + 0.45 * Math.abs(Math.sin(beat))})`;
-      ctx.beginPath(); ctx.arc(p.x, p.y, dTileW() * (0.16 + Math.abs(Math.sin(beat)) * 0.09), 0, 7); ctx.fill(); }
-    dRect(2.9, 7.2, 3.15, 1.3, '#37295e', '#5a4a8a', 8);
-    dRect(3.3, 7.45, 2.35, 0.8, '#5a4a9a', '#2f2557', 6);
-    for (const dx of [3.95, 5.0]) { const p = detailProj(dx, 7.85); ctx.strokeStyle = '#8b5cf6'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(p.x, p.y, dTileW() * 0.2, t * 4, t * 4 + Math.PI * 1.4); ctx.stroke(); }
-    dPerson(4.5, 8.1, { s: 1.15, color: '#3b2f7a', skin: '#f0b98c', hair: '#1a1a22', headphones: true, arms: beat, bob: Math.sin(beat) * 2 });
-    dLabel(4.5, 7.0, '🎧 DJ', '#c9b6ff', 10);
-    // Bar links (braun, Regal + Flaschen + Barkeeper)
-    dRect(0.3, 8.2, 0.5, 5.2, '#4a3320', '#33220f', 5);
-    const bottles = ['🍾','🥃','🍷','🍹','🧉']; ctx.font = `${dTileW() * 0.4}px sans-serif`; ctx.textAlign = 'center';
-    for (let i = 0; i < 5; i++) { const p = detailProj(0.55, 8.7 + i * 0.95); ctx.fillText(bottles[i], p.x, p.y); }
-    dRect(0.85, 8.4, 1.0, 4.8, '#6b4a2f', '#33220f', 6);
-    dLabel(1.35, 7.9, '🍹 BAR', '#ffd9a8', 10);
-    dPerson(1.35, 9.1, { s: 1.1, color: '#f5f0e6', skin: '#f0b98c', hair: '#5a3617', bob: Math.sin(t * 2.5) * 2 });
-    // Shot-Bar rechts oben
-    dRect(7.55, 8.5, 1.2, 2.3, '#5d2a70', '#7d3a95', 7);
-    ctx.font = `${dTileW() * 0.5}px sans-serif`;
-    { const p1 = detailProj(7.95, 9.2), p2 = detailProj(8.35, 10.0); ctx.fillText('🥃', p1.x, p1.y); ctx.fillText('🥃', p2.x, p2.y); }
+    // Boxen (hohe 3D-Blöcke) mit pulsierender Membran
+    for (const bx of [2.3, 6.15]) { dShadow(bx, 7.2, 0.6, 1.3);
+      dBox(bx, 7.2, 0.6, 1.3, u, '#241a40', '#0d0a1c', '#3a2a5e');
+      const p = detailProj(bx + 0.3, 7.85); ctx.fillStyle = `rgba(170,130,255,${0.4 + 0.45 * Math.abs(Math.sin(beat))})`;
+      ctx.beginPath(); ctx.arc(p.x, p.y - u, u * (0.15 + Math.abs(Math.sin(beat)) * 0.08), 0, 7); ctx.fill(); }
+    // DJ-Pult (Podest) + Teller + DJ
+    dShadow(2.9, 7.2, 3.15, 1.3);
+    dBox(2.9, 7.2, 3.15, 1.3, u * 0.5, '#37295e', '#241a40', '#5a4a8a');
+    dBox(3.3, 7.35, 2.35, 0.7, u * 0.72, '#5a4a9a', '#2f2557');
+    for (const dx of [3.95, 5.0]) { const p = detailProj(dx, 7.7); ctx.strokeStyle = '#8b5cf6'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(p.x, p.y - u * 0.72, u * 0.18, t * 4, t * 4 + Math.PI * 1.4); ctx.stroke(); }
+    dPerson(4.5, 8.05, { s: 1.15, color: '#3b2f7a', skin: '#f0b98c', hair: '#1a1a22', headphones: true, arms: beat, bob: Math.sin(beat) * 2, groundZ: u * 0.5 });
+    dLabel(4.5, 6.9, '🎧 DJ', '#c9b6ff', 10);
+    // Bar (Regal hoch + Theke) + Flaschen + Barkeeper
+    dShadow(0.3, 8.2, 1.6, 5.0);
+    dBox(0.3, 8.2, 0.55, 5.1, u * 1.15, '#4a3320', '#2c1d0e', '#5e4326');
+    const bottles = ['🍾','🥃','🍷','🍹','🧉']; ctx.font = `${u * 0.4}px sans-serif`; ctx.textAlign = 'center';
+    for (let i = 0; i < 5; i++) { const p = detailProj(0.57, 8.7 + i * 0.95); ctx.fillText(bottles[i], p.x, p.y - u * 1.15); }
+    dBox(0.9, 8.5, 1.0, 4.6, u * 0.55, '#7a5330', '#4a3320', '#8a5f36');
+    dLabel(1.4, 7.95, '🍹 BAR', '#ffd9a8', 10);
+    dPerson(1.4, 9.0, { s: 1.1, color: '#f5f0e6', skin: '#f0b98c', hair: '#5a3617', bob: Math.sin(t * 2.5) * 2, groundZ: u * 0.25 });
+    // Shot-Bar
+    dShadow(7.55, 8.5, 1.2, 2.3);
+    dBox(7.55, 8.5, 1.2, 2.3, u * 0.6, '#6a2f80', '#41224d', '#7d3a95');
+    ctx.font = `${u * 0.5}px sans-serif`;
+    { const p1 = detailProj(7.95, 9.2), p2 = detailProj(8.35, 10.0); ctx.fillText('🥃', p1.x, p1.y - u * 0.6); ctx.fillText('🥃', p2.x, p2.y - u * 0.6); }
     dLabel(8.1, 8.2, 'SHOTS', `hsl(${(t * 80) % 360},80%,68%)`, 10);
-    // Garderobe rechts unten
-    dRect(7.3, 12.6, 1.5, 1.3, '#8a5c9e', '#4d2c5e', 7);
-    ctx.font = `${dTileW() * 0.4}px sans-serif`;
-    for (let i = 0; i < 3; i++) { const p = detailProj(7.55 + i * 0.45, 13.25); ctx.fillText('🧥', p.x, p.y); }
+    // Garderobe
+    dShadow(7.3, 12.6, 1.5, 1.3);
+    dBox(7.3, 12.6, 1.5, 1.3, u * 0.6, '#8a5c9e', '#552f68', '#a06fb4');
+    ctx.font = `${u * 0.4}px sans-serif`;
+    for (let i = 0; i < 3; i++) { const p = detailProj(7.55 + i * 0.45, 13.2); ctx.fillText('🧥', p.x, p.y - u * 0.6); }
     dLabel(8.05, 12.3, 'GARDEROBE', '#e9d5ff', 9);
-    // Eingang unten: roter Teppich + Vordach + AIRPORT + Türsteher
+    // Eingang: roter Teppich + AIRPORT + Türsteher
     const c1 = detailProj(3.6, 13.9), c2 = detailProj(5.4, 15.3), sp = (c2.x - c1.x) * 0.18;
     ctx.fillStyle = '#b3243a'; ctx.beginPath(); ctx.moveTo(c1.x, c1.y); ctx.lineTo(c2.x, c1.y); ctx.lineTo(c2.x + sp, c2.y); ctx.lineTo(c1.x - sp, c2.y); ctx.closePath(); ctx.fill();
-    dRect(3.5, 13.7, 2.0, 0.4, '#8b5cf6', '#6d3fd4', 4);
     dLabel(2.3, 14.3, '✈ AIRPORT', `hsl(${(t * 40) % 360},90%,65%)`, 11);
-    dPerson(4.5, 14.3, { s: 1.25, color: '#22222e', skin: '#c68a53', hair: '#1a1a22', shades: true });
+    dPerson(4.5, 14.2, { s: 1.25, color: '#22222e', skin: '#c68a53', hair: '#1a1a22', shades: true });
   } else if (id === 'klo') {
     ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1.5;
-    for (let i = 1; i < r.w; i++) { const p1 = detailProj(r.x+i, r.y), p2 = detailProj(r.x+i, r.y+r.d); ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y); ctx.stroke(); }
-    for (let j = 1; j < r.d; j++) { const p1 = detailProj(r.x, r.y+j), p2 = detailProj(r.x+r.w, r.y+j); ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y); ctx.stroke(); }
-    for (let k = 0; k < 3; k++) { dRect(r.x+0.4+k*1.2, r.y+0.6, 0.9, 1.3, '#7a8fa5', '#46545f', 6);
-      const p = detailProj(r.x+0.85+k*1.2, r.y+1.25); ctx.font = `${dTileW()*0.6}px sans-serif`; ctx.textAlign='center'; ctx.fillText('🚽', p.x, p.y); }
-    dLabel(r.x+r.w/2, r.y+0.25, '🚻 WC', '#dfeaf5', 13);
+    for (let i = 1; i < r.w; i++) { const p1 = detailProj(r.x+i, r.y+1.6), p2 = detailProj(r.x+i, r.y+r.d); ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y); ctx.stroke(); }
+    for (let j = 2; j < r.d; j++) { const p1 = detailProj(r.x, r.y+j), p2 = detailProj(r.x+r.w, r.y+j); ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y); ctx.stroke(); }
+    for (let k = 0; k < 3; k++) { dShadow(r.x+0.4+k*1.2, r.y+0.7, 0.9, 1.3);
+      dBox(r.x+0.4+k*1.2, r.y+0.7, 0.9, 1.3, u * 0.6, '#7a8fa5', '#46545f', '#8fa4b8');
+      const p = detailProj(r.x+0.85+k*1.2, r.y+1.35); ctx.font = `${u*0.5}px sans-serif`; ctx.textAlign='center'; ctx.fillText('🚽', p.x, p.y - u*0.6); }
+    dLabel(r.x+r.w/2, r.y+0.3, '🚻 WC', '#dfeaf5', 13);
   } else if (id === 't2') {
     const fl = { x: 12.2, y: 2.4, w: 4.4, d: 3.4 };
     dTiles(fl.x, fl.y, fl.w, fl.d, 5, 4, 'vip', t, beat);
-    dLabel(fl.x + fl.w / 2, fl.y - 0.3, 'VIP DANCEFLOOR', 'rgba(255,215,120,0.6)', 10);
-    dRect(9.9, 0.9, 2.6, 1.0, '#8a6a3a', '#b28a4a', 7);
+    dLabel(fl.x + fl.w / 2, fl.y - 0.35, 'VIP DANCEFLOOR', 'rgba(255,215,120,0.6)', 10);
+    dShadow(9.9, 0.9, 2.6, 1.0); dBox(9.9, 0.9, 2.6, 1.0, u * 0.55, '#8a6a3a', '#453218', '#b28a4a');
     dLabel(11.2, 0.5, '🍾 CHAMPAGNE', '#ffe9a8', 10);
-    if (roomUnlocked('t2')) dPerson(11.2, 1.6, { s: 1.1, color: '#1c1c28', skin: '#f0b98c', hair: '#c98b2d', bob: Math.sin(t*2.2)*2 });
-    for (const [ax, ay] of [[16.2,6.4],[17.3,2.4]]) { dRect(ax-1.2, ay-0.5, 2.4, 1.0, '#c24e72', '#7a2846', 8);
-      dRect(ax-1.2, ay-0.85, 2.4, 0.4, '#a63a5c', '#611d33', 6); dLabel(ax, ay-1.05, '🛋️', '#ffd0e0', 13); }
-    for (const [tx, ty] of [[13.2,5.5],[15.5,3.2]]) { dRect(tx-0.35, ty-0.35, 0.7, 0.7, '#3a2044', '#1f1026', 6);
-      const p=detailProj(tx,ty); ctx.font=`${dTileW()*0.5}px sans-serif`; ctx.textAlign='center'; ctx.fillText('🍾',p.x,p.y); }
+    if (roomUnlocked('t2')) dPerson(11.2, 1.6, { s: 1.1, color: '#1c1c28', skin: '#f0b98c', hair: '#c98b2d', bob: Math.sin(t*2.2)*2, groundZ: u * 0.25 });
+    for (const [ax, ay] of [[16.2,6.4],[17.3,2.4]]) { dShadow(ax-1.2, ay-0.5, 2.4, 1.0);
+      dBox(ax-1.2, ay-0.5, 2.4, 1.0, u * 0.3, '#c24e72', '#7a2846', '#d4638a');            // Sitzfläche
+      dBox(ax-1.2, ay-0.85, 2.4, 0.4, u * 0.75, '#a63a5c', '#611d33', '#c24e72'); }         // Lehne
+    for (const [tx, ty] of [[13.2,5.5],[15.5,3.2]]) { dShadow(tx-0.35, ty-0.35, 0.7, 0.7);
+      dBox(tx-0.35, ty-0.35, 0.7, 0.7, u * 0.6, '#3a2044', '#1f1026', '#4a2a55');
+      const p=detailProj(tx,ty); ctx.font=`${u*0.5}px sans-serif`; ctx.textAlign='center'; ctx.fillText('🍾',p.x,p.y-u*0.6); }
   } else if (id === 'roof') {
     const fl = { x: 11.8, y: 10.8, w: 4.2, d: 3.2 };
     dTiles(fl.x, fl.y, fl.w, fl.d, 5, 4, 'roof', t, beat);
-    dLabel(fl.x + fl.w / 2, fl.y - 0.3, 'SKY FLOOR', 'rgba(160,220,255,0.6)', 10);
-    dRect(9.9, 10.8, 2.6, 1.0, '#2f6f8a', '#3f93b0', 7);
+    dLabel(fl.x + fl.w / 2, fl.y - 0.35, 'SKY FLOOR', 'rgba(160,220,255,0.6)', 10);
+    dShadow(9.9, 10.8, 2.6, 1.0); dBox(9.9, 10.8, 2.6, 1.0, u * 0.55, '#2f6f8a', '#183846', '#3f93b0');
     dLabel(11.2, 10.4, '🍸 SKYBAR', '#a8ecff', 10);
-    dRect(A.pool.x-1.5, A.pool.y-1.1, 3.0, 2.2, '#2f7fd6', 'rgba(255,255,255,0.35)', 10);
-    dLabel(A.pool.x, A.pool.y-1.4, '🏊 POOL', '#bfe6ff', 10);
+    // Pool (in den Boden eingelassen)
+    dRect(A.pool.x-1.55, A.pool.y-1.15, 3.1, 2.3, '#1f4a6e', '#14324c', 12);
+    dRect(A.pool.x-1.4, A.pool.y-1.0, 2.8, 2.0, '#2f7fd6', 'rgba(255,255,255,0.35)', 10);
+    dLabel(A.pool.x, A.pool.y-1.35, '🏊 POOL', '#bfe6ff', 10);
   }
 
-  // Performer im Detail (falls hier)
+  // Performer im Detail (falls hier) — auf 3D-Bühne
   if (state.performer.unlocked && state.performer.room === id) {
     const c = { t1:[6.2,9.0], t2:[15.0,5.2], roof:[13.5,14.5] }[id] || [6,9];
-    dRect(c[0]-0.7, c[1]-0.7, 1.4, 1.4, '#ff5e8a', '#a32e52', 8);
-    dPerson(c[0], c[1], { s: 1.15, color: '#ff4fa3', skin: '#f0b98c', hair: '#1a1a22', female: true, arms: beat*1.5, dancing: true, bob: Math.sin(beat*1.5)*3 });
+    dShadow(c[0]-0.7, c[1]-0.7, 1.4, 1.4);
+    dBox(c[0]-0.7, c[1]-0.7, 1.4, 1.4, u * 0.35, '#ff5e8a', '#a32e52', '#ff85b3');
+    dPerson(c[0], c[1], { s: 1.15, color: '#ff4fa3', skin: '#f0b98c', hair: '#1a1a22', female: true, arms: beat*1.5, dancing: true, bob: Math.sin(beat*1.5)*3, groundZ: u * 0.35 });
   }
 
   // Gäste in diesem Raum (nach y sortiert)
@@ -1047,7 +1095,7 @@ function drawRoomDetail(id, t, beat) {
     const amount = state.stationCash[stId] || 0;
     if (amount < 1) continue;
     const a = A[anchorId], p = detailProj(a.x, a.y);
-    drawPinAt(p.x, p.y - dTileW() * 0.5, amount, t, stId.length);
+    drawPinAt(p.x, p.y - dTileW() * 1.05, amount, t, stId.length);
   }
 }
 
