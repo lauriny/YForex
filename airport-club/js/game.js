@@ -2,7 +2,7 @@
 //  AIRPORT – Club Simulator · Spiellogik & State
 // ============================================================
 import {
-  STATIONS, STATION_MAP, STAFF, STAFF_MAP, SHOP, ROOMS,
+  STATIONS, STATION_MAP, STAFF, STAFF_MAP, SHOP,
   T2_REQ, BOOST, DROP, HYPE_PER_TAP, HYPE_DECAY, OFFLINE, CELEB, PRESTIGE,
   getPhase, chestReward, costOf, bulkCost, maxAffordable, milestoneMult,
 } from './data.js';
@@ -31,7 +31,6 @@ export const state = {
   stations: freshStations(),
   staff: {},               // id -> Stufe
   t2Unlocked: false,
-  room: 't1',
   boostUntil: 0,
   boostCdUntil: 0,
   hype: 0,
@@ -160,7 +159,6 @@ export function unlockT2() {
   if (state.level < T2_REQ.level || state.money < T2_REQ.cost) return false;
   state.money -= T2_REQ.cost;
   state.t2Unlocked = true;
-  state.room = 't2';
   emit('t2unlocked');
   save();
   return true;
@@ -354,7 +352,6 @@ export function doPrestige() {
   state.stations = freshStations();
   state.staff = {};
   state.t2Unlocked = false;
-  state.room = 't1';
   state.hype = 0;
   state.boostUntil = 0; state.boostCdUntil = 0; state.dropUntil = 0;
   state.celeb = null;

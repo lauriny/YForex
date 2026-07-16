@@ -62,16 +62,14 @@ export function updateHUD() {
   }
 
   updateCards();
-  updateRoomTabs();
 }
 
 // ------------------------------------------------------------------
 //  Upgrade-Karten (Top 3 des aktuellen Raums)
 // ------------------------------------------------------------------
 function cardStations() {
-  const room = G.state.room === 't2' && G.state.t2Unlocked ? 't2' : 't1';
-  const list = STATIONS.filter(s => s.room === room);
-  // die 3 günstigsten nächsten Upgrades zuerst
+  // alle freigeschalteten Räume, die 3 günstigsten nächsten Upgrades zuerst
+  const list = STATIONS.filter(s => s.room === 't1' || G.state.t2Unlocked);
   return list
     .sort((a, b) => costOf(a, G.state.stations[a.id] || 0) - costOf(b, G.state.stations[b.id] || 0))
     .slice(0, 3);
@@ -120,31 +118,6 @@ function fillCard(card, st) {
   card.querySelector('.up-count').textContent = `${lvl}/${target}`;
   card.querySelector('.up-cost').textContent = fmt(cost) + ' €';
   card.classList.toggle('affordable', afford);
-}
-
-// ------------------------------------------------------------------
-//  Raum-Tabs
-// ------------------------------------------------------------------
-function updateRoomTabs() {
-  ROOMS.forEach(r => {
-    const tab = $('#tab-' + r.id);
-    tab.classList.toggle('active', G.state.room === r.id);
-    if (r.id === 't2') tab.classList.toggle('locked', !G.state.t2Unlocked);
-  });
-}
-
-function initRoomTabs() {
-  const wrap = $('#room-tabs');
-  ROOMS.forEach(r => {
-    const tab = el('button', 'room-tab', `${r.icon} ${r.name}`);
-    tab.id = 'tab-' + r.id;
-    tab.addEventListener('click', () => {
-      G.state.room = r.id;
-      playSfx('click');
-      updateHUD();
-    });
-    wrap.appendChild(tab);
-  });
 }
 
 // ------------------------------------------------------------------
@@ -230,28 +203,51 @@ function openStationsModal() {
       modeBar.querySelectorAll('.mode-btn').forEach(b =>
         b.classList.toggle('active', String(buyMode) === b.dataset.mode));
       list.innerHTML = '';
-      const room = G.state.room === 't2' && G.state.t2Unlocked ? 't2' : 't1';
-      const roomDef = ROOMS.find(r => r.id === room);
-      list.appendChild(el('div', 'list-caption', `${roomDef.icon} ${roomDef.name} · ${roomDef.sub}`));
-      for (const st of STATIONS.filter(s => s.room === room)) {
-        const lvl = G.state.stations[st.id] || 0;
-        const info = G.buyInfo(st.id, buyMode);
-        const income = G.stationIncome(st.id) * G.globalMult();
-        const row = el('div', 'station-row' + (info.affordable ? '' : ' dim'));
-        row.innerHTML = `
-          <div class="st-icon">${st.icon}</div>
-          <div class="st-info">
-            <div class="st-name">${st.name} <span class="st-lvl">Stufe ${lvl}</span></div>
-            <div class="st-desc">${lvl > 0 ? '💶 ' + fmt(income) + ' €/s' : st.desc}
-              ${milestoneMult(lvl) > 1 ? ` · <b>x${milestoneMult(lvl)}</b>` : ''}</div>
-          </div>
-          <button class="btn-buy${info.affordable ? '' : ' disabled'}">
-            <span>+${info.count}</span><b>${fmt(info.cost)} €</b>
-          </button>`;
-        row.querySelector('.btn-buy').addEventListener('click', () => {
-          if (G.buyStation(st.id, buyMode)) { playSfx('buy'); renderRows(); updateHUD(); }
-        });
-        list.appendChild(row);
+      for (const roomDef of ROOMS) {
+        list.appendChild(el('div', 'list-caption', `${roomDef.icon} ${roomDef.name} · ${roomDef.sub}`));
+        if (roomDef.id === 't2' && !G.state.t2Unlocked) {
+          // Nachbarraum noch gesperrt → Freischalt-Zeile
+          const lvlOk = G.state.level >= T2_REQ.level;
+          const afford = G.state.money >= T2_REQ.cost;
+          const row = el('div', 'station-row' + (lvlOk && afford ? '' : ' dim'));
+          row.innerHTML = `
+            <div class="st-icon">🔒</div>
+            <div class="st-info">
+              <div class="st-name">VIP-Etage gesperrt</div>
+              <div class="st-desc">${lvlOk ? 'Bereit zur Eröffnung!' : 'Ab Level ' + T2_REQ.level + ' (du: Level ' + G.state.level + ')'}</div>
+            </div>
+            <button class="btn-buy${lvlOk && afford ? '' : ' disabled'}">
+              <span>Freischalten</span><b>${fmt(T2_REQ.cost)} €</b>
+            </button>`;
+          row.querySelector('.btn-buy').addEventListener('click', () => {
+            if (G.unlockT2()) {
+              playSfx('chest'); confetti(40); renderRows(); updateHUD();
+              toast('🎉 Terminal 2 ist eröffnet! VIP-Gäste strömen die Treppe hoch!');
+            }
+          });
+          list.appendChild(row);
+          continue;
+        }
+        for (const st of STATIONS.filter(s => s.room === roomDef.id)) {
+          const lvl = G.state.stations[st.id] || 0;
+          const info = G.buyInfo(st.id, buyMode);
+          const income = G.stationIncome(st.id) * G.globalMult();
+          const row = el('div', 'station-row' + (info.affordable ? '' : ' dim'));
+          row.innerHTML = `
+            <div class="st-icon">${st.icon}</div>
+            <div class="st-info">
+              <div class="st-name">${st.name} <span class="st-lvl">Stufe ${lvl}</span></div>
+              <div class="st-desc">${lvl > 0 ? '💶 ' + fmt(income) + ' €/s' : st.desc}
+                ${milestoneMult(lvl) > 1 ? ` · <b>x${milestoneMult(lvl)}</b>` : ''}</div>
+            </div>
+            <button class="btn-buy${info.affordable ? '' : ' disabled'}">
+              <span>+${info.count}</span><b>${fmt(info.cost)} €</b>
+            </button>`;
+          row.querySelector('.btn-buy').addEventListener('click', () => {
+            if (G.buyStation(st.id, buyMode)) { playSfx('buy'); renderRows(); updateHUD(); }
+          });
+          list.appendChild(row);
+        }
       }
     }
     renderRows();
@@ -334,16 +330,14 @@ function openRoomsModal() {
       const r1 = el('div', 'room-card unlocked');
       r1.innerHTML = `<div class="room-emoji">🪩</div>
         <div class="room-info"><b>Terminal 1</b><span>Mainfloor · ${fmt(G.roomIncome('t1'))} €/s</span></div>
-        <button class="btn-buy"><b>Betreten</b></button>`;
-      r1.querySelector('button').addEventListener('click', () => { G.state.room = 't1'; closeModal(); updateHUD(); });
+        <div class="room-emoji">✔️</div>`;
       list.appendChild(r1);
-      // Terminal 2
+      // Terminal 2 (Nachbarraum oben)
       const r2 = el('div', 'room-card ' + (G.state.t2Unlocked ? 'unlocked' : 'locked'));
       if (G.state.t2Unlocked) {
         r2.innerHTML = `<div class="room-emoji">🥂</div>
           <div class="room-info"><b>Terminal 2</b><span>VIP-Etage · ${fmt(G.roomIncome('t2'))} €/s</span></div>
-          <button class="btn-buy"><b>Betreten</b></button>`;
-        r2.querySelector('button').addEventListener('click', () => { G.state.room = 't2'; closeModal(); updateHUD(); });
+          <div class="room-emoji">✔️</div>`;
       } else {
         const lvlOk = G.state.level >= T2_REQ.level;
         const afford = G.state.money >= T2_REQ.cost;
@@ -502,8 +496,6 @@ export function offlinePopup(away, money) {
 //  Initialisierung & Event-Verdrahtung
 // ------------------------------------------------------------------
 export function initUI() {
-  initRoomTabs();
-
   $('#btn-settings').addEventListener('click', openSettingsModal);
   $('#phasebar').addEventListener('click', openQuestModal);
   $('#btn-shop').addEventListener('click', openShopModal);
@@ -554,5 +546,9 @@ export function canvasFeedback(fb) {
     floatText({ x: fb.x, y: fb.y - 10 }, '🌟 +' + fmt(fb.money) + ' €' + (fb.gems ? ' +' + fb.gems + '💎' : ''), 'float-celeb');
     playSfx('chest');
     confetti(16);
+  } else if (fb.type === 'locked') {
+    // Tap auf den gesperrten Nachbarraum → Freischalt-Dialog
+    playSfx('click');
+    openRoomsModal();
   }
 }
