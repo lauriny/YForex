@@ -1,65 +1,77 @@
 // ============================================================
-//  AIRPORT – Club Simulator · Pseudo-3D-Ansicht von oben
-//  (Cartoon-Tycoon-Look: Gebäude mit aufgeschnittenem Dach,
-//   Wände/Möbel mit Tiefe, Gäste mit echtem Verhalten)
+//  AIRPORT – Club Simulator · Isometrische Render-Engine
+//  2:1-Iso, fit-to-view-Kamera, 4 Räume als Cutaway-Grundriss,
+//  plastische Möbel (3 Sichtflächen), detaillierte Figuren.
 // ============================================================
 import {
   state, totalLevels, dropActive, tapCeleb, tapHype,
-  depositAtStation, collectStation,
+  depositAtStation, collectStation, roomUnlocked,
+  eventDef, eventGuestMult, incomePerSec,
 } from './game.js';
-import { fmt } from './data.js';
+import { fmt, CASH_STATIONS } from './data.js';
 
 let canvas, ctx, W = 0, H = 0, DPR = 1;
 let particles = [];
 let startTime = performance.now();
 
-// ---------------- Grundriss (normierte Koordinaten) ----------------
-const L = {
-  // Gebäude
-  bld:   { x: 0.05, y: 0.05, w: 0.90, h: 0.76 },
-  wallT: 0.016,                                   // Wanddicke
-  split: 0.345,                                   // Trennwand T1/T2 (y)
-  stair: { x: 0.66, w: 0.13 },                    // Durchgang zur VIP-Etage
-  entry: { x: 0.42, w: 0.16 },                    // Eingangstür unten
+// ---------------- Iso-Projektion & Kamera ----------------
+// Welt in Tiles: x → rechts-unten, y → links-unten, z → hoch.
+const TILE = { w: 32, h: 16, z: 15 };
+const cam = { s: 1, ox: 0, oy: 0 };
 
-  // Terminal 1 (unten)
-  dj:    { x: 0.36, y: 0.375, w: 0.28, h: 0.062 },
-  floor1:{ x: 0.295, y: 0.47, w: 0.41, h: 0.245 },
-  bar:   { x: 0.085, y: 0.42, w: 0.125, h: 0.26 },
-  shots: { x: 0.795, y: 0.44, w: 0.115, h: 0.16 },
-  wc:    { x: 0.085, y: 0.655, w: 0.15, h: 0.11 },
-  ward:  { x: 0.73, y: 0.665, w: 0.175, h: 0.095 },
+function iso(x, y, z = 0) {
+  return {
+    x: cam.ox + (x - y) * TILE.w * 0.5 * cam.s,
+    y: cam.oy + (x + y) * TILE.h * 0.5 * cam.s - z * TILE.z * cam.s,
+  };
+}
 
-  // Terminal 2 (oben, VIP)
-  floor2:{ x: 0.375, y: 0.115, w: 0.29, h: 0.165 },
-  champ: { x: 0.095, y: 0.10, w: 0.19, h: 0.075 },
-  sofaR1:{ x: 0.72, y: 0.11, w: 0.17, h: 0.05 },
-  sofaR2:{ x: 0.72, y: 0.215, w: 0.17, h: 0.05 },
-  sofaL: { x: 0.10, y: 0.24, w: 0.16, h: 0.05 },
+// ---------------- Grundriss (Welt-Tiles) ----------------
+// Vier Räume; Kamera fasst immer alle, gesperrte werden abgedunkelt.
+const RM = {
+  t1:   { x: 0,  y: 7,  w: 9, d: 8, name: 'TERMINAL 1' },
+  klo:  { x: 0,  y: 0,  w: 4, d: 6, name: 'WC' },
+  t2:   { x: 10, y: 0,  w: 9, d: 9, name: 'TERMINAL 2 · VIP' },
+  roof: { x: 10, y: 10, w: 9, d: 8, name: 'ROOFTOP' },
+};
+const WALL_H = 2.1;  // Wandhöhe in z-Einheiten
+const CENTER = { x: 9.4, y: 8.4 };            // Kreuzung der Räume
+const DOOR = {                                 // Übergang je Raum → Zentrum
+  t1:   { x: 8.4, y: 10.5 },
+  klo:  { x: 3.0, y: 6.2 },
+  t2:   { x: 10.6, y: 6.5 },
+  roof: { x: 10.6, y: 10.6 },
+};
+const ENTRY_OUT = { x: 4, y: 17.5 };
+const ENTRY_IN  = { x: 4, y: 14 };
+
+// Möbel-Anker (Welt-Mittelpunkte) — auch Ziel der Gäste & Ort der Geld-Pins
+const A = {
+  dj:        { x: 4.5, y: 7.7, room: 't1' },
+  bar:       { x: 0.9, y: 10.5, room: 't1' },
+  shots:     { x: 7.9, y: 9.0, room: 't1' },
+  garderobe: { x: 7.4, y: 13.4, room: 't1' },
+  dance1:    { x: 4.3, y: 11.2, room: 't1' },
+  toilet:    { x: 2.0, y: 2.2, room: 'klo' },
+  vipbar:    { x: 11.2, y: 1.4, room: 't2' },  // champus
+  dance2:    { x: 14.2, y: 4.2, room: 't2' },  // second
+  tables:    { x: 16.2, y: 6.4, room: 't2' },
+  chill:     { x: 17.3, y: 2.4, room: 't2' },
+  vipdoor:   { x: 10.7, y: 6.6, room: 't2' },  // vipEinlass
+  skybar:    { x: 11.3, y: 11.3, room: 'roof' },
+  pool:      { x: 15.3, y: 15.0, room: 'roof' },
+  stars:     { x: 14.0, y: 13.2, room: 'roof' },
+};
+// Station-Id → Anker für Geld-Pin
+const PIN_AT = {
+  bar: 'bar', shots: 'shots', garderobe: 'garderobe',
+  champus: 'vipbar', tables: 'tables', chill: 'chill',
+  skybar: 'skybar', pool: 'pool',
 };
 
-// Wo der Geld-Pin jeder Station schwebt
-const CASH_PINS = {
-  einlass:    { x: 0.50, y: 0.775 },
-  garderobe:  { x: 0.815, y: 0.655 },
-  bar:        { x: 0.148, y: 0.50 },
-  shots:      { x: 0.852, y: 0.47 },
-  vipEinlass: { x: 0.725, y: 0.40 },
-  second:     { x: 0.52, y: 0.155 },
-  champus:    { x: 0.19, y: 0.115 },
-  tables:     { x: 0.505, y: 0.30 },
-  chill:      { x: 0.805, y: 0.20 },
-};
-
-// Gäste-Aktivität → Station, deren Kasse gefüllt wird
-const ACT_STATION = {
-  bar: 'bar', shots: 'shots', ward: 'garderobe',
-  champ: 'champus', sofa: 'tables', vipdance: 'second',
-};
-
-const GUEST_COLORS = ['#e74c8b', '#4f9cf7', '#f7b32b', '#42d6a4', '#b06df7', '#f76d4f', '#4fd7f7', '#95e04a'];
-const SKIN = ['#ffd9b3', '#f0b98c', '#c68a53', '#8c5a33'];
-const HAIR = ['#2b1c10', '#5a3617', '#c98b2d', '#1a1a22', '#7a4a86', '#b8452c'];
+const GUEST_COLORS = ['#e74c8b', '#4f9cf7', '#f7b32b', '#42d6a4', '#b06df7', '#f76d4f', '#4fd7f7', '#95e04a', '#ff8fab', '#5eead4'];
+const SKIN = ['#ffd9b3', '#f0b98c', '#c68a53', '#8c5a33', '#5c3a21'];
+const HAIR = ['#2b1c10', '#5a3617', '#c98b2d', '#1a1a22', '#7a4a86', '#b8452c', '#d9d0c0'];
 const DRINKS_T1 = ['🍹', '🍺', '🍸', '🥃'];
 const DRINKS_T2 = ['🥂', '🍾', '🍸'];
 
@@ -80,176 +92,200 @@ function resize() {
   canvas.height = H * DPR;
   canvas.style.width = W + 'px';
   canvas.style.height = H + 'px';
+  setupCamera();
+}
+
+// Kamera so skalieren/verschieben, dass die ganze Szene (Räume + Vorplatz) passt
+function setupCamera() {
+  cam.s = 1; cam.ox = 0; cam.oy = 0;
+  // Extrempunkte der Welt inkl. Vorplatz vorne und Wandhöhe oben
+  const pts = [
+    iso(RM.klo.x - 0.6, RM.klo.y - 0.6, WALL_H + 0.6),  // hinten oben
+    iso(RM.t2.x + RM.t2.w + 0.6, RM.t2.y - 0.6, WALL_H),// rechts hinten
+    iso(RM.roof.x + RM.roof.w + 0.6, RM.roof.y + RM.roof.d + 0.6, 0), // rechts vorne
+    iso(RM.t1.x - 1.4, RM.t1.y + RM.t1.d + 0.6, 0),     // links
+    iso(ENTRY_OUT.x + 3.2, ENTRY_OUT.y + 1.4, 0),       // Vorplatz vorne unten
+    iso(ENTRY_OUT.x - 3.2, ENTRY_OUT.y + 1.4, 0),
+  ];
+  let minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
+  for (const c of pts) {
+    minX = Math.min(minX, c.x); maxX = Math.max(maxX, c.x);
+    minY = Math.min(minY, c.y); maxY = Math.max(maxY, c.y);
+  }
+  const padX = W * 0.03, padY = H * 0.03;
+  const ZOOM = 1.12;   // etwas näher dran, damit der Club dominiert
+  const s = Math.min((W - padX * 2) / (maxX - minX), (H - padY * 2) / (maxY - minY)) * ZOOM;
+  cam.s = s;
+  minX *= s; maxX *= s; minY *= s; maxY *= s;
+  cam.ox = (W - (maxX - minX)) / 2 - minX;
+  cam.oy = (H - (maxY - minY)) / 2 - minY + H * 0.03;   // vertikal zentriert, minimal tiefer
 }
 
 // ---------------- Interaktion ----------------
 let onTapFeedback = null;
 export function setTapFeedback(cb) { onTapFeedback = cb; }
 
+function pointInQuad(px, py, q) {
+  let inside = false;
+  for (let i = 0, j = q.length - 1; i < q.length; j = i++) {
+    const xi = q[i].x, yi = q[i].y, xj = q[j].x, yj = q[j].y;
+    if (((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+}
+
+function roomFloorQuad(r) {
+  return [iso(r.x, r.y), iso(r.x + r.w, r.y), iso(r.x + r.w, r.y + r.d), iso(r.x, r.y + r.d)];
+}
+
 function onTap(e) {
   const rect = canvas.getBoundingClientRect();
-  const x = (e.clientX - rect.left) / W;
-  const y = (e.clientY - rect.top) / H;
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+
   // Promi zuerst (große Trefferfläche)
   if (state.celeb) {
     const c = guests.find(g => g.celeb);
-    if (c && Math.hypot((x - c.x) * W, (y - c.y) * H) < 44) {
-      const r = tapCeleb();
-      if (r && onTapFeedback) onTapFeedback({ type: 'celeb', x: e.clientX, y: e.clientY, ...r });
-      return;
+    if (c) {
+      const s = iso(c.x, c.y);
+      if (Math.hypot(mx - s.x, my - (s.y - 22)) < 40) {
+        const r = tapCeleb();
+        if (r && onTapFeedback) onTapFeedback({ type: 'celeb', x: e.clientX, y: e.clientY, ...r });
+        return;
+      }
     }
   }
-  // Geld-Pins an den Stationen einsammeln
-  for (const [id, pin] of Object.entries(CASH_PINS)) {
-    if ((state.stationCash[id] || 0) < 1) continue;
-    if (Math.hypot((x - pin.x) * W, (y - pin.y) * H + 14) < 30) {
-      const amount = collectStation(id);
+  // Geld-Pins einsammeln (an den Konsum-Stationen)
+  for (const [stId, anchorId] of Object.entries(PIN_AT)) {
+    if ((state.stationCash[stId] || 0) < 1) continue;
+    const a = A[anchorId];
+    const s = iso(a.x, a.y, 1.15);
+    if (Math.hypot(mx - s.x, my - s.y) < 30) {
+      const amount = collectStation(stId);
       if (amount > 0 && onTapFeedback) onTapFeedback({ type: 'collect', x: e.clientX, y: e.clientY, amount });
       return;
     }
   }
-  // Tap auf gesperrtes Terminal 2 → Freischalt-Dialog
-  if (!state.t2Unlocked && y < L.split && y > L.bld.y && x > L.bld.x && x < L.bld.x + L.bld.w) {
-    if (onTapFeedback) onTapFeedback({ type: 'locked' });
-    return;
+  // Tap auf gesperrten Raum → passender Freischalt-Dialog
+  for (const id of ['t2', 'roof']) {
+    if (!roomUnlocked(id) && pointInQuad(mx, my, roomFloorQuad(RM[id]))) {
+      if (onTapFeedback) onTapFeedback({ type: 'locked', room: id });
+      return;
+    }
   }
-  // Sonst: kleiner Hype-Schub (rein optional, kein Tipp-Zwang)
+  // Sonst: kleiner Hype-Schub (optional)
   tapHype();
-  particles.push({ x, y, vy: -0.06, life: 0.8, txt: '🔥', size: 12 });
+  spawnScreenParticle(mx, my, '🔥', 12, 0.8);
   if (onTapFeedback) onTapFeedback({ type: 'tap', x: e.clientX, y: e.clientY });
 }
 
 // ============================================================
-//  Gäste-Simulation (Zustandsautomat)
-//  Modi: enter → (dance | bar | shots | wc | ward | vip…) → leave
+//  Gäste-Simulation (Zustandsautomat auf Iso-Grid)
 // ============================================================
 let guests = [];
-
 function rnd(a, b) { return a + Math.random() * (b - a); }
 function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+function inRoom(r, mx = 0.6) { return { x: rnd(r.x + mx, r.x + r.w - mx), y: rnd(r.y + mx, r.y + r.d - mx) }; }
 
 function targetGuestCount() {
-  return Math.min(30, 5 + Math.floor(totalLevels() / 8));
+  let base = 6 + Math.floor(totalLevels() / 7);
+  if (state.roofUnlocked) base += 6; else if (state.t2Unlocked) base += 3;
+  return Math.min(38, Math.floor(base * eventGuestMult()));
 }
 
 function spawnGuest(celeb = false) {
   const vip = !celeb && state.t2Unlocked && Math.random() < 0.4;
   const g = {
-    x: L.entry.x + L.entry.w / 2 + rnd(-0.02, 0.02),
-    y: 0.93,
+    x: ENTRY_OUT.x + rnd(-0.6, 0.6), y: ENTRY_OUT.y,
     color: celeb ? '#ffd700' : vip ? pick(['#e6b800', '#d4941e', '#c9a227']) : pick(GUEST_COLORS),
-    skin: pick(SKIN),
-    hair: pick(HAIR),
-    speed: rnd(0.045, 0.075),
+    skin: pick(SKIN), hair: pick(HAIR),
+    speed: rnd(1.7, 2.7),
     bobPhase: Math.random() * Math.PI * 2,
-    vip, celeb,
-    mode: 'walk',
-    act: 'dance',
-    actT: 0,
-    drink: null,
-    alpha: 1,
-    path: [],
+    female: Math.random() < 0.5,
+    vip, celeb, mode: 'walk', act: 'dance', actT: 0,
+    drink: null, alpha: 1, path: [],
   };
-  // erst rein durch die Tür, dann zur Garderobe oder direkt tanzen
-  const inside = { x: L.entry.x + L.entry.w / 2, y: 0.755 };
-  g.path = [inside];
-  if (!celeb && Math.random() < 0.35) {
-    g.path.push({ x: L.ward.x - 0.03, y: L.ward.y + L.ward.h / 2 });
-    g.afterPath = 'ward';
-  } else {
-    pushActivity(g, celeb || (vip && Math.random() < 0.75) ? (vip ? 'vipdance' : 'dance') : 'dance');
-  }
+  g.path = [ENTRY_IN];
+  if (!celeb && Math.random() < 0.3) { g.path.push({ ...A.garderobe }); g.afterPath = 'ward'; }
+  else pushActivity(g, celeb ? 'dance' : chooseAct(g));
   guests.push(g);
-  depositAtStation('einlass'); // Eintritt landet in der Einlass-Kasse
   return g;
 }
 
-// Wege über den Treppen-Durchgang routen, wenn Raumgrenze gekreuzt wird
+// Routing zwischen Räumen über das Zentrum
+function roomOf(x, y) {
+  for (const id of ['t1', 'klo', 't2', 'roof']) {
+    const r = RM[id];
+    if (x >= r.x - 1 && x <= r.x + r.w + 1 && y >= r.y - 1 && y <= r.y + r.d + 1) return id;
+  }
+  return 't1';
+}
 function routeTo(g, tx, ty) {
-  const door = { x: L.stair.x + L.stair.w / 2, y: L.split };
-  const crossing = (g.y < L.split) !== (ty < L.split);
+  const from = roomOf(g.x, g.y), to = roomOf(tx, ty);
   const path = [];
-  if (crossing) {
-    path.push({ x: door.x, y: door.y + (g.y > L.split ? 0.03 : -0.03) });
-    path.push({ x: door.x, y: door.y + (ty > L.split ? 0.05 : -0.05) });
+  if (from !== to) {
+    if (DOOR[from]) path.push(DOOR[from]);
+    path.push(CENTER);
+    if (DOOR[to]) path.push(DOOR[to]);
   }
   path.push({ x: tx, y: ty });
   return path;
 }
 
+function chooseAct(g) {
+  const r = Math.random();
+  if (g.vip && state.roofUnlocked && r < 0.22) return 'roofbar';
+  if (g.vip && state.t2Unlocked) {
+    if (r < 0.32) return 'vipdance';
+    if (r < 0.52) return 'champ';
+    if (r < 0.68) return 'sofa';
+    if (r < 0.80) return 'dance';
+    if (r < 0.90) return 'wc';
+    return 'leave';
+  }
+  if (state.roofUnlocked && r < 0.10) return 'roofbar';
+  if (r < 0.40) return 'dance';
+  if (r < 0.58) return 'bar';
+  if (r < 0.70) return 'shots';
+  if (r < 0.80) return 'wc';
+  if (r < 0.87) return 'ward';
+  if (r < 0.93 && state.t2Unlocked) return 'vipdance';
+  return 'leave';
+}
+
+function actTarget(act) {
+  switch (act) {
+    case 'dance':    return inRoom({ x: 2.5, y: 9.5, w: 5, d: 4 });
+    case 'vipdance': return inRoom({ x: 12.5, y: 2.5, w: 4, d: 3.5 });
+    case 'roofbar':  return Math.random() < 0.5 ? { x: A.skybar.x + rnd(-0.8, 1.2), y: A.skybar.y + 0.9 }
+                                                 : { x: A.pool.x + rnd(-1, 1), y: A.pool.y - 1 };
+    case 'bar':      return { x: A.bar.x + 1.3, y: A.bar.y + rnd(-1.5, 1.5) };
+    case 'shots':    return { x: A.shots.x - 1.1, y: A.shots.y + rnd(-1, 1) };
+    case 'champ':    return { x: A.vipbar.x + rnd(-0.8, 1), y: A.vipbar.y + 1.3 };
+    case 'sofa':     return Math.random() < 0.5 ? { x: A.tables.x + rnd(-0.8, 0.8), y: A.tables.y + 0.9 }
+                                                : { x: A.chill.x + rnd(-0.8, 0.8), y: A.chill.y + 0.9 };
+    case 'wc':       return { x: A.toilet.x + rnd(-0.5, 0.5), y: A.toilet.y + 1 };
+    case 'ward':     return { x: A.garderobe.x - 0.6, y: A.garderobe.y + 0.6 };
+    case 'leave':    return ENTRY_OUT;
+    default:         return inRoom(RM.t1);
+  }
+}
+const ACT_STATION = { bar: 'bar', shots: 'shots', ward: 'garderobe', champ: 'champus', sofa: null, roofbar: null };
+function stationForAct(act) {
+  if (act === 'sofa') return Math.random() < 0.5 ? 'tables' : 'chill';
+  if (act === 'roofbar') return Math.random() < 0.5 ? 'skybar' : 'pool';
+  return ACT_STATION[act] || null;
+}
+
 function pushActivity(g, act) {
   g.act = act;
-  let tx, ty;
-  switch (act) {
-    case 'dance':
-      tx = rnd(L.floor1.x + 0.02, L.floor1.x + L.floor1.w - 0.02);
-      ty = rnd(L.floor1.y + 0.02, L.floor1.y + L.floor1.h - 0.02);
-      break;
-    case 'vipdance':
-      tx = rnd(L.floor2.x + 0.02, L.floor2.x + L.floor2.w - 0.02);
-      ty = rnd(L.floor2.y + 0.02, L.floor2.y + L.floor2.h - 0.02);
-      break;
-    case 'bar':      // rechts an der Theke anstehen
-      tx = L.bar.x + L.bar.w + 0.03;
-      ty = rnd(L.bar.y + 0.03, L.bar.y + L.bar.h - 0.03);
-      break;
-    case 'shots':
-      tx = L.shots.x - 0.03;
-      ty = rnd(L.shots.y + 0.02, L.shots.y + L.shots.h - 0.02);
-      break;
-    case 'champ':    // Champagner-Bar (VIP)
-      tx = rnd(L.champ.x + 0.02, L.champ.x + L.champ.w - 0.02);
-      ty = L.champ.y + L.champ.h + 0.035;
-      break;
-    case 'sofa': {
-      const s = pick([L.sofaR1, L.sofaR2, L.sofaL]);
-      tx = rnd(s.x + 0.02, s.x + s.w - 0.02);
-      ty = s.y + 0.022;
-      break;
-    }
-    case 'wc':
-      tx = L.wc.x + L.wc.w + 0.025;   // erst zur Tür …
-      ty = L.wc.y + L.wc.h / 2;
-      break;
-    case 'ward':
-      tx = L.ward.x - 0.03;
-      ty = L.ward.y + L.ward.h / 2;
-      break;
-    case 'leave':
-      tx = L.entry.x + L.entry.w / 2;
-      ty = 0.87;
-      break;
-  }
+  const t = actTarget(act);
   g.mode = 'walk';
-  if (g.y > L.split && ty < L.split) g.paysVip = true; // geht hoch in den VIP
-  g.path = routeTo(g, tx, ty);
+  g.path = routeTo(g, t.x, t.y);
 }
-
-function nextActivity(g) {
-  if (g.celeb) { pushActivity(g, 'dance'); return; }
-  const r = Math.random();
-  if (g.vip && state.t2Unlocked) {
-    if (r < 0.35) pushActivity(g, 'vipdance');
-    else if (r < 0.55) pushActivity(g, 'champ');
-    else if (r < 0.72) pushActivity(g, 'sofa');
-    else if (r < 0.82) pushActivity(g, 'dance');
-    else if (r < 0.92) pushActivity(g, 'wc');
-    else pushActivity(g, 'leave');
-  } else {
-    if (r < 0.42) pushActivity(g, 'dance');
-    else if (r < 0.60) pushActivity(g, 'bar');
-    else if (r < 0.70) pushActivity(g, 'shots');
-    else if (r < 0.80) pushActivity(g, 'wc');
-    else if (r < 0.86) pushActivity(g, 'ward');
-    else if (r < 0.93 && state.t2Unlocked) pushActivity(g, 'vipdance');
-    else pushActivity(g, 'leave');
-  }
-}
-
 function actDuration(act) {
   switch (act) {
-    case 'dance': case 'vipdance': return rnd(4, 10);
-    case 'bar': case 'shots': case 'champ': return rnd(4, 8);
+    case 'dance': case 'vipdance': return rnd(4, 9);
+    case 'bar': case 'shots': case 'champ': case 'roofbar': return rnd(3.5, 7);
     case 'sofa': return rnd(5, 10);
     case 'wc': return rnd(2.5, 4.5);
     case 'ward': return rnd(1.5, 2.5);
@@ -259,547 +295,515 @@ function actDuration(act) {
 
 function updateGuests(dt) {
   const want = targetGuestCount();
-
-  // Nachschub: Gäste kommen einzeln durch den Eingang
   const alive = guests.filter(g => !g.celeb).length;
-  if (alive < want && Math.random() < dt * 1.6) spawnGuest();
-  if (alive > want + 3) {
-    const g = guests.find(g => !g.celeb && g.act !== 'leave');
-    if (g) pushActivity(g, 'leave');
-  }
+  if (alive < want && Math.random() < dt * (dropActive() ? 3 : 1.7)) spawnGuest();
+  if (alive > want + 3) { const g = guests.find(g => !g.celeb && g.act !== 'leave'); if (g) pushActivity(g, 'leave'); }
 
-  // Promi-Gast synchron zum Spiel-State halten
   const hasCeleb = guests.some(g => g.celeb);
   if (state.celeb && !hasCeleb) spawnGuest(true);
   if (!state.celeb && hasCeleb) guests = guests.filter(g => !g.celeb);
 
+  const speedMult = dropActive() ? 1.5 : 1;
   for (let i = guests.length - 1; i >= 0; i--) {
     const g = guests[i];
-    const speedMult = dropActive() ? 1.6 : 1;
-
     if (g.mode === 'walk') {
       const t = g.path[0];
       if (!t) { g.mode = 'act'; g.actT = actDuration(g.act); continue; }
-      const dx = t.x - g.x, dy = t.y - g.y;
-      const d = Math.hypot(dx, dy);
+      const dx = t.x - g.x, dy = t.y - g.y, d = Math.hypot(dx, dy);
       const step = g.speed * speedMult * dt;
+      g.face = dx - dy;   // Blickrichtung für Animation
       if (d < step) {
-        g.x = t.x; g.y = t.y;
-        g.path.shift();
+        g.x = t.x; g.y = t.y; g.path.shift();
         if (g.path.length === 0) {
           if (g.afterPath) { g.act = g.afterPath; g.afterPath = null; }
-          if (g.act === 'leave' ) { guests.splice(i, 1); continue; }
-          g.mode = 'act';
-          g.actT = actDuration(g.act);
-          if (g.paysVip) { depositAtStation('vipEinlass'); g.paysVip = false; }
+          if (g.act === 'leave') { guests.splice(i, 1); continue; }
+          g.mode = 'act'; g.actT = actDuration(g.act);
           if (g.act === 'bar') g.drink = pick(DRINKS_T1);
-          if (g.act === 'shots') g.drink = '🥃';
-          if (g.act === 'champ' || g.act === 'sofa') g.drink = pick(DRINKS_T2);
+          else if (g.act === 'shots') g.drink = '🥃';
+          else if (g.act === 'champ' || g.act === 'sofa' || g.act === 'roofbar') g.drink = pick(DRINKS_T2);
         }
-      } else {
-        g.x += dx / d * step;
-        g.y += dy / d * step;
-      }
-    } else { // act
+      } else { g.x += dx / d * step; g.y += dy / d * step; }
+    } else {
       g.actT -= dt;
-      // im WC: kurz "verschwinden"
-      if (g.act === 'wc') {
-        const inWC = g.actT < actDuration('wc') - 0.5;
-        g.alpha = inWC ? 0.25 : 1;
-      } else g.alpha = 1;
+      g.alpha = (g.act === 'wc' && g.actT < actDuration('wc') - 0.5) ? 0.2 : 1;
       if (g.actT <= 0) {
-        // Kauf abgeschlossen → Umsatz landet in der Stations-Kasse
-        const stId = g.act === 'sofa'
-          ? (Math.random() < 0.5 ? 'tables' : 'chill')
-          : ACT_STATION[g.act];
+        const stId = stationForAct(g.act);
         if (stId) depositAtStation(stId);
-        g.drink = null;
-        g.alpha = 1;
+        g.drink = null; g.alpha = 1;
         if (g.celeb) pushActivity(g, 'dance');
-        else nextActivity(g);
+        else pushActivity(g, chooseAct(g));
       }
     }
   }
 }
 
 // ============================================================
-//  Zeichnen · Pseudo-3D-Helfer
+//  Iso-Zeichenhelfer
 // ============================================================
-function rr(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); }
-
-// Quader in 3/4-Ansicht: Grundfläche (x,y,w,h in Weltkoordinaten 0..1), z = Höhe px
-function box(nx, ny, nw, nh, z, topColor, frontColor, r = 6, stroke) {
-  const x = nx * W, y = ny * H, w = nw * W, h = nh * H;
-  // Frontseite
-  ctx.fillStyle = frontColor;
-  rr(x, y + h - z - r, w, z + r, r); ctx.fill();
-  // Deckfläche
-  ctx.fillStyle = topColor;
-  rr(x, y - z, w, h, r); ctx.fill();
-  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1.5; rr(x, y - z, w, h, r); ctx.stroke(); }
-}
-
-function shadow(nx, ny, rx, ry = rx * 0.45) {
-  ctx.fillStyle = 'rgba(20,10,40,0.25)';
+function quad(p, fill, stroke, lw = 1) {
   ctx.beginPath();
-  ctx.ellipse(nx * W, ny * H, rx, ry, 0, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.moveTo(p[0].x, p[0].y);
+  for (let i = 1; i < p.length; i++) ctx.lineTo(p[i].x, p[i].y);
+  ctx.closePath();
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lw; ctx.stroke(); }
 }
 
-// Figur (stehend, von schräg oben): Schatten, Körper-Kapsel, Kopf, Haare
-function drawPerson(nx, ny, o = {}) {
-  const s = o.s || 1;
-  const px = nx * W, py = ny * H + (o.bob || 0);
+// Iso-Quader mit 3 Sichtflächen (Deckel, Front = +y, rechts = +x)
+function isoBox(x, y, w, d, h, top, front, side, stroke) {
+  const A0 = iso(x, y, h), B0 = iso(x + w, y, h), C0 = iso(x + w, y + d, h), D0 = iso(x, y + d, h);
+  const Cf = iso(x + w, y + d, 0), Df = iso(x, y + d, 0), Bf = iso(x + w, y, 0);
+  quad([D0, C0, Cf, Df], front, stroke, 1);          // Frontfläche (+y)
+  quad([B0, C0, Cf, Bf], side, stroke, 1);           // rechte Fläche (+x)
+  quad([A0, B0, C0, D0], top, stroke, 1);            // Deckel
+}
+
+// gefüllter Boden eines Rechtecks (z=0)
+function floorRect(x, y, w, d, fill, stroke) {
+  quad([iso(x, y), iso(x + w, y), iso(x + w, y + d), iso(x, y + d)], fill, stroke, 1);
+}
+
+function screenShadow(sx, sy, rx, ry) {
+  ctx.fillStyle = 'rgba(10,6,26,0.28)';
+  ctx.beginPath(); ctx.ellipse(sx, sy, rx, ry, 0, 0, Math.PI * 2); ctx.fill();
+}
+
+// ---------------- Figuren (Iso-Billboard, detailliert) ----------------
+function drawPerson(wx, wy, o = {}) {
+  const s = (o.s || 1) * cam.s * 1.0;
+  const p = iso(wx, wy, 0);
+  const px = p.x, py = p.y - (o.lift || 0);
   ctx.save();
   if (o.alpha !== undefined) ctx.globalAlpha = o.alpha;
-  shadow(nx, ny + 0.004, 6 * s);
+  screenShadow(px, py, 7 * s, 3.2 * s);
+  const bob = o.bob || 0;
+  const cy = py - 13 * s + bob;      // Körperzentrum
   if (o.glow) { ctx.shadowColor = '#ffd700'; ctx.shadowBlur = 16; }
-  // Arme beim Tanzen (hinter dem Körper)
-  if (o.arms) {
-    ctx.strokeStyle = o.color;
-    ctx.lineWidth = 2.6 * s;
-    ctx.lineCap = 'round';
-    const a = Math.sin(o.arms) * 4 * s;
+
+  // Beine
+  ctx.strokeStyle = o.pants || '#2b2b3a';
+  ctx.lineWidth = 2.4 * s; ctx.lineCap = 'round';
+  const legSpread = o.dancing ? Math.sin((o.arms || 0)) * 2 * s : 1.2 * s;
+  ctx.beginPath();
+  ctx.moveTo(px - 1.6 * s, py - 6 * s + bob); ctx.lineTo(px - legSpread, py - 0.5 * s);
+  ctx.moveTo(px + 1.6 * s, py - 6 * s + bob); ctx.lineTo(px + legSpread, py - 0.5 * s);
+  ctx.stroke();
+
+  // Arme (tanzend hoch)
+  ctx.strokeStyle = o.skin || '#ffd9b3';
+  ctx.lineWidth = 2.2 * s;
+  if (o.arms != null) {
+    const a = Math.sin(o.arms) * 5 * s;
     ctx.beginPath();
-    ctx.moveTo(px - 4 * s, py - 4 * s); ctx.lineTo(px - 7.5 * s, py - 8 * s - a);
-    ctx.moveTo(px + 4 * s, py - 4 * s); ctx.lineTo(px + 7.5 * s, py - 8 * s + a);
+    ctx.moveTo(px - 3 * s, cy + 1 * s); ctx.lineTo(px - 6.5 * s, cy - 6 * s - a);
+    ctx.moveTo(px + 3 * s, cy + 1 * s); ctx.lineTo(px + 6.5 * s, cy - 6 * s + a);
+    ctx.stroke();
+  } else {
+    ctx.beginPath();
+    ctx.moveTo(px - 3 * s, cy); ctx.lineTo(px - 4.5 * s, cy + 6 * s);
+    ctx.moveTo(px + 3 * s, cy); ctx.lineTo(px + 4.5 * s, cy + 6 * s);
     ctx.stroke();
   }
-  // Körper
+
+  // Oberkörper (Kleid/Shirt)
   ctx.fillStyle = o.color;
-  rr(px - 4.4 * s, py - 7 * s, 8.8 * s, 12.5 * s, 4.4 * s); ctx.fill();
+  if (o.female) {
+    ctx.beginPath();
+    ctx.moveTo(px - 3.4 * s, cy - 3 * s);
+    ctx.lineTo(px + 3.4 * s, cy - 3 * s);
+    ctx.lineTo(px + 4.2 * s, cy + 7 * s);
+    ctx.lineTo(px - 4.2 * s, cy + 7 * s);
+    ctx.closePath(); ctx.fill();
+  } else {
+    roundRectP(px - 3.6 * s, cy - 4 * s, 7.2 * s, 11 * s, 3 * s); ctx.fill();
+  }
+  // Highlight
+  ctx.fillStyle = 'rgba(255,255,255,0.18)';
+  roundRectP(px - 3 * s, cy - 3 * s, 2 * s, 8 * s, 1 * s); ctx.fill();
+
   // Kopf
   ctx.fillStyle = o.skin || '#ffd9b3';
-  ctx.beginPath(); ctx.arc(px, py - 10.5 * s, 4.6 * s, 0, Math.PI * 2); ctx.fill();
-  // Haare (kleine Kappe von oben)
+  ctx.beginPath(); ctx.arc(px, cy - 8 * s, 3.9 * s, 0, Math.PI * 2); ctx.fill();
+  // Haare
   ctx.fillStyle = o.hair || '#2b1c10';
-  ctx.beginPath(); ctx.arc(px, py - 11.6 * s, 3.4 * s, Math.PI, 2 * Math.PI); ctx.fill();
-  // Kopfhörer (DJ)
+  ctx.beginPath();
+  if (o.female) {
+    ctx.arc(px, cy - 8.6 * s, 4.2 * s, Math.PI * 0.85, Math.PI * 2.15); // längere Haare
+    ctx.lineTo(px + 3.5 * s, cy - 4 * s); ctx.lineTo(px - 3.5 * s, cy - 4 * s);
+  } else {
+    ctx.arc(px, cy - 9 * s, 3.6 * s, Math.PI, 2 * Math.PI);
+  }
+  ctx.fill();
+
+  // Accessoires
   if (o.headphones) {
-    ctx.strokeStyle = '#222';
-    ctx.lineWidth = 1.8 * s;
-    ctx.beginPath(); ctx.arc(px, py - 10.5 * s, 5.4 * s, Math.PI * 1.15, Math.PI * 1.85); ctx.stroke();
-    ctx.fillStyle = '#222';
-    ctx.beginPath(); ctx.arc(px - 4.8 * s, py - 10 * s, 1.8 * s, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.arc(px + 4.8 * s, py - 10 * s, 1.8 * s, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#1a1a22'; ctx.lineWidth = 1.8 * s;
+    ctx.beginPath(); ctx.arc(px, cy - 8 * s, 5 * s, Math.PI * 1.12, Math.PI * 1.88); ctx.stroke();
+    ctx.fillStyle = '#1a1a22';
+    ctx.beginPath(); ctx.arc(px - 4.4 * s, cy - 7.6 * s, 1.7 * s, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(px + 4.4 * s, cy - 7.6 * s, 1.7 * s, 0, 7); ctx.fill();
   }
-  // Sonnenbrille (Türsteher)
-  if (o.shades) {
-    ctx.fillStyle = '#111';
-    rr(px - 3.6 * s, py - 11.6 * s, 7.2 * s, 2.2 * s, 1); ctx.fill();
-  }
+  if (o.shades) { ctx.fillStyle = '#111'; roundRectP(px - 3.4 * s, cy - 9 * s, 6.8 * s, 2 * s, 1); ctx.fill(); }
   ctx.restore();
-  // Getränk in der Hand (leicht zum Mund kippend)
+
   if (o.drink) {
     const tilt = Math.sin(performance.now() / 400 + (o.bobPhase || 0)) * 2;
-    ctx.font = `${10 * s}px sans-serif`;
-    ctx.textAlign = 'center';
+    ctx.font = `${11 * s}px sans-serif`; ctx.textAlign = 'center';
     ctx.globalAlpha = o.alpha !== undefined ? o.alpha : 1;
-    ctx.fillText(o.drink, px + 6.5 * s, py - 4 * s - tilt);
+    ctx.fillText(o.drink, px + 6.5 * s, cy - 2 * s - tilt);
     ctx.globalAlpha = 1;
   }
-  if (o.star) {
-    ctx.font = `${13 * s}px sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.fillText('⭐', px, py - 20 * s);
-  }
+  if (o.star) { ctx.font = `${14 * s}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('⭐', px, cy - 15 * s + bob); }
 }
+
+function roundRectP(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); }
 
 // ============================================================
 //  Szene
 // ============================================================
-function drawOutside(t) {
-  // Wiese im hellen Cartoon-Look mit Schachbrett-Schimmer
-  ctx.fillStyle = '#7ec24f';
-  ctx.fillRect(0, 0, W, H);
-  ctx.fillStyle = 'rgba(255,255,255,0.05)';
-  const cell = W / 8;
-  for (let i = 0; i < 8; i++)
-    for (let j = 0; j < Math.ceil(H / cell); j++)
-      if ((i + j) % 2 === 0) ctx.fillRect(i * cell, j * cell, cell, cell);
+function drawGround() {
+  // Nachthimmel-Verlauf als Hintergrund
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#2a1e56'); g.addColorStop(0.5, '#1c1436'); g.addColorStop(1, '#120c22');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // Mond
+  ctx.fillStyle = 'rgba(255,246,214,0.9)';
+  ctx.beginPath(); ctx.arc(W * 0.82, H * 0.1, 16, 0, 7); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  for (let i = 0; i < 40; i++) { const sx = (i * 97) % W, sy = (i * 53) % (H * 0.4);
+    ctx.globalAlpha = 0.3 + 0.5 * Math.abs(Math.sin(i)); ctx.fillRect(sx, sy, 1.4, 1.4); }
+  ctx.globalAlpha = 1;
+  // City-Skyline hinter dem Club (füllt den oberen Bereich)
+  const skyTop = iso((RM.klo.x + RM.t2.x) / 2, RM.klo.y - 0.6, WALL_H);
+  const base = Math.max(H * 0.30, skyTop.y + 10);
+  const bw = W / 11;
+  for (let i = 0; i < 12; i++) {
+    const bh = 45 + ((i * 47) % 90);
+    ctx.fillStyle = i % 2 ? '#191340' : '#221a4e';
+    ctx.fillRect(i * bw - 4, base - bh, bw - 3, bh);
+    ctx.fillStyle = 'rgba(255,214,120,0.55)';
+    for (let wy = base - bh + 6; wy < base - 6; wy += 9)
+      for (let wx = i * bw + 2; wx < i * bw + bw - 7; wx += 8)
+        if ((wx * 7 + wy) % 3 === 0) ctx.fillRect(wx, wy, 2.5, 3.5);
+  }
+  // Dunst-Verlauf über der Skyline für Tiefe
+  const haze = ctx.createLinearGradient(0, base - 40, 0, base + 20);
+  haze.addColorStop(0, 'rgba(28,20,54,0)'); haze.addColorStop(1, 'rgba(28,20,54,0.9)');
+  ctx.fillStyle = haze; ctx.fillRect(0, base - 40, W, 62);
 
   // Straße unten
-  ctx.fillStyle = '#4c4f5e';
-  ctx.fillRect(0, H * 0.945, W, H * 0.055);
-  ctx.fillStyle = '#e8e8e8';
-  for (let i = 0; i < 7; i++) ctx.fillRect((i * 0.15 + 0.03) * W, H * 0.968, W * 0.06, 2.5);
-  // Gehweg
-  ctx.fillStyle = '#b9b3a5';
-  ctx.fillRect(0, H * 0.915, W, H * 0.03);
+  ctx.fillStyle = '#20233a'; ctx.fillRect(0, H * 0.9, W, H * 0.1);
+  ctx.strokeStyle = 'rgba(255,220,120,0.5)'; ctx.lineWidth = 2; ctx.setLineDash([14, 12]);
+  ctx.beginPath(); ctx.moveTo(0, H * 0.95); ctx.lineTo(W, H * 0.95); ctx.stroke(); ctx.setLineDash([]);
 
-  // Bäume & Büsche
-  const bush = (nx, ny, r) => {
-    shadow(nx, ny + 0.008, r * 1.1);
-    ctx.fillStyle = '#3f9142';
-    ctx.beginPath(); ctx.arc(nx * W, ny * H, r, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#54ad55';
-    ctx.beginPath(); ctx.arc(nx * W - r * 0.3, ny * H - r * 0.35, r * 0.55, 0, Math.PI * 2); ctx.fill();
-  };
-  bush(0.025, 0.12, 9); bush(0.975, 0.2, 11); bush(0.02, 0.5, 10);
-  bush(0.978, 0.55, 9); bush(0.03, 0.9, 10); bush(0.97, 0.9, 11);
-
-  // Roter Teppich vom Gehweg zur Tür
-  const ex = (L.entry.x + L.entry.w / 2) * W;
-  const ew = L.entry.w * 0.7 * W;
-  ctx.fillStyle = '#c22b3f';
-  ctx.beginPath();
-  ctx.moveTo(ex - ew / 2, L.bld.y === 0 ? 0 : (L.bld.y + L.bld.h) * H - 2);
-  ctx.lineTo(ex + ew / 2, (L.bld.y + L.bld.h) * H - 2);
-  ctx.lineTo(ex + ew * 0.8, H * 0.945);
-  ctx.lineTo(ex - ew * 0.8, H * 0.945);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillStyle = 'rgba(255,255,255,0.25)';
-  ctx.fillRect(ex - ew / 2, (L.bld.y + L.bld.h) * H, ew, 2.5);
-
-  // Absperrpfosten mit Kordel
-  for (const side of [-1, 1]) {
-    for (const dy of [0.845, 0.885]) {
-      const bx = ex + side * ew * 0.75;
-      ctx.fillStyle = '#ffd700';
-      ctx.beginPath(); ctx.arc(bx, dy * H, 3, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#8a6f4d';
-      ctx.fillRect(bx - 1, dy * H, 2, 7);
-    }
-  }
-
+  // Boden-Plattform unter dem ganzen Club (leichter Überstand)
+  const pad = 0.6;
+  const p = [
+    iso(RM.klo.x - pad, RM.klo.y - pad), iso(RM.t2.x + RM.t2.w + pad, RM.t2.y - pad),
+    iso(RM.roof.x + RM.roof.w + pad, RM.roof.y + RM.roof.d + pad), iso(RM.t1.x - pad, RM.t1.y + RM.t1.d + pad),
+  ];
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.55)'; ctx.shadowBlur = 30; ctx.shadowOffsetY = 12;
+  quad(p, '#2a2350'); ctx.restore();
+  quad(p, null, 'rgba(255,255,255,0.06)', 1.5);
 }
 
-function drawBuilding() {
-  const b = L.bld;
-  const z = 12; // Wandhöhe in px
-  // Gebäudeschatten
-  ctx.fillStyle = 'rgba(20,30,10,0.25)';
-  rr(b.x * W + 6, b.y * H + 8, b.w * W, b.h * H, 18); ctx.fill();
-  // Außenwand (Deckfläche des Mauerrings)
-  box(b.x, b.y, b.w, b.h, z, '#e8d5b8', '#b39a76', 16, '#8a6f4d');
-  // Innenboden Terminal 1 (dunkler Clubboden)
-  const ix = b.x + L.wallT, iw = b.w - L.wallT * 2;
-  ctx.fillStyle = '#463a72';
-  rr(ix * W, (L.split + 0.012) * H, iw * W, (b.y + b.h - L.split - 0.012 - L.wallT) * H, 8);
-  ctx.fill();
-  // Innenboden Terminal 2 (VIP: dunkles Plum)
-  ctx.fillStyle = '#3d1f42';
-  rr(ix * W, (b.y + L.wallT - 0.012) * H + 0, iw * W, (L.split - b.y - L.wallT) * H, 8);
-  ctx.fill();
-
-  // Trennwand mit Treppen-Durchgang
-  ctx.fillStyle = '#e8d5b8';
-  const wy = L.split * H - 8, wh = 0.024 * H + 8;
-  rr(ix * W, wy, (L.stair.x - ix) * W, wh, 4); ctx.fill();
-  rr((L.stair.x + L.stair.w) * W, wy, (ix + iw - L.stair.x - L.stair.w) * W, wh, 4); ctx.fill();
-  ctx.fillStyle = '#b39a76';
-  rr(ix * W, wy + wh - 4, (L.stair.x - ix) * W, 6, 3); ctx.fill();
-  rr((L.stair.x + L.stair.w) * W, wy + wh - 4, (ix + iw - L.stair.x - L.stair.w) * W, 6, 3); ctx.fill();
-  // Stufen im Durchgang
-  for (let i = 0; i < 4; i++) {
-    ctx.fillStyle = i % 2 ? '#6b5a94' : '#7d6ba8';
-    rr((L.stair.x + 0.01) * W, wy + i * (wh / 4), (L.stair.w - 0.02) * W, wh / 4 + 1, 2);
-    ctx.fill();
+// Vorplatz: roter Teppich, Kordeln, Neon-Schild, Warteschlange läuft hier
+function drawPlaza(t) {
+  // roter Teppich vom Eingang nach vorne
+  const cw = 1.6;
+  quad([iso(ENTRY_IN.x - cw, ENTRY_IN.y), iso(ENTRY_IN.x + cw, ENTRY_IN.y),
+        iso(ENTRY_OUT.x + cw + 0.4, ENTRY_OUT.y + 1.4), iso(ENTRY_OUT.x - cw - 0.4, ENTRY_OUT.y + 1.4)], '#b3243a');
+  quad([iso(ENTRY_IN.x - cw, ENTRY_IN.y), iso(ENTRY_IN.x + cw, ENTRY_IN.y),
+        iso(ENTRY_OUT.x + cw + 0.4, ENTRY_OUT.y + 1.4), iso(ENTRY_OUT.x - cw - 0.4, ENTRY_OUT.y + 1.4)], null, 'rgba(255,210,140,0.4)', 1.5);
+  // Kordel-Pfosten
+  for (const side of [-1, 1]) for (const yy of [15.2, 16.6]) {
+    const p = iso(ENTRY_OUT.x + side * (cw + 0.6), yy, 0);
+    ctx.fillStyle = '#8a6f4d'; ctx.fillRect(p.x - 1, p.y - 8 * cam.s, 2, 8 * cam.s);
+    ctx.fillStyle = '#ffd700'; ctx.beginPath(); ctx.arc(p.x, p.y - 8 * cam.s, 2.4 * cam.s, 0, 7); ctx.fill();
   }
-
-  // Eingangstür (Lücke in der Südwand) + Vordach
-  const ex = L.entry.x * W, ew = L.entry.w * W;
-  const by = (b.y + b.h) * H;
-  ctx.fillStyle = '#2c2350';
-  rr(ex, by - 14, ew, 16, 4); ctx.fill();      // dunkle Türöffnung
-  ctx.fillStyle = '#8b5cf6';
-  rr(ex - 6, by - 20, ew + 12, 8, 4); ctx.fill(); // Vordach lila
-  ctx.fillStyle = '#6d3fd4';
-  rr(ex - 6, by - 13, ew + 12, 4, 2); ctx.fill();
-
-  // Neon-Schild an der Frontwand (links neben dem Eingang)
-  const t = (performance.now() - startTime) / 1000;
-  const signX = (b.x + L.entry.x) / 2;
-  ctx.font = `800 ${Math.min(15, W * 0.036)}px system-ui, sans-serif`;
+  // Vordach + Neon-Schild über dem Eingang
+  const sgn = iso(ENTRY_IN.x, ENTRY_IN.y + 0.2, WALL_H + 0.3);
+  ctx.font = `800 ${Math.max(11, 12 * cam.s + 3)}px system-ui, sans-serif`;
   ctx.textAlign = 'center';
-  ctx.fillStyle = `hsla(${(t * 40) % 360}, 90%, 65%, 1)`;
-  ctx.shadowColor = ctx.fillStyle;
-  ctx.shadowBlur = 10;
-  ctx.fillText('✈ AIRPORT', signX * W, by - 3);
+  ctx.fillStyle = `hsl(${(t * 40) % 360}, 90%, 65%)`;
+  ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 12;
+  ctx.fillText('✈ AIRPORT', sgn.x, sgn.y);
   ctx.shadowBlur = 0;
 }
 
-function drawTerminal1(t, beat) {
-  // --- Tanzfläche: pulsierende Neon-Kacheln ---
-  const f = L.floor1;
-  const cols = 6, rows = 5;
-  for (let i = 0; i < cols; i++) {
-    for (let j = 0; j < rows; j++) {
-      const hue = ((i + j) * 55 + t * 90) % 360;
+// Rückwände (Cutaway): nur hintere zwei Wände je Raum
+function drawWalls(r, colBack, colLeft, cap) {
+  const h = WALL_H;
+  // Rückwand (y = r.y)
+  quad([iso(r.x, r.y, 0), iso(r.x + r.w, r.y, 0), iso(r.x + r.w, r.y, h), iso(r.x, r.y, h)], colBack);
+  // linke Wand (x = r.x)
+  quad([iso(r.x, r.y, 0), iso(r.x, r.y + r.d, 0), iso(r.x, r.y + r.d, h), iso(r.x, r.y, h)], colLeft);
+  // Wandkronen
+  if (cap) {
+    quad([iso(r.x, r.y, h), iso(r.x + r.w, r.y, h), iso(r.x + r.w + 0.12, r.y - 0.12, h), iso(r.x - 0.12, r.y - 0.12, h)], cap);
+    quad([iso(r.x, r.y, h), iso(r.x, r.y + r.d, h), iso(r.x - 0.12, r.y + r.d + 0.12, h), iso(r.x - 0.12, r.y - 0.12, h)], cap);
+  }
+}
+
+// Neon-Tanzboden mit pulsierenden Diamant-Kacheln
+function drawDanceFloor(x, y, w, d, t, beat, palette) {
+  for (let i = 0; i < w; i++) {
+    for (let j = 0; j < d; j++) {
       const pulse = 0.5 + 0.5 * Math.sin(beat + i + j);
-      ctx.fillStyle = `hsla(${hue}, 85%, ${dropActive() ? 52 + pulse * 16 : 36 + pulse * 12}%, 0.95)`;
-      rr((f.x + i * f.w / cols) * W + 1, (f.y + j * f.h / rows) * H + 1,
-         f.w / cols * W - 2, f.h / rows * H - 2, 4);
-      ctx.fill();
+      let col;
+      if (palette === 'vip') col = `hsla(${42 + ((i + j) % 3) * 8}, 88%, ${30 + pulse * 22}%, 1)`;
+      else if (palette === 'roof') col = `hsla(${(t * 30 + (i + j) * 24) % 360}, 70%, ${26 + pulse * 16}%, 1)`;
+      else col = `hsla(${((i + j) * 42 + t * 80) % 360}, 85%, ${dropActive() ? 50 + pulse * 18 : 34 + pulse * 14}%, 1)`;
+      floorRect(x + i, y + j, 1, 1, col, 'rgba(255,255,255,0.06)');
     }
   }
-  // Rand der Tanzfläche
-  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
-  ctx.lineWidth = 2;
-  rr(f.x * W - 2, f.y * H - 2, f.w * W + 4, f.h * H + 4, 6); ctx.stroke();
-
-  // --- DJ-Bühne (Podest an der Trennwand) ---
-  const d = L.dj;
-  box(d.x, d.y, d.w, d.h, 8, '#37295e', '#241a40', 6, '#5a4a8a');
-  // Mischpult
-  box(d.x + 0.05, d.y + 0.012, d.w - 0.1, d.h - 0.028, 6, '#5a4a9a', '#3a2f68', 4);
-  // Plattenteller
-  for (const dx of [0.35, 0.65]) {
-    ctx.fillStyle = '#1c1535';
-    ctx.beginPath();
-    ctx.arc((d.x + d.w * dx) * W, (d.y + d.h * 0.42) * H - 6, 5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#8b5cf6';
-    ctx.lineWidth = 1.2;
-    ctx.beginPath();
-    ctx.arc((d.x + d.w * dx) * W, (d.y + d.h * 0.42) * H - 6, 5, t * 4, t * 4 + Math.PI * 1.4);
-    ctx.stroke();
-  }
-  // Boxen links & rechts, Membran pulsiert
-  for (const bx of [d.x - 0.055, d.x + d.w + 0.012]) {
-    box(bx, d.y + 0.004, 0.045, d.h - 0.01, 10, '#1a1430', '#0f0b20', 4);
-    ctx.fillStyle = `rgba(170,130,255,${0.45 + 0.4 * Math.abs(Math.sin(beat))})`;
-    ctx.beginPath();
-    ctx.arc((bx + 0.0225) * W, (d.y + d.h / 2) * H - 4, 4.5 + Math.abs(Math.sin(beat)) * 1.5, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  // DJ hinter dem Pult
-  drawPerson(0.5, d.y + 0.012, {
-    s: 1.15, color: '#3b2f7a', skin: '#f0b98c', hair: '#1a1a22',
-    bob: Math.sin(beat) * 1.6, headphones: true, arms: beat,
-  });
-
-  // --- Lichtkegel über der Tanzfläche ---
-  ctx.save();
-  ctx.globalCompositeOperation = 'lighter';
-  for (let i = 0; i < 3; i++) {
-    const ang = Math.sin(t * (0.7 + i * 0.3) + i * 2) * 0.55;
-    ctx.fillStyle = `hsla(${(t * 60 + i * 120) % 360}, 90%, 65%, ${dropActive() ? 0.16 : 0.08})`;
-    ctx.beginPath();
-    ctx.moveTo(W / 2, (d.y + d.h) * H);
-    ctx.lineTo(W / 2 + Math.sin(ang) * W * 0.32 - W * 0.08, (f.y + f.h) * H);
-    ctx.lineTo(W / 2 + Math.sin(ang) * W * 0.32 + W * 0.08, (f.y + f.h) * H);
-    ctx.closePath();
-    ctx.fill();
-  }
-  ctx.restore();
-
-  // --- Bar links (Theke mit Tiefe, Flaschenregal, Hocker) ---
-  const b = L.bar;
-  box(b.x - 0.045, b.y, 0.04, b.h, 14, '#4a3320', '#33220f', 4);   // Flaschenregal an der Wand
-  const bottles = ['🍾', '🥃', '🍷', '🍹', '🧉'];
-  ctx.font = '9px sans-serif'; ctx.textAlign = 'center';
-  for (let i = 0; i < 5; i++) {                                     // Flaschen
-    ctx.fillText(bottles[i], (b.x - 0.025) * W, (b.y + 0.03 + i * (b.h - 0.05) / 4) * H - 12);
-  }
-  box(b.x, b.y, b.w, b.h, 10, '#6b4a2f', '#4a3320', 6, '#33220f'); // Theke
-  ctx.fillStyle = 'rgba(255,255,255,0.12)';                        // Thekenglanz
-  rr(b.x * W + 3, b.y * H - 8, b.w * W - 6, 4, 2); ctx.fill();
-  for (let i = 0; i < 4; i++) {                                     // Barhocker
-    const hy = b.y + 0.028 + i * (b.h - 0.05) / 3;
-    shadow(b.x + b.w + 0.028, hy + 0.004, 4);
-    ctx.fillStyle = '#a2452f';
-    ctx.beginPath(); ctx.arc((b.x + b.w + 0.028) * W, hy * H, 4, 0, Math.PI * 2); ctx.fill();
-  }
-  // Barkeeper (am Kopfende hinter der Theke)
-  drawPerson(b.x + b.w / 2, b.y - 0.008, {
-    s: 1.0, color: '#f5f0e6', skin: '#f0b98c', hair: '#5a3617',
-    bob: Math.sin(t * 2.5) * 1.2,
-  });
-
-  // --- Shot-Bar rechts ---
-  const s = L.shots;
-  box(s.x, s.y, s.w, s.h, 9, '#5d2a70', '#41224d', 6, '#2c1535');
-  ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
-  ctx.fillText('🥃', (s.x + s.w * 0.3) * W, s.y * H + s.h * H * 0.4 - 9);
-  ctx.fillText('🥃', (s.x + s.w * 0.7) * W, s.y * H + s.h * H * 0.6 - 9);
-  ctx.fillStyle = `hsla(${(t * 80) % 360}, 80%, 65%, 0.9)`;
-  ctx.font = `800 ${Math.max(7, W * 0.017)}px system-ui, sans-serif`;
-  ctx.fillText('SHOTS', (s.x + s.w / 2) * W, s.y * H - 12);
-
-  // --- WC unten links (kleiner Raum) ---
-  const w = L.wc;
-  box(w.x, w.y, w.w, w.h, 10, '#7a8fa5', '#5a6b7e', 6, '#46545f');
-  ctx.fillStyle = '#2c3540';
-  rr((w.x + w.w) * W - 4, (w.y + w.h * 0.3) * H, 6, w.h * 0.4 * H, 2); ctx.fill(); // Tür
-  ctx.fillStyle = '#fff';
-  ctx.font = `800 ${Math.max(9, W * 0.024)}px system-ui, sans-serif`;
-  ctx.fillText('WC', (w.x + w.w / 2) * W, (w.y + w.h / 2) * H - 4);
-  ctx.font = '9px sans-serif';
-  ctx.fillText('🚻', (w.x + w.w / 2) * W, (w.y + w.h / 2) * H + 7);
-
-  // --- Garderobe unten rechts ---
-  const g = L.ward;
-  box(g.x, g.y, g.w, g.h, 9, '#8a5c9e', '#6b4080', 6, '#4d2c5e');
-  ctx.font = '10px sans-serif';
-  for (let i = 0; i < 4; i++)
-    ctx.fillText('🧥', (g.x + 0.02 + i * (g.w - 0.04) / 3) * W, (g.y + g.h / 2) * H - 6);
-  ctx.fillStyle = '#fff';
-  ctx.font = `800 ${Math.max(7, W * 0.016)}px system-ui, sans-serif`;
-  ctx.fillText('GARDEROBE', (g.x + g.w / 2) * W, g.y * H - 12);
-
-  // Türsteher am Eingang (draußen, neben dem Teppich)
-  drawPerson(L.entry.x + L.entry.w + 0.05, 0.845, {
-    s: 1.2, color: '#22222e', skin: '#c68a53', hair: '#1a1a22', shades: true,
-  });
 }
 
-function drawTerminal2(t, beat) {
-  const b = L.bld;
-  // --- goldene VIP-Tanzfläche ---
-  const f = L.floor2;
-  const cols = 5, rows = 4;
-  for (let i = 0; i < cols; i++) {
-    for (let j = 0; j < rows; j++) {
-      const pulse = 0.5 + 0.5 * Math.sin(beat + i * j);
-      const warm = 38 + ((i + j) % 3) * 10;
-      ctx.fillStyle = `hsla(${warm}, 88%, ${28 + pulse * 20}%, 0.95)`;
-      rr((f.x + i * f.w / cols) * W + 1, (f.y + j * f.h / rows) * H + 1,
-         f.w / cols * W - 2, f.h / rows * H - 2, 4);
-      ctx.fill();
-    }
-  }
-  ctx.strokeStyle = 'rgba(255,215,0,0.4)';
-  ctx.lineWidth = 2;
-  rr(f.x * W - 2, f.y * H - 2, f.w * W + 4, f.h * H + 4, 6); ctx.stroke();
+// ---------------- Möbel & Personal je Raum ----------------
+function drawT1(t, beat, drawables) {
+  const r = RM.t1;
+  drawWalls(r, '#3a2f63', '#2f2652', '#5a4a8a');
+  floorRect(r.x, r.y, r.w, r.d, '#2c2450');
+  drawDanceFloor(2.5, 9.5, 5, 4, t, beat, 'main');
+  ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.lineWidth = 1.5;
+  quad([iso(2.5, 9.5), iso(7.5, 9.5), iso(7.5, 13.5), iso(2.5, 13.5)], null, 'rgba(255,255,255,0.18)', 1.5);
+  drawTV(0.05, 8.4, WALL_H - 0.35, 'left');   // TV an linker Wand
+  drawTV(6.2, 0 + r.y, WALL_H - 0.35, 'back'); // TV an Rückwand
 
-  // --- Champagner-Bar ---
-  const c = L.champ;
-  box(c.x, c.y, c.w, c.h, 10, '#8a6a3a', '#5e4423', 6, '#453218');
-  ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
-  ctx.fillText('🍾', (c.x + c.w * 0.25) * W, (c.y + c.h * 0.5) * H - 8);
-  ctx.fillText('🥂', (c.x + c.w * 0.6) * W, (c.y + c.h * 0.5) * H - 8);
-  ctx.fillText('🍸', (c.x + c.w * 0.85) * W, (c.y + c.h * 0.5) * H - 8);
-  // VIP-Barkeeper
-  if (state.t2Unlocked) {
-    drawPerson(c.x + c.w / 2, c.y + 0.01, {
-      s: 0.95, color: '#1c1c28', skin: pick(SKIN), hair: '#c98b2d',
-      bob: Math.sin(t * 2.2) * 1.1,
-    });
+  // DJ-Pult + Boxen (Deko, gehört zum Boden-Layer)
+  const d = A.dj;
+  isoBox(d.x - 1.6, d.y - 0.5, 3.2, 1.1, 0.55, '#4a3a7d', '#33285c', '#281f49', '#6a58a0');
+  isoBox(d.x - 1.2, d.y - 0.35, 2.4, 0.8, 0.85, '#5a4a9a', '#3d3070', '#2f2557');
+  for (const bx of [d.x - 2.4, d.x + 1.9]) {
+    isoBox(bx, d.y - 0.4, 0.8, 1.0, 1.4, '#141024', '#0d0a1c', '#080615');
+    const s = iso(bx + 0.4, d.y + 0.1, 0.7);
+    ctx.fillStyle = `rgba(170,130,255,${0.4 + 0.45 * Math.abs(Math.sin(beat))})`;
+    ctx.beginPath(); ctx.arc(s.x, s.y, (5 + Math.abs(Math.sin(beat)) * 2) * cam.s, 0, 7); ctx.fill();
   }
+  drawables.push({ d: d.x + d.y - 1, fn: () => drawPerson(d.x, d.y - 0.2, {
+    s: 1.2, color: '#3b2f7a', skin: '#f0b98c', hair: '#1a1a22', bob: Math.sin(beat) * 1.6 * cam.s, headphones: true, arms: beat }) });
 
-  // --- Sofas (Samt mit Rückenlehne) ---
-  for (const s of [L.sofaR1, L.sofaR2, L.sofaL]) {
-    box(s.x, s.y - 0.012, s.w, 0.016, 8, '#a63a5c', '#7a2440', 5);  // Lehne
-    box(s.x, s.y, s.w, s.h, 6, '#c24e72', '#943353', 6);            // Sitzfläche
-  }
+  // Bar (Theke + Regal + Barkeeper)
+  const b = A.bar;
+  isoBox(b.x - 0.55, b.y - 2.4, 0.5, 4.8, 1.7, '#4a3320', '#33220f', '#281a0b'); // Regal an Wand
+  isoBox(b.x - 0.1, b.y - 2.2, 1.1, 4.4, 1.0, '#7a5330', '#4a3320', '#3a2818', '#33220f'); // Theke
+  drawables.push({ d: b.x + b.y, fn: () => drawPerson(b.x + 0.2, b.y - 1.6, {
+    s: 1.0, color: '#f5f0e6', skin: '#f0b98c', hair: '#5a3617', bob: Math.sin(t * 2.5) * 1.1 * cam.s }) });
 
-  // --- Bottle-Service-Tische mit Wunderkerzen ---
-  for (const [tx, ty] of [[0.33, 0.30], [0.68, 0.31]]) {
-    shadow(tx, ty + 0.008, 9);
-    ctx.fillStyle = '#3a2044';
-    ctx.beginPath(); ctx.arc(tx * W, ty * H - 4, 9, 0, Math.PI * 2); ctx.fill();
-    ctx.font = '10px sans-serif';
-    ctx.fillText('🍾', tx * W, ty * H - 6);
-    if (state.t2Unlocked && Math.random() < 0.25) {
-      particles.push({ x: tx + rnd(-0.01, 0.01), y: ty - 0.03, vy: -0.09, life: 0.55, txt: '✨', size: 8 });
-    }
-  }
+  // Shot-Bar
+  const sh = A.shots;
+  isoBox(sh.x - 0.6, sh.y - 1.1, 1.2, 2.2, 0.95, '#6a2f80', '#4a2058', '#3a1846', '#7d3a95');
+  drawLabel(sh.x, sh.y - 1.4, 'SHOTS', `hsla(${(t * 80) % 360},80%,68%,1)`);
 
-  // Schriftzug
-  ctx.fillStyle = '#ffd700';
-  ctx.font = `800 ${Math.max(8, W * 0.02)}px system-ui, sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.shadowColor = '#ffd700'; ctx.shadowBlur = 8;
-  ctx.fillText('✦ TERMINAL 2 · VIP ✦', W / 2, (b.y + 0.045) * H);
-  ctx.shadowBlur = 0;
+  // Garderobe
+  const gd = A.garderobe;
+  isoBox(gd.x - 1.3, gd.y - 0.5, 2.6, 1.0, 1.0, '#8a5c9e', '#6b4080', '#552f68');
+  drawLabel(gd.x, gd.y - 0.9, '🧥', '#e9d5ff', 9);
+
+  // Türsteher am Eingang (außen)
+  drawables.push({ d: ENTRY_IN.x + ENTRY_IN.y + 1, fn: () => drawPerson(ENTRY_IN.x + 1.7, ENTRY_IN.y + 1.2, {
+    s: 1.25, color: '#22222e', skin: '#c68a53', hair: '#1a1a22', shades: true }) });
+
+  drawRoomLabel(r, 'TERMINAL 1', '#c9b6ff');
 }
 
-function drawT2Lock(t) {
-  const b = L.bld;
-  const ix = b.x + L.wallT, iw = b.w - L.wallT * 2;
-  ctx.fillStyle = 'rgba(12,8,24,0.72)';
-  rr(ix * W, (b.y + 0.004) * H, iw * W, (L.split - b.y - 0.004) * H, 8);
-  ctx.fill();
-  // Absperrband am Treppenaufgang
+function drawKlo(t) {
+  const r = RM.klo;
+  drawWalls(r, '#3b4a58', '#2f3c48', '#5a6b7e');
+  floorRect(r.x, r.y, r.w, r.d, '#46586a');
+  // Fliesen-Raster
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1;
+  for (let i = 1; i < r.w; i++) quad([iso(r.x + i, r.y), iso(r.x + i, r.y + r.d)], null, 'rgba(255,255,255,0.08)');
+  for (let j = 1; j < r.d; j++) quad([iso(r.x, r.y + j), iso(r.x + r.w, r.y + j)], null, 'rgba(255,255,255,0.08)');
+  // Kabinen
+  for (let k = 0; k < 2; k++) isoBox(r.x + 0.4 + k * 1.5, r.y + 0.4, 1.2, 1.1, 1.3, '#7a8fa5', '#5a6b7e', '#46545f', '#8fa4b8');
+  drawLabel(r.x + r.w / 2, r.y - 0.3, '🚻 WC', '#dfeaf5', 8);
+}
+
+function drawT2(t, beat, drawables) {
+  const r = RM.t2;
+  const locked = !state.t2Unlocked;
+  drawWalls(r, '#4a2450', '#3d1f42', locked ? '#3a2a3a' : '#c9a227');
+  floorRect(r.x, r.y, r.w, r.d, locked ? '#241631' : '#3a1f42');
+  if (locked) return;   // Lock-Overlay beschriftet den Raum
+
+  drawDanceFloor(12.5, 2.5, 4, 3, t, beat, 'vip');
+  drawTV(RM.t2.x + 3.5, r.y, WALL_H - 0.35, 'back');
+
+  // Champagner-Bar
+  const c = A.vipbar;
+  isoBox(c.x - 1.3, c.y - 0.5, 2.6, 1.0, 1.0, '#8a6a3a', '#5e4423', '#453218', '#b28a4a');
+  drawLabel(c.x, c.y - 0.9, '🍾', '#ffe9a8', 9);
+
+  // Sofas (tables + chill)
+  for (const a of [A.tables, A.chill]) {
+    isoBox(a.x - 1.2, a.y - 0.5, 2.4, 1.0, 0.35, '#c24e72', '#943353', '#7a2846');
+    isoBox(a.x - 1.2, a.y - 0.5, 2.4, 0.3, 0.8, '#a63a5c', '#7a2440', '#611d33'); // Lehne
+  }
+  // Bottle-Tische mit Wunderkerzen
+  for (const [tx, ty] of [[13.2, 5.5], [15.5, 3.2]]) {
+    isoBox(tx - 0.35, ty - 0.35, 0.7, 0.7, 0.7, '#3a2044', '#2a1633', '#1f1026');
+    if (Math.random() < 0.25) spawnWorldParticle(tx, ty, 1.1, '✨', 8, 0.6);
+  }
+  drawRoomLabel(r, 'TERMINAL 2 · VIP', '#ffd970');
+}
+
+function drawRoof(t, beat, drawables) {
+  const r = RM.roof;
+  const locked = !state.roofUnlocked;
+  floorRect(r.x, r.y, r.w, r.d, locked ? '#1b2033' : '#1b2138');
+  // Brüstung (niedrige Rückwände)
+  const bh = 0.5;
+  quad([iso(r.x, r.y, 0), iso(r.x + r.w, r.y, 0), iso(r.x + r.w, r.y, bh), iso(r.x, r.y, bh)], '#2b3350');
+  quad([iso(r.x, r.y, 0), iso(r.x, r.y + r.d, 0), iso(r.x, r.y + r.d, bh), iso(r.x, r.y, bh)], '#232a44');
+  if (locked) return;   // Lock-Overlay beschriftet den Raum
+
+  drawDanceFloor(12, 11, 4, 3, t, beat, 'roof');
+  // funkelnde Sterne auf dem Floor
+  ctx.fillStyle = 'rgba(255,255,255,0.8)';
+  for (let i = 0; i < 14; i++) {
+    const s = iso(r.x + ((i * 2.7) % r.w), r.y + ((i * 1.9) % r.d), 0.02);
+    ctx.globalAlpha = 0.3 + (0.5 + 0.5 * Math.sin(t * 2 + i)) * 0.5;
+    ctx.beginPath(); ctx.arc(s.x, s.y, 1.1 * cam.s, 0, 7); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // Skybar
+  const sb = A.skybar;
+  isoBox(sb.x - 1.3, sb.y - 0.5, 2.6, 1.0, 1.0, '#2f6f8a', '#204a5e', '#183846', '#3f93b0');
+  drawLabel(sb.x, sb.y - 0.9, '🍸', '#a8ecff', 9);
+  // Pool
+  const pl = A.pool;
+  floorRect(pl.x - 1.4, pl.y - 1.0, 2.8, 2.0, '#2f7fd6');
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 1;
+  quad([iso(pl.x - 1.4, pl.y - 1.0), iso(pl.x + 1.4, pl.y - 1.0), iso(pl.x + 1.4, pl.y + 1.0), iso(pl.x - 1.4, pl.y + 1.0)], null, 'rgba(255,255,255,0.3)');
+
+  drawRoomLabel(r, 'ROOFTOP', '#8fe3ff');
+}
+
+// Performer (Tänzerin) auf kleiner Bühne im zugewiesenen Raum
+function drawPerformer(t, beat, drawables) {
+  if (!state.performer.unlocked) return;
+  const room = state.performer.room;
+  const centers = { t1: { x: 6.2, y: 8.6 }, t2: { x: 15.5, y: 5.5 }, roof: { x: 13.5, y: 15.2 } };
+  const c = centers[room] || centers.t1;
+  if (!roomUnlocked(room)) return;
+  // Bühne
+  isoBox(c.x - 0.8, c.y - 0.8, 1.6, 1.6, 0.3, '#ff5e8a', '#c73d68', '#a32e52');
+  // Spotlight
+  const sp = iso(c.x, c.y, 0);
+  const grd = ctx.createRadialGradient(sp.x, sp.y - 20 * cam.s, 2, sp.x, sp.y - 20 * cam.s, 40 * cam.s);
+  grd.addColorStop(0, 'rgba(255,180,220,0.35)'); grd.addColorStop(1, 'rgba(255,180,220,0)');
+  ctx.fillStyle = grd; ctx.beginPath(); ctx.arc(sp.x, sp.y - 14 * cam.s, 34 * cam.s, 0, 7); ctx.fill();
+  drawables.push({ d: c.x + c.y + 0.3, fn: () => drawPerson(c.x, c.y, {
+    s: 1.15, color: '#ff4fa3', skin: '#f0b98c', hair: '#1a1a22', female: true,
+    bob: Math.sin(beat * 1.5) * 3 * cam.s, arms: beat * 1.5, dancing: true, lift: 5 * cam.s }) });
+}
+
+// ---------------- TV-Screens & Ticker ----------------
+let tickerX = 0;
+function drawTV(wx, wy, wz, facing) {
+  // Bildschirm als Billboard an der Wand-Position
+  const p = iso(wx, wy, wz);
+  const w = 46 * cam.s, h = 26 * cam.s;
+  const x = p.x - w / 2, y = p.y - h;
+  ctx.fillStyle = '#0a0a14'; roundRectP(x - 2, y - 2, w + 4, h + 4, 3); ctx.fill();
+  const g = ctx.createLinearGradient(x, y, x, y + h);
+  g.addColorStop(0, '#123'); g.addColorStop(1, '#1a2b4a');
+  ctx.fillStyle = g; roundRectP(x, y, w, h, 2); ctx.fill();
   ctx.save();
-  ctx.translate((L.stair.x + L.stair.w / 2) * W, L.split * H + 2);
-  ctx.rotate(-0.06);
-  ctx.fillStyle = '#f7c625';
-  ctx.fillRect(-L.stair.w * W * 0.7, -4, L.stair.w * W * 1.4, 8);
-  ctx.fillStyle = '#222';
-  ctx.font = '700 6px system-ui, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('GESPERRT · GESPERRT', 0, 2);
+  roundRectP(x, y, w, h, 2); ctx.clip();
+  // Inhalt: Hype-Balken + €/s
+  ctx.fillStyle = dropActive() ? '#4fd7f7' : '#ff9f43';
+  ctx.fillRect(x + 3, y + 3, (w - 6) * (dropActive() ? 1 : Math.min(1, state.hype / 100)), 4 * cam.s);
+  ctx.fillStyle = '#9dedaa'; ctx.font = `800 ${8 * cam.s}px system-ui`; ctx.textAlign = 'center';
+  ctx.fillText(fmt(incomeCache) + ' €/s', x + w / 2, y + h * 0.55);
+  // Ticker
+  const ev = eventDef();
+  const msg = ev ? `★ ${ev.name.toUpperCase()} — ${ev.txt} ★   ` : `AIRPORT CLUB · HYPE ${Math.floor(state.hype)}% · LVL ${state.level} · `;
+  ctx.fillStyle = ev ? '#ffd93c' : '#c9b6ff'; ctx.font = `700 ${7 * cam.s}px system-ui`; ctx.textAlign = 'left';
+  const tw = ctx.measureText(msg).width;
+  let tx = x + (tickerX % tw);
+  while (tx > x) tx -= tw;
+  for (; tx < x + w; tx += tw) ctx.fillText(msg, tx, y + h - 4 * cam.s);
   ctx.restore();
-  // Schloss + Hinweis
+  ctx.strokeStyle = 'rgba(120,160,255,0.4)'; ctx.lineWidth = 1; roundRectP(x, y, w, h, 2); ctx.stroke();
+}
+
+function drawLabel(wx, wy, txt, color, size = 8) {
+  const p = iso(wx, wy, 1.2);
+  ctx.font = `800 ${Math.max(7, size * cam.s + 2)}px system-ui, sans-serif`;
   ctx.textAlign = 'center';
-  const bob = Math.sin(t * 2) * 2;
-  ctx.font = `${Math.min(34, W * 0.085)}px sans-serif`;
-  ctx.fillText('🔒', W / 2, (b.y + (L.split - b.y) * 0.48) * H + bob);
-  ctx.fillStyle = '#fff';
-  ctx.font = `800 ${Math.min(13, W * 0.032)}px system-ui, sans-serif`;
-  ctx.fillText('Terminal 2 · VIP-Etage', W / 2, (b.y + (L.split - b.y) * 0.68) * H);
-  ctx.fillStyle = '#ffd93c';
-  ctx.font = `700 ${Math.min(11, W * 0.027)}px system-ui, sans-serif`;
-  ctx.fillText('Zum Freischalten antippen', W / 2, (b.y + (L.split - b.y) * 0.82) * H);
+  ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillText(txt, p.x, p.y + 0.5);
+  ctx.fillStyle = color; ctx.fillText(txt, p.x, p.y);
+}
+
+function drawRoomLabel(r, txt, color) {
+  const p = iso(r.x + r.w / 2, r.y + 0.25, WALL_H + 0.15);
+  ctx.font = `800 ${Math.max(8, 9 * cam.s + 3)}px system-ui, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillText(txt, p.x + 1, p.y + 1);
+  ctx.fillStyle = color; ctx.fillText(txt, p.x, p.y);
+}
+
+// ---------------- Lock-Overlays ----------------
+function drawLockOverlay(r, title, hint) {
+  quad(roomFloorQuad(r), 'rgba(10,6,22,0.6)');
+  const c = iso(r.x + r.w / 2, r.y + r.d / 2, 0.5);
+  ctx.textAlign = 'center';
+  ctx.font = `${Math.min(30, 22 * cam.s + 8)}px sans-serif`;
+  ctx.fillText('🔒', c.x, c.y - 6 * cam.s);
+  ctx.fillStyle = '#fff'; ctx.font = `800 ${Math.max(10, 10 * cam.s + 2)}px system-ui`;
+  ctx.fillText(title, c.x, c.y + 12 * cam.s);
+  ctx.fillStyle = '#ffd93c'; ctx.font = `700 ${Math.max(8, 8 * cam.s + 1)}px system-ui`;
+  ctx.fillText(hint, c.x, c.y + 26 * cam.s);
 }
 
 // ---------------- Geld-Pins ----------------
 function drawCashPins(t) {
   let idx = 0;
-  for (const [id, pin] of Object.entries(CASH_PINS)) {
+  for (const [stId, anchorId] of Object.entries(PIN_AT)) {
     idx++;
-    const amount = state.stationCash[id] || 0;
+    const amount = state.stationCash[stId] || 0;
     if (amount < 1) continue;
+    const a = A[anchorId];
+    const p = iso(a.x, a.y, 1.15);
     const bounce = Math.sin(t * 3 + idx) * 2.5;
-    const px = pin.x * W, py = pin.y * H - 16 + bounce;
+    const px = p.x, py = p.y - bounce;
     const label = fmt(amount);
-    ctx.font = `800 ${Math.max(9, W * 0.024)}px system-ui, sans-serif`;
+    ctx.font = `800 ${Math.max(9, 10 * cam.s + 1)}px system-ui, sans-serif`;
     const tw = ctx.measureText(label).width;
-    const bw = tw + 24, bh = 17;
-    // Zeiger-Spitze
+    const bw = tw + 26, bh = 18;
     ctx.fillStyle = '#2ea84a';
-    ctx.beginPath();
-    ctx.moveTo(px, py + bh / 2 + 7);
-    ctx.lineTo(px - 5, py + bh / 2 - 1);
-    ctx.lineTo(px + 5, py + bh / 2 - 1);
-    ctx.closePath();
-    ctx.fill();
-    // Pill
-    ctx.fillStyle = '#38c95c';
-    rr(px - bw / 2, py - bh / 2, bw, bh, bh / 2); ctx.fill();
-    ctx.strokeStyle = '#1d7a33';
-    ctx.lineWidth = 2;
-    rr(px - bw / 2, py - bh / 2, bw, bh, bh / 2); ctx.stroke();
-    // Inhalt
-    ctx.fillStyle = '#fff';
-    ctx.textAlign = 'left';
-    ctx.font = `${11}px sans-serif`;
+    ctx.beginPath(); ctx.moveTo(px, py + bh / 2 + 7); ctx.lineTo(px - 5, py + bh / 2 - 1); ctx.lineTo(px + 5, py + bh / 2 - 1); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#38c95c'; roundRectP(px - bw / 2, py - bh / 2, bw, bh, bh / 2); ctx.fill();
+    ctx.strokeStyle = '#1d7a33'; ctx.lineWidth = 2; roundRectP(px - bw / 2, py - bh / 2, bw, bh, bh / 2); ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.textAlign = 'left'; ctx.font = `${11}px sans-serif`;
     ctx.fillText('💶', px - bw / 2 + 5, py + 4);
-    ctx.font = `800 ${Math.max(9, W * 0.024)}px system-ui, sans-serif`;
-    ctx.fillText(label, px - bw / 2 + 19, py + 3.5);
+    ctx.font = `800 ${Math.max(9, 10 * cam.s + 1)}px system-ui, sans-serif`;
+    ctx.fillText(label, px - bw / 2 + 20, py + 3.5);
     ctx.textAlign = 'center';
   }
 }
 
 // ---------------- Partikel ----------------
-export function spawnMoneyParticle(nx, ny) {
-  particles.push({ x: nx, y: ny, vy: -0.06, life: 1, txt: '💶', size: 13 });
-}
+function spawnScreenParticle(sx, sy, txt, size, life, color) { particles.push({ screen: true, x: sx, y: sy, vy: -40, life, txt, size, color }); }
+function spawnWorldParticle(wx, wy, wz, txt, size, life) { const p = iso(wx, wy, wz); particles.push({ screen: true, x: p.x, y: p.y, vy: -35, life, txt, size }); }
+export function spawnMoneyParticle() {}
 
-function ambientParticles(dt) {
-  if (Math.random() < dt * (dropActive() ? 4 : 0.9) && guests.length) {
-    const g = pick(guests);
-    particles.push({ x: g.x, y: g.y - 0.05, vy: -0.05, life: 1, txt: '+€', size: 11, color: '#d7ffd9' });
-  }
-  if (dropActive() && Math.random() < dt * 12) {
-    particles.push({
-      x: Math.random(), y: -0.02, vy: 0.15 + Math.random() * 0.2, life: 2.2,
-      txt: pick(['🎉', '✨', '💜', '🎊']), size: 12 + Math.random() * 8, fall: true,
-    });
-  }
+function updateParticles(dt) {
+  if (dropActive() && Math.random() < dt * 10) spawnScreenParticle(rnd(0, W), -10, pick(['🎉','✨','💜','🎊']), 12 + Math.random() * 8, 2.2, null), particles[particles.length-1].vy = rnd(40, 90);
   for (let i = particles.length - 1; i >= 0; i--) {
     const p = particles[i];
-    p.y += p.vy * dt;
-    p.life -= dt * (p.fall ? 0.45 : 1);
+    p.y += p.vy * dt; p.life -= dt;
     if (p.life <= 0) particles.splice(i, 1);
   }
 }
 
 // ---------------- Frame ----------------
 let lastFrame = 0;
+let incomeCache = 0, incomeTimer = 0;
 
 export function renderFrame(now) {
   if (!ctx) return;
@@ -808,62 +812,52 @@ export function renderFrame(now) {
   const t = (now - startTime) / 1000;
   const bpm = dropActive() ? 160 : 126;
   const beat = t * (bpm / 60) * Math.PI;
+  tickerX -= dt * 40 * cam.s;
 
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
 
   updateGuests(dt);
-  ambientParticles(dt);
+  updateParticles(dt);
+  incomeTimer += dt; if (incomeTimer > 0.25) { incomeTimer = 0; incomeCache = incomePerSec(); }
 
-  drawOutside(t);
-  drawBuilding();
-  drawTerminal2(t, beat);
-  drawTerminal1(t, beat);
+  drawGround();
+  drawPlaza(t);
 
-  // Gäste (nach y sortiert → Pseudo-Tiefe), gesperrter VIP-Bereich hat keine
-  const sorted = [...guests].sort((a, b) => a.y - b.y);
-  for (const g of sorted) {
-    const dancing = g.mode === 'act' && (g.act === 'dance' || g.act === 'vipdance');
-    const bob = dancing ? Math.sin(beat + g.bobPhase) * (dropActive() ? 3.5 : 2.2) : 0;
-    drawPerson(g.x, g.y, {
-      s: g.celeb ? 1.35 : g.vip ? 1.08 : 1,
-      color: g.color, skin: g.skin, hair: g.hair,
-      bob,
-      arms: dancing ? beat + g.bobPhase : null,
-      drink: g.mode === 'act' ? g.drink : null,
-      alpha: g.alpha,
-      glow: g.celeb,
-      star: g.celeb,
-      bobPhase: g.bobPhase,
-    });
-    if (g.celeb && state.celeb) {
-      const frac = Math.max(0, (state.celeb.expires - Date.now()) / 20000);
-      ctx.strokeStyle = 'rgba(255,215,0,0.9)';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc(g.x * W, g.y * H - 6, 26, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2);
-      ctx.stroke();
-    }
+  // Räume (Boden/Wände/Deko) + Sammel-Liste für tiefen­sortierte Objekte
+  const drawables = [];
+  drawKlo(t);
+  drawT2(t, beat, drawables);
+  drawT1(t, beat, drawables);
+  drawRoof(t, beat, drawables);
+  drawPerformer(t, beat, drawables);
+
+  // Gäste als Drawables (Tiefe = x+y)
+  for (const g of guests) {
+    const dancing = g.mode === 'act' && (g.act === 'dance' || g.act === 'vipdance' || g.act === 'roofbar');
+    const bob = dancing ? Math.sin(beat + g.bobPhase) * (dropActive() ? 3.2 : 2) * cam.s : 0;
+    const gg = g;
+    drawables.push({ d: g.x + g.y, fn: () => drawPerson(gg.x, gg.y, {
+      s: gg.celeb ? 1.35 : gg.vip ? 1.08 : 1, color: gg.color, skin: gg.skin, hair: gg.hair, female: gg.female,
+      bob, arms: dancing ? beat + gg.bobPhase : null, dancing,
+      drink: gg.mode === 'act' ? gg.drink : null, alpha: gg.alpha, glow: gg.celeb, star: gg.celeb, bobPhase: gg.bobPhase }) });
   }
+  drawables.sort((a, b) => a.d - b.d);
+  for (const it of drawables) it.fn();
 
-  // Geld-Pins über den Stationen (Umsätze einsammeln)
+  // Lock-Overlays über gesperrten Räumen
+  if (!state.t2Unlocked) drawLockOverlay(RM.t2, 'Terminal 2 · VIP', 'Antippen zum Freischalten');
+  if (!state.roofUnlocked) drawLockOverlay(RM.roof, 'Rooftop', state.t2Unlocked ? 'Antippen zum Freischalten' : 'Erst Terminal 2');
+
   drawCashPins(t);
-
-  // VIP-Etage gesperrt → Overlay über allem in T2
-  if (!state.t2Unlocked) drawT2Lock(t);
 
   // Partikel
   for (const p of particles) {
     ctx.globalAlpha = Math.max(0, Math.min(1, p.life));
-    ctx.font = `700 ${p.size}px system-ui, sans-serif`;
-    ctx.textAlign = 'center';
-    if (p.color) ctx.fillStyle = p.color;
-    ctx.fillText(p.txt, p.x * W, p.y * H);
+    ctx.font = `700 ${p.size}px system-ui, sans-serif`; ctx.textAlign = 'center';
+    ctx.fillStyle = p.color || '#fff';
+    ctx.fillText(p.txt, p.x, p.y);
   }
   ctx.globalAlpha = 1;
 
-  // DROP-Strobe
-  if (dropActive()) {
-    ctx.fillStyle = `rgba(255,255,255,${0.05 + 0.05 * Math.abs(Math.sin(t * 20))})`;
-    ctx.fillRect(0, 0, W, H);
-  }
+  if (dropActive()) { ctx.fillStyle = `rgba(255,255,255,${0.04 + 0.05 * Math.abs(Math.sin(t * 20))})`; ctx.fillRect(0, 0, W, H); }
 }

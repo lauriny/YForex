@@ -2,8 +2,10 @@
 //  AIRPORT – Club Simulator · Spiellogik & State
 // ============================================================
 import {
-  STATIONS, STATION_MAP, STAFF, STAFF_MAP, SHOP,
-  T2_REQ, BOOST, DROP, HYPE_PER_TAP, HYPE_DECAY, OFFLINE, CELEB, PRESTIGE,
+  STATIONS, STATION_MAP, STAFF, STAFF_MAP, SHOP, CASH_STATIONS,
+  T2_REQ, ROOF_REQ, PERFORMER, AUTOCOLLECT, autoCollectInterval,
+  BOOST, DROP, HYPE_PER_TAP, OFFLINE, CELEB, PRESTIGE,
+  EVENTS, EVENT_GAP, WHEEL, DAILY_MIN_GAP_H, DAILY_STREAK_MAX, ACHIEVEMENTS,
   getPhase, chestReward, costOf, bulkCost, maxAffordable, milestoneMult,
 } from './data.js';
 
@@ -31,7 +33,14 @@ export const state = {
   stations: freshStations(),
   staff: {},               // id -> Stufe
   t2Unlocked: false,
+  roofUnlocked: false,
   stationCash: {},         // id -> aufgelaufener, einsammelbarer Umsatz
+  autoCollect: 0,          // Stufe des Auto-Kassierers (0 = aus)
+  performer: { unlocked: false, room: 't1' },
+  event: null,             // { id, expires }
+  nextEventAt: Date.now() + 180_000,
+  daily: { lastClaim: 0, streak: 0 },
+  achievements: {},        // id -> true (Belohnung abgeholt)
   boostUntil: 0,
   boostCdUntil: 0,
   hype: 0,
@@ -45,6 +54,13 @@ export const state = {
   settings: { sound: true, music: true },
   createdAt: Date.now(),
 };
+
+// ---- Raum-Freischaltung -------------------------------------------
+export function roomUnlocked(roomId) {
+  if (roomId === 't2') return state.t2Unlocked;
+  if (roomId === 'roof') return state.roofUnlocked;
+  return true; // t1
+}
 
 // ---- Abgeleitete Werte --------------------------------------------
 export function staffStationMult(stationId) {
@@ -69,12 +85,17 @@ export function fameMult() { return 1 + state.fame * PRESTIGE.multPerStar; }
 export function boostActive() { return Date.now() < state.boostUntil; }
 export function dropActive() { return Date.now() < state.dropUntil; }
 
+// Show-Act: der Raum, in dem die Tänzerin steht, wird geboostet
+export function performerRoomMult(roomId) {
+  return (state.performer.unlocked && state.performer.room === roomId) ? PERFORMER.roomMult : 1;
+}
+
 export function stationIncome(id) {
   const lvl = state.stations[id] || 0;
   if (lvl <= 0) return 0;
   const st = STATION_MAP[id];
-  if (st.room === 't2' && !state.t2Unlocked) return 0;
-  return st.baseIncome * lvl * milestoneMult(lvl) * staffStationMult(id);
+  if (!roomUnlocked(st.room)) return 0;
+  return st.baseIncome * lvl * milestoneMult(lvl) * staffStationMult(id) * performerRoomMult(st.room);
 }
 
 export function roomIncome(roomId) {
@@ -83,10 +104,17 @@ export function roomIncome(roomId) {
   return sum * globalMult();
 }
 
+// ---- Live-Events ---------------------------------------------------
+export function eventActive() { return state.event && Date.now() < state.event.expires; }
+export function eventDef() { return eventActive() ? EVENTS.find(e => e.id === state.event.id) : null; }
+export function eventMult() { const d = eventDef(); return d ? d.mult : 1; }
+export function eventGuestMult() { const d = eventDef(); return d ? d.guests : 1; }
+
 export function globalMult() {
   let m = staffGlobalMult() * fameMult();
   if (boostActive()) m *= BOOST.mult;
   if (dropActive()) m *= DROP.mult;
+  if (eventActive()) m *= eventMult();
   return m;
 }
 
@@ -105,9 +133,9 @@ export function dropDuration() {
   return DROP.dur + neon * (STAFF_MAP.neon.dropBonus || 0);
 }
 
-// Spielerlevel leitet sich aus dem Lebenszeit-Umsatz ab
+// Spielerlevel leitet sich aus dem Lebenszeit-Umsatz ab (bewusst flach)
 export function levelFor(lifetime) {
-  return 1 + Math.max(0, Math.floor(Math.log(1 + lifetime / 50) / Math.log(2.6)));
+  return 1 + Math.max(0, Math.floor(Math.log(1 + lifetime / 100) / Math.log(2.7)));
 }
 
 // ---- Geld ----------------------------------------------------------
@@ -139,7 +167,7 @@ export function buyStation(id, mode = 1) {
   const { count, cost, affordable } = buyInfo(id, mode);
   if (!affordable) return false;
   const st = STATION_MAP[id];
-  if (st.room === 't2' && !state.t2Unlocked) return false;
+  if (!roomUnlocked(st.room)) return false;
   const before = state.stations[id] || 0;
   state.money -= cost;
   state.stations[id] = before + count;
@@ -150,11 +178,10 @@ export function buyStation(id, mode = 1) {
   return true;
 }
 
-// ---- Terminal 2 ------------------------------------------------------
+// ---- Räume freischalten ------------------------------------------
 export function canUnlockT2() {
   return !state.t2Unlocked && state.level >= T2_REQ.level && state.money >= T2_REQ.cost;
 }
-
 export function unlockT2() {
   if (state.t2Unlocked) return false;
   if (state.level < T2_REQ.level || state.money < T2_REQ.cost) return false;
@@ -165,13 +192,47 @@ export function unlockT2() {
   return true;
 }
 
+export function canUnlockRoof() {
+  return state.t2Unlocked && !state.roofUnlocked && state.level >= ROOF_REQ.level && state.money >= ROOF_REQ.cost;
+}
+export function unlockRoof() {
+  if (state.roofUnlocked || !state.t2Unlocked) return false;
+  if (state.level < ROOF_REQ.level || state.money < ROOF_REQ.cost) return false;
+  state.money -= ROOF_REQ.cost;
+  state.roofUnlocked = true;
+  emit('roofunlocked');
+  save();
+  return true;
+}
+
+// ---- Show-Act (bewegliche Tänzerin) -------------------------------
+export function canUnlockPerformer() {
+  return !state.performer.unlocked && state.level >= PERFORMER.level && state.money >= PERFORMER.cost;
+}
+export function unlockPerformer() {
+  if (state.performer.unlocked) return false;
+  if (state.level < PERFORMER.level || state.money < PERFORMER.cost) return false;
+  state.money -= PERFORMER.cost;
+  state.performer.unlocked = true;
+  state.performer.room = 't1';
+  emit('performer');
+  save();
+  return true;
+}
+export function setPerformerRoom(roomId) {
+  if (!state.performer.unlocked || !roomUnlocked(roomId)) return false;
+  state.performer.room = roomId;
+  emit('performer');
+  save();
+  return true;
+}
+
 // ---- Personal ---------------------------------------------------------
 export function staffCost(id) {
   const s = STAFF_MAP[id];
   const lvl = state.staff[id] || 0;
   return s.baseCost * Math.pow(s.growth, lvl);
 }
-
 export function hireStaff(id) {
   const s = STAFF_MAP[id];
   const lvl = state.staff[id] || 0;
@@ -185,6 +246,21 @@ export function hireStaff(id) {
   return true;
 }
 
+// ---- Auto-Kassierer ---------------------------------------------------
+export function autoCollectCost() {
+  return AUTOCOLLECT.baseCost * Math.pow(AUTOCOLLECT.growth, state.autoCollect);
+}
+export function buyAutoCollect() {
+  if (state.autoCollect >= AUTOCOLLECT.max) return false;
+  const cost = autoCollectCost();
+  if (state.money < cost) return false;
+  state.money -= cost;
+  state.autoCollect++;
+  emit('autocollect', { level: state.autoCollect });
+  save();
+  return true;
+}
+
 // ---- Boost -------------------------------------------------------------
 export function boostState() {
   const now = Date.now();
@@ -192,7 +268,6 @@ export function boostState() {
   if (now < state.boostCdUntil) return { st: 'cooldown', left: (state.boostCdUntil - now) / 1000 };
   return { st: 'ready', left: 0 };
 }
-
 export function startBoost(force = false) {
   const bs = boostState();
   if (bs.st === 'active') return false;
@@ -206,12 +281,13 @@ export function startBoost(force = false) {
 }
 
 // ---- Stations-Kassen (Gäste kaufen → Geld liegt am Stand) -------------------
-// Ein Kauf legt ~12–25 Sekunden Stations-Einkommen in die Kasse (gedeckelt).
+// Nur Konsum-Stationen erzeugen Pins; Eintritt (einlass/vipEinlass) läuft passiv.
 export function depositAtStation(id) {
+  if (!CASH_STATIONS.includes(id)) return 0;
   const income = stationIncome(id) * globalMult();
   if (income <= 0) return 0;
-  const amount = income * (12 + Math.random() * 13);
-  const cap = income * 120; // max. 2 Minuten Stations-Einkommen pro Kasse
+  const amount = income * (4 + Math.random() * 4);
+  const cap = income * 40; // max. 40 s Stations-Einkommen pro Kasse
   const cur = state.stationCash[id] || 0;
   const add = Math.min(amount, Math.max(0, cap - cur));
   if (add <= 0) return 0;
@@ -225,17 +301,20 @@ export function collectStation(id) {
   state.stationCash[id] = 0;
   addMoney(amount, 'collect');
   emit('collect', { id, amount });
-  save();
   return amount;
 }
 
-// ---- Hype & DROP ----------------------------------------------------------
-// Hype füllt sich von allein (DJ-Stufe & Ausbau beschleunigen das).
-// Tippen auf den Club gibt nur einen kleinen Extra-Schub — kein Tipp-Zwang.
-export function hypeFillSeconds() {
-  return Math.max(35, 90 - (state.stations.dj || 0) * 0.8 - totalLevels() * 0.02);
+export function totalStationCash() {
+  return Object.values(state.stationCash).reduce((a, b) => a + b, 0);
 }
 
+// ---- Hype & DROP ----------------------------------------------------------
+// Hype füllt sich von allein (DJ-Stufe, Ausbau & Tänzerin beschleunigen das).
+export function hypeFillSeconds() {
+  let base = Math.max(35, 90 - (state.stations.dj || 0) * 0.8 - totalLevels() * 0.02);
+  if (state.performer.unlocked) base /= PERFORMER.hypeMult;
+  return base;
+}
 export function tapHype() {
   if (!dropActive()) {
     state.hype = Math.min(100, state.hype + HYPE_PER_TAP);
@@ -243,7 +322,6 @@ export function tapHype() {
   }
   return 0;
 }
-
 export function triggerDrop() {
   state.hype = 0;
   state.dropUntil = Date.now() + dropDuration() * 1000;
@@ -256,19 +334,30 @@ function scheduleCeleb() {
   const gap = CELEB.minGap + Math.random() * (CELEB.maxGap - CELEB.minGap);
   state.nextCelebAt = Date.now() + gap * 1000;
 }
-
 export function tapCeleb() {
   if (!state.celeb) return null;
   state.celeb = null;
   state.stats.celebs++;
   scheduleCeleb();
-  const money = incomePerSec() * (90 + Math.random() * 90);
+  const money = incomePerSec() * (25 + Math.random() * 25);
   const gems = Math.random() < 0.35 ? 1 + Math.floor(Math.random() * 2) : 0;
   addMoney(money, 'celeb');
   state.gems += gems;
   emit('celeb', { money, gems });
   save();
   return { money, gems };
+}
+
+// ---- Live-Events (Happy Hour / Rush) ---------------------------------------
+function scheduleEvent() {
+  const gap = EVENT_GAP.min + Math.random() * (EVENT_GAP.max - EVENT_GAP.min);
+  state.nextEventAt = Date.now() + gap * 1000;
+}
+export function startRandomEvent() {
+  const def = EVENTS[Math.floor(Math.random() * EVENTS.length)];
+  state.event = { id: def.id, expires: Date.now() + def.dur * 1000 };
+  scheduleEvent();
+  emit('event', def);
 }
 
 // ---- Diamant-Shop --------------------------------------------------------------
@@ -290,6 +379,58 @@ export function buyShopItem(id) {
   return true;
 }
 
+// ---- Täglicher Bonus & Glücksrad -------------------------------------------
+export function dailyDue() {
+  return Date.now() - (state.daily.lastClaim || 0) >= DAILY_MIN_GAP_H * 3600 * 1000;
+}
+// liefert Index des Rad-Segments (Zufall) — die UI dreht optisch dorthin
+export function spinWheelIndex() {
+  return Math.floor(Math.random() * WHEEL.length);
+}
+export function claimWheel(index) {
+  if (!dailyDue()) return null;
+  const seg = WHEEL[index];
+  // Streak pflegen (innerhalb 48 h fortsetzen, sonst Reset)
+  const gap = Date.now() - (state.daily.lastClaim || 0);
+  state.daily.streak = gap <= 48 * 3600 * 1000 ? Math.min(DAILY_STREAK_MAX, (state.daily.streak || 0) + 1) : 1;
+  state.daily.lastClaim = Date.now();
+  const streakMult = 1 + (state.daily.streak - 1) * 0.15;
+  const result = { streak: state.daily.streak, seg };
+  if (seg.type === 'money') {
+    const money = Math.max(200, incomePerSec() * 60 * seg.minutes) * streakMult;
+    addMoney(money, 'daily'); result.money = money;
+  } else if (seg.type === 'gems') {
+    const gems = Math.ceil(seg.gems * streakMult); state.gems += gems; result.gems = gems;
+  } else if (seg.type === 'boost') {
+    startBoost(true); result.boost = true;
+  } else if (seg.type === 'drop') {
+    triggerDrop(); result.drop = true;
+  }
+  save();
+  return result;
+}
+
+// ---- Erfolge / Achievements ------------------------------------------------
+export function achievementDone(a) { return questValue(a) >= a.v; }
+export function claimAchievement(id) {
+  if (state.achievements[id]) return false;
+  const a = ACHIEVEMENTS.find(x => x.id === id);
+  if (!a || !achievementDone(a)) return false;
+  state.achievements[id] = true;
+  state.gems += a.gems;
+  emit('achievement', a);
+  save();
+  return true;
+}
+export function achievementsInfo() {
+  return ACHIEVEMENTS.map(a => ({
+    ...a,
+    done: achievementDone(a),
+    claimed: !!state.achievements[a.id],
+    value: Math.min(questValue(a), a.v),
+  }));
+}
+
 // ---- Quests & Phasen --------------------------------------------------------------
 export function questValue(q) {
   switch (q.t) {
@@ -304,6 +445,7 @@ export function questValue(q) {
     case 'celebs':      return state.stats.celebs;
     case 'boosts':      return state.stats.boostsUsed;
     case 't2':          return state.t2Unlocked ? 1 : 0;
+    case 'roof':        return state.roofUnlocked ? 1 : 0;
     case 'fame':        return state.fame;
     default:            return 0;
   }
@@ -361,7 +503,6 @@ function openChest(kind) {
 export function prestigeStars() {
   return Math.floor(Math.sqrt(state.lifetime / PRESTIGE.div));
 }
-
 export function prestigeInfo() {
   const totalStars = prestigeStars();
   return {
@@ -371,7 +512,6 @@ export function prestigeInfo() {
     current: state.fame,
   };
 }
-
 export function doPrestige() {
   const info = prestigeInfo();
   if (!info.available) return false;
@@ -380,8 +520,12 @@ export function doPrestige() {
   state.stations = freshStations();
   state.staff = {};
   state.t2Unlocked = false;
+  state.roofUnlocked = false;
   state.stationCash = {};
+  state.autoCollect = 0;
+  state.performer.room = 't1';   // Tänzerin bleibt engagiert, zurück auf Mainfloor
   state.hype = 0;
+  state.event = null;
   state.boostUntil = 0; state.boostCdUntil = 0; state.dropUntil = 0;
   state.celeb = null;
   state.stats.prestiges++;
@@ -394,6 +538,7 @@ export function doPrestige() {
 let lastTick = 0;
 let questTimer = 0;
 let saveTimer = 0;
+let autoTimer = 0;
 
 export function tick(now) {
   if (!lastTick) lastTick = now;
@@ -409,17 +554,28 @@ export function tick(now) {
     if (state.hype >= 100) triggerDrop();
   }
 
+  // Auto-Kassierer sammelt Pins ein
+  if (state.autoCollect > 0) {
+    autoTimer += dt;
+    if (autoTimer >= autoCollectInterval(state.autoCollect)) {
+      autoTimer = 0;
+      for (const id of CASH_STATIONS) if ((state.stationCash[id] || 0) > 0) collectStation(id);
+    }
+  }
+
   // Promi-Gast
   const nowMs = Date.now();
   if (state.celeb && nowMs > state.celeb.expires) {
-    state.celeb = null;
-    scheduleCeleb();
-    emit('celebGone');
+    state.celeb = null; scheduleCeleb(); emit('celebGone');
   }
   if (!state.celeb && nowMs > state.nextCelebAt) {
     state.celeb = { expires: nowMs + CELEB.stay * 1000, seed: Math.random() };
     emit('celebSpawn');
   }
+
+  // Live-Events
+  if (state.event && nowMs > state.event.expires) { state.event = null; emit('eventEnd'); }
+  if (!state.event && nowMs > state.nextEventAt) startRandomEvent();
 
   questTimer += dt;
   if (questTimer > 0.5) { questTimer = 0; checkQuests(); }
@@ -443,7 +599,6 @@ export function load() {
     const data = JSON.parse(raw);
     const ts = data.ts || Date.now();
     delete data.ts;
-    // sanft mergen, damit neue Felder Defaults behalten
     for (const k of Object.keys(state)) {
       if (data[k] === undefined) continue;
       if (typeof state[k] === 'object' && state[k] !== null && !Array.isArray(state[k])) {
@@ -454,6 +609,7 @@ export function load() {
     }
     state.level = Math.max(state.level, levelFor(state.lifetime));
     state.celeb = null;
+    state.event = null;
     // Offline-Einnahmen
     const away = (Date.now() - ts) / 1000;
     if (away > 60) {

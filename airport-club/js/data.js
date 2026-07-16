@@ -5,45 +5,88 @@
 export const MILESTONE_STEP = 25;   // alle 25 Stufen ...
 export const MILESTONE_MULT = 2;    // ... verdoppelt sich das Einkommen der Station
 
-export const T2_REQ = { level: 10, cost: 500_000 };
+// ---- Freischalt-Gates ------------------------------------------
+export const T2_REQ   = { level: 10, cost: 750_000 };
+export const ROOF_REQ = { level: 20, cost: 250_000_000 };
+
+// ---- Show-Act (bewegliche Tänzerin) ----------------------------
+export const PERFORMER = { level: 14, cost: 12_000_000, roomMult: 2.2, hypeMult: 1.6 };
+
+// ---- Auto-Kassierer (sammelt Geld-Pins von allein ein) ---------
+export const AUTOCOLLECT = { baseCost: 400_000, growth: 5.5, max: 6 };
+export function autoCollectInterval(lvl) {   // Sekunden zwischen Einsammel-Runden
+  return lvl <= 0 ? Infinity : Math.max(2, 20 - lvl * 3);
+}
 
 export const BOOST = { dur: 300, cd: 600, mult: 2 };      // x2-Einkommen: 5 min an, 10 min Cooldown
 export const DROP  = { dur: 12, mult: 3 };                // Hype-DROP: 12 s x3
 export const HYPE_PER_TAP = 3;                            // % Hype pro Tap
 export const HYPE_DECAY = 4;                              // % Hype-Verfall pro Sekunde
-export const OFFLINE = { cap: 8 * 3600, eff: 0.5 };       // Offline: max 8 h, 50 % Effizienz
-export const CELEB = { minGap: 120, maxGap: 300, stay: 20 }; // Promi-Gast (Sekunden)
-export const PRESTIGE = { minLevel: 20, div: 2e9, multPerStar: 0.25 };
+export const OFFLINE = { cap: 8 * 3600, eff: 0.4 };       // Offline: max 8 h, 40 % Effizienz
+export const CELEB = { minGap: 150, maxGap: 330, stay: 20 }; // Promi-Gast (Sekunden)
+export const PRESTIGE = { minLevel: 25, div: 5e10, multPerStar: 0.25 };
 
+// ---- Live-Events (Happy Hour / Rush) ---------------------------
+export const EVENT_GAP = { min: 210, max: 420 };          // Sekunden zwischen Events
+export const EVENTS = [
+  { id: 'happyhour', name: 'Happy Hour',   icon: '🍹', mult: 2,   dur: 60, guests: 1.2, txt: 'Doppeltes Einkommen an allen Bars!' },
+  { id: 'rush',      name: 'Freitagnacht', icon: '🎉', mult: 2.5, dur: 45, guests: 1.8, txt: 'Der Laden ist rappelvoll!' },
+  { id: 'vipnight',  name: 'VIP-Nacht',    icon: '🥂', mult: 3,   dur: 40, guests: 1.4, txt: 'Die High-Roller sind da!' },
+  { id: 'ladies',    name: 'Ladies Night', icon: '💃', mult: 2.2, dur: 50, guests: 1.5, txt: 'Freier Eintritt — volle Tanzfläche!' },
+];
+
+// ---- Glücksrad (täglicher Bonus) -------------------------------
+// reward: money = incomePerSec * minutes*60 (skaliert mit Fortschritt), gems fest.
+export const WHEEL = [
+  { label: '5 Min €',  color: '#43d95e', type: 'money', minutes: 5 },
+  { label: '3 💎',      color: '#c56cf0', type: 'gems',  gems: 3 },
+  { label: '15 Min €', color: '#4fd7f7', type: 'money', minutes: 15 },
+  { label: '⚡ Boost',  color: '#ffd93c', type: 'boost' },
+  { label: '8 Min €',  color: '#43d95e', type: 'money', minutes: 8 },
+  { label: '6 💎',      color: '#f2a9ff', type: 'gems',  gems: 6 },
+  { label: '30 Min €', color: '#ff9f43', type: 'money', minutes: 30 },
+  { label: '🔊 DROP',   color: '#ff5e8a', type: 'drop' },
+];
+export const DAILY_MIN_GAP_H = 20;   // frühestens nach 20 h wieder
+export const DAILY_STREAK_MAX = 7;   // Streak-Bonus deckelt bei x7
+
+// ---- Räume -----------------------------------------------------
 export const ROOMS = [
-  { id: 't1', name: 'Terminal 1', sub: 'Mainfloor',  icon: '🪩' },
-  { id: 't2', name: 'Terminal 2', sub: 'VIP-Etage',  icon: '🥂' },
+  { id: 't1',   name: 'Terminal 1', sub: 'Mainfloor',  icon: '🪩' },
+  { id: 't2',   name: 'Terminal 2', sub: 'VIP-Etage',  icon: '🥂' },
+  { id: 'roof', name: 'Rooftop',    sub: 'Sky Lounge', icon: '🌃' },
 ];
 
 // ---- Stationen -------------------------------------------------
 // baseIncome = €/s pro Stufe · Kosten = baseCost * growth^stufe
 export const STATIONS = [
-  { id: 'einlass',   room: 't1', name: 'Einlass',            icon: '🚪', desc: 'Mehr Gäste kommen rein',        baseCost: 10,     growth: 1.14, baseIncome: 0.5 },
-  { id: 'garderobe', room: 't1', name: 'Garderobe',          icon: '🧥', desc: 'Eintritt & Trinkgeld',          baseCost: 60,     growth: 1.15, baseIncome: 2.2 },
-  { id: 'bar',       room: 't1', name: 'Bar',                icon: '🍹', desc: 'Cocktails & Longdrinks',        baseCost: 400,    growth: 1.15, baseIncome: 10 },
-  { id: 'dj',        room: 't1', name: 'DJ-Pult',            icon: '🎧', desc: 'Beats für die Menge',           baseCost: 2500,   growth: 1.15, baseIncome: 45 },
-  { id: 'dance',     room: 't1', name: 'Tanzfläche',         icon: '💃', desc: 'Platz für mehr Leute',          baseCost: 16000,  growth: 1.16, baseIncome: 190 },
-  { id: 'shots',     room: 't1', name: 'Shot-Bar',           icon: '🥃', desc: 'Eine Runde Shots!',             baseCost: 95000,  growth: 1.16, baseIncome: 800 },
-  { id: 'vipEinlass',room: 't2', name: 'VIP-Einlass',        icon: '🎫', desc: 'Nur wer auf der Liste steht',   baseCost: 6.5e5,  growth: 1.15, baseIncome: 4200 },
-  { id: 'second',    room: 't2', name: 'Second Floor',       icon: '✨', desc: 'Die zweite Tanzfläche',         baseCost: 3.6e6,  growth: 1.15, baseIncome: 16000 },
-  { id: 'champus',   room: 't2', name: 'Champagner-Lounge',  icon: '🍾', desc: 'Flaschen mit Wunderkerzen',     baseCost: 2.2e7,  growth: 1.16, baseIncome: 68000 },
-  { id: 'tables',    room: 't2', name: 'Bottle-Service',     icon: '🛋️', desc: 'Reservierte Tische',            baseCost: 1.3e8,  growth: 1.16, baseIncome: 290000 },
-  { id: 'chill',     room: 't2', name: 'Chill-Out-Area',     icon: '🌙', desc: 'Durchatmen & weiterfeiern',     baseCost: 8e8,    growth: 1.17, baseIncome: 1.2e6 },
+  { id: 'einlass',   room: 't1', name: 'Einlass',            icon: '🚪', desc: 'Mehr Gäste kommen rein',        baseCost: 12,     growth: 1.15, baseIncome: 0.45 },
+  { id: 'garderobe', room: 't1', name: 'Garderobe',          icon: '🧥', desc: 'Eintritt & Trinkgeld',          baseCost: 75,     growth: 1.16, baseIncome: 2.0 },
+  { id: 'bar',       room: 't1', name: 'Bar',                icon: '🍹', desc: 'Cocktails & Longdrinks',        baseCost: 550,    growth: 1.16, baseIncome: 9 },
+  { id: 'dj',        room: 't1', name: 'DJ-Pult',            icon: '🎧', desc: 'Beats für die Menge',           baseCost: 3800,   growth: 1.17, baseIncome: 40 },
+  { id: 'dance',     room: 't1', name: 'Tanzfläche',         icon: '💃', desc: 'Platz für mehr Leute',          baseCost: 24000,  growth: 1.17, baseIncome: 165 },
+  { id: 'shots',     room: 't1', name: 'Shot-Bar',           icon: '🥃', desc: 'Eine Runde Shots!',             baseCost: 150000, growth: 1.17, baseIncome: 680 },
+  { id: 'vipEinlass',room: 't2', name: 'VIP-Einlass',        icon: '🎫', desc: 'Nur wer auf der Liste steht',   baseCost: 9e5,    growth: 1.16, baseIncome: 3400 },
+  { id: 'second',    room: 't2', name: 'Second Floor',       icon: '✨', desc: 'Die zweite Tanzfläche',         baseCost: 5e6,    growth: 1.16, baseIncome: 13000 },
+  { id: 'champus',   room: 't2', name: 'Champagner-Lounge',  icon: '🍾', desc: 'Flaschen mit Wunderkerzen',     baseCost: 3.2e7,  growth: 1.17, baseIncome: 55000 },
+  { id: 'tables',    room: 't2', name: 'Bottle-Service',     icon: '🛋️', desc: 'Reservierte Tische',            baseCost: 2e8,    growth: 1.17, baseIncome: 230000 },
+  { id: 'chill',     room: 't2', name: 'Chill-Out-Area',     icon: '🌙', desc: 'Durchatmen & weiterfeiern',     baseCost: 1.3e9,  growth: 1.18, baseIncome: 950000 },
+  { id: 'skybar',    room: 'roof', name: 'Skybar',           icon: '🍸', desc: 'Drinks über den Dächern',       baseCost: 8e9,    growth: 1.18, baseIncome: 4.2e6 },
+  { id: 'pool',      room: 'roof', name: 'Pool-Bar',         icon: '🏊', desc: 'Party am Rooftop-Pool',         baseCost: 5e10,   growth: 1.18, baseIncome: 1.9e7 },
+  { id: 'stars',     room: 'roof', name: 'Sternenhimmel',    icon: '🌌', desc: 'Open-Air-Floor unterm Himmel',  baseCost: 3.5e11, growth: 1.19, baseIncome: 9e7 },
 ];
 
 export const STATION_MAP = Object.fromEntries(STATIONS.map(s => [s.id, s]));
 
+// Konsum-Stationen: hier fällt einsammelbares Geld an (Pins).
+export const CASH_STATIONS = ['garderobe', 'bar', 'shots', 'champus', 'tables', 'chill', 'skybar', 'pool'];
+
 // ---- Personal ---------------------------------------------------
 export const STAFF = [
-  { id: 'bruno', name: 'Türsteher Bruno',  icon: '🕶️', desc: '+20 % auf Einlass, Garderobe & VIP-Einlass pro Stufe', baseCost: 2000,  growth: 6, max: 10, targets: ['einlass', 'garderobe', 'vipEinlass'], perLevel: 0.2 },
-  { id: 'mia',   name: 'Barkeeperin Mia',  icon: '🍸', desc: '+20 % auf Bar, Shot-Bar, Champagner & Bottle-Service pro Stufe', baseCost: 30000, growth: 6, max: 10, targets: ['bar', 'shots', 'champus', 'tables'], perLevel: 0.2 },
-  { id: 'neon',  name: 'DJ Neon',          icon: '🎛️', desc: '+8 % Gesamteinkommen & +2 s DROP-Dauer pro Stufe', baseCost: 450000, growth: 6, max: 10, global: 0.08, dropBonus: 2 },
-  { id: 'lea',   name: 'Promoterin Lea',   icon: '📣', desc: '+25 % Offline-Einnahmen & +5 % Gesamteinkommen pro Stufe', baseCost: 6e6, growth: 6, max: 10, global: 0.05, offline: 0.25 },
+  { id: 'bruno', name: 'Türsteher Bruno',  icon: '🕶️', desc: '+20 % auf Einlass, Garderobe & VIP-Einlass pro Stufe', baseCost: 2500,  growth: 6, max: 10, targets: ['einlass', 'garderobe', 'vipEinlass'], perLevel: 0.2 },
+  { id: 'mia',   name: 'Barkeeperin Mia',  icon: '🍸', desc: '+20 % auf alle Bars & Lounges pro Stufe', baseCost: 40000, growth: 6, max: 10, targets: ['bar', 'shots', 'champus', 'tables', 'skybar', 'pool'], perLevel: 0.2 },
+  { id: 'neon',  name: 'DJ Neon',          icon: '🎛️', desc: '+8 % Gesamteinkommen & +2 s DROP-Dauer pro Stufe', baseCost: 600000, growth: 6, max: 10, global: 0.08, dropBonus: 2 },
+  { id: 'lea',   name: 'Promoterin Lea',   icon: '📣', desc: '+25 % Offline-Einnahmen & +5 % Gesamteinkommen pro Stufe', baseCost: 9e6, growth: 6, max: 10, global: 0.05, offline: 0.25 },
 ];
 
 export const STAFF_MAP = Object.fromEntries(STAFF.map(s => [s.id, s]));
@@ -56,9 +99,28 @@ export const SHOP = [
   { id: 'drop',   name: 'Instant-DROP',   icon: '🔊', desc: 'Löst sofort einen DROP aus',   gems: 4 },
 ];
 
+// ---- Erfolge / Achievements ------------------------------------
+// Bedingung nutzt dieselbe questValue()-Logik wie Quests (t + v).
+export const ACHIEVEMENTS = [
+  { id: 'earn1',  icon: '💶', name: 'Erste Kasse',       t: 'earn',   v: 10_000,   txt: '10K € insgesamt verdient',       gems: 2 },
+  { id: 'earn2',  icon: '💰', name: 'Geldmaschine',      t: 'earn',   v: 10e6,     txt: '10M € insgesamt verdient',       gems: 5 },
+  { id: 'earn3',  icon: '🤑', name: 'Millionärsclub',    t: 'earn',   v: 1e9,      txt: '1B € insgesamt verdient',        gems: 10 },
+  { id: 'earn4',  icon: '🏦', name: 'Imperium',          t: 'earn',   v: 1e12,     txt: '1T € insgesamt verdient',        gems: 20 },
+  { id: 'lvl1',   icon: '⭐', name: 'Aufsteiger',        t: 'level',  v: 10,       txt: 'Level 10 erreicht',              gems: 4 },
+  { id: 'lvl2',   icon: '🌟', name: 'Szene-Größe',       t: 'level',  v: 25,       txt: 'Level 25 erreicht',              gems: 10 },
+  { id: 'drops1', icon: '🔊', name: 'Bass-Drop',         t: 'drops',  v: 10,       txt: '10 DROPs ausgelöst',             gems: 4 },
+  { id: 'drops2', icon: '📢', name: 'DROP-Meister',      t: 'drops',  v: 50,       txt: '50 DROPs ausgelöst',             gems: 12 },
+  { id: 'celeb1', icon: '🌟', name: 'Roter Teppich',     t: 'celebs', v: 5,        txt: '5 Promis begrüßt',               gems: 6 },
+  { id: 'staff1', icon: '👥', name: 'Chef-Etage',        t: 'staffLevels', v: 20,  txt: '20 Personal-Stufen',             gems: 8 },
+  { id: 't2a',    icon: '🥂', name: 'VIP-Betreiber',     t: 't2',     v: 1,        txt: 'Terminal 2 freigeschaltet',      gems: 6 },
+  { id: 'roofa',  icon: '🌃', name: 'Über den Dächern',  t: 'roof',   v: 1,        txt: 'Rooftop freigeschaltet',         gems: 15 },
+  { id: 'levels1',icon: '🏗️', name: 'Dauerbaustelle',    t: 'levels', v: 300,      txt: '300 Stationsstufen insgesamt',   gems: 10 },
+  { id: 'fame1',  icon: '♻️', name: 'Neuanfang',         t: 'fame',   v: 1,        txt: 'Einmal neu eröffnet',            gems: 15 },
+];
+
 // ---- Phasen & Quests --------------------------------------------
 // Quest-Typen: station | levels | earn | income | level | staff | staffLevels
-//              drops | celebs | boosts | t2 | fame
+//              drops | celebs | boosts | t2 | roof | fame
 export const PHASES = [
   { name: 'Eröffnungsnacht', quests: [
     { t: 'station', id: 'einlass',   v: 5,   txt: 'Einlass auf Stufe 5' },
@@ -101,28 +163,29 @@ export const PHASES = [
     { t: 'drops',   v: 5,                 txt: 'Löse 5 DROPs aus' },
     { t: 'earn',    v: 5e7,               txt: 'Verdiene insgesamt 50M €' },
   ]},
-  { name: 'Stadtgespräch', quests: [
+  { name: 'Ab aufs Dach', quests: [
+    { t: 'level',   v: 20,                txt: 'Erreiche Level 20' },
+    { t: 'roof',    v: 1,                 txt: 'Schalte das Rooftop frei' },
     { t: 'station', id: 'tables', v: 10,  txt: 'Bottle-Service auf Stufe 10' },
-    { t: 'levels',  v: 300,               txt: 'Insgesamt 300 Stationsstufen' },
     { t: 'income',  v: 1e6,               txt: 'Erreiche 1M €/s Einkommen' },
-    { t: 'celebs',  v: 5,                 txt: 'Begrüße 5 Promi-Gäste' },
     { t: 'earn',    v: 1e9,               txt: 'Verdiene insgesamt 1B €' },
   ]},
-  { name: 'After-Hour-Legende', quests: [
-    { t: 'station', id: 'chill', v: 10,   txt: 'Chill-Out-Area auf Stufe 10' },
+  { name: 'Sky is the limit', quests: [
+    { t: 'station', id: 'skybar', v: 10,  txt: 'Skybar auf Stufe 10' },
+    { t: 'station', id: 'chill',  v: 25,  txt: 'Chill-Out-Area auf Stufe 25' },
+    { t: 'celebs',  v: 5,                 txt: 'Begrüße 5 Promi-Gäste' },
     { t: 'staffLevels', v: 12,            txt: 'Insgesamt 12 Personal-Stufen' },
-    { t: 'drops',   v: 15,                txt: 'Löse 15 DROPs aus' },
-    { t: 'earn',    v: 1e10,              txt: 'Verdiene insgesamt 10B €' },
+    { t: 'earn',    v: 5e10,              txt: 'Verdiene insgesamt 50B €' },
   ]},
   { name: 'Kult-Club', quests: [
-    { t: 'level',   v: 20,                txt: 'Erreiche Level 20' },
-    { t: 'station', id: 'champus', v: 50, txt: 'Champagner-Lounge auf Stufe 50' },
+    { t: 'level',   v: 25,                txt: 'Erreiche Level 25' },
+    { t: 'station', id: 'pool',  v: 10,   txt: 'Pool-Bar auf Stufe 10' },
     { t: 'levels',  v: 600,               txt: 'Insgesamt 600 Stationsstufen' },
-    { t: 'earn',    v: 1e11,              txt: 'Verdiene insgesamt 100B €' },
+    { t: 'earn',    v: 5e11,              txt: 'Verdiene insgesamt 500B €' },
   ]},
   { name: 'Neueröffnung?', quests: [
     { t: 'fame',    v: 1,                 txt: 'Eröffne den Club neu (1 Ruf-Stern)' },
-    { t: 'station', id: 'tables', v: 50,  txt: 'Bottle-Service auf Stufe 50' },
+    { t: 'station', id: 'stars', v: 25,   txt: 'Sternenhimmel auf Stufe 25' },
     { t: 'income',  v: 1e8,               txt: 'Erreiche 100M €/s Einkommen' },
     { t: 'earn',    v: 1e12,              txt: 'Verdiene insgesamt 1T €' },
   ]},
@@ -146,8 +209,8 @@ export function getPhase(i) {
 
 export function chestReward(phaseIdx, kind) { // kind: 'mid' | 'end'
   return kind === 'mid'
-    ? { gems: 4 + phaseIdx,     minutes: 10 }
-    : { gems: 8 + 2 * phaseIdx, minutes: 30 };
+    ? { gems: 3 + Math.floor(phaseIdx / 2), minutes: 3 }
+    : { gems: 6 + phaseIdx,                 minutes: 8 };
 }
 
 // ---- Zahlen & Kosten --------------------------------------------

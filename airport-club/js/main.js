@@ -3,7 +3,7 @@
 // ============================================================
 import * as G from './game.js';
 import { initCanvas, renderFrame, setTapFeedback } from './render.js';
-import { initUI, updateHUD, offlinePopup, canvasFeedback } from './ui.js';
+import { initUI, updateHUD, offlinePopup, canvasFeedback, maybeOpenDaily } from './ui.js';
 import { startMusic, pauseAudio } from './sfx.js';
 
 // Spielstand laden (liefert ggf. Offline-Einnahmen)
@@ -13,9 +13,20 @@ initUI();
 initCanvas(document.getElementById('club-canvas'));
 setTapFeedback(canvasFeedback);
 
-if (offline && offline.money > 1) {
-  offlinePopup(offline.away, offline.money);
+// Start-Splash: erster Tap startet Audio/Musik synchron in der Geste (iOS-sicher)
+const splash = document.getElementById('splash');
+let started = false;
+function startGame() {
+  if (started) return;
+  started = true;
+  startMusic();
+  splash.classList.add('gone');
+  setTimeout(() => splash.remove(), 400);
+  if (offline && offline.money > 1) offlinePopup(offline.away, offline.money);
+  else maybeOpenDaily();
 }
+splash.addEventListener('click', startGame);
+splash.addEventListener('touchstart', startGame, { passive: true });
 
 // Haupt-Loop
 let hudTimer = 0;
@@ -27,9 +38,6 @@ function loop(now) {
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
-
-// Musik startet mit der ersten Berührung (Browser-Autoplay-Regel)
-document.addEventListener('pointerdown', () => startMusic(), { once: true });
 
 // Speichern & Audio pausieren, wenn die App in den Hintergrund geht
 document.addEventListener('visibilitychange', () => {

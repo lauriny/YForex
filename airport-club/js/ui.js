@@ -4,9 +4,16 @@
 import * as G from './game.js';
 import {
   STATIONS, STATION_MAP, STAFF, STAFF_MAP, SHOP, ROOMS,
-  T2_REQ, MILESTONE_STEP, fmt, fmtTime, costOf, milestoneMult, nextMilestone,
+  T2_REQ, ROOF_REQ, PERFORMER, AUTOCOLLECT, WHEEL, ACHIEVEMENTS,
+  autoCollectInterval, MILESTONE_STEP, fmt, fmtTime, costOf, milestoneMult, nextMilestone,
 } from './data.js';
 import { playSfx, setMusic } from './sfx.js';
+
+const ROOM_META = {
+  t1:   { icon: '🪩', name: 'Terminal 1',        sub: 'Mainfloor' },
+  t2:   { icon: '🥂', name: 'Terminal 2 · VIP',  sub: 'VIP-Etage' },
+  roof: { icon: '🌃', name: 'Rooftop',           sub: 'Sky Lounge' },
+};
 
 const $ = sel => document.querySelector(sel);
 const el = (tag, cls, html) => {
@@ -42,6 +49,23 @@ export function updateHUD() {
     ? '🔊 DROP! x3'
     : `🔥 Hype ${Math.floor(G.state.hype)}%`;
   $('#hype-meter').classList.toggle('dropping', G.dropActive());
+
+  // Live-Event-Banner
+  const banner = $('#event-banner');
+  const ev = G.eventDef();
+  if (ev) {
+    const left = Math.ceil((G.state.event.expires - Date.now()) / 1000);
+    banner.innerHTML = `${ev.icon} <b>${ev.name}</b> · x${ev.mult} Einkommen · ${left}s`;
+    banner.classList.add('show');
+  } else banner.classList.remove('show');
+
+  // Seiten-Buttons: Badges & Show-Act-Sichtbarkeit
+  $('#badge-daily').classList.toggle('on', G.dailyDue());
+  const claimable = G.achievementsInfo().some(a => a.done && !a.claimed);
+  const badgeAch = $('#badge-ach');
+  badgeAch.classList.toggle('on', claimable);
+  badgeAch.textContent = claimable ? '!' : '';
+  $('#btn-showact').classList.toggle('hidden', !(G.state.performer.unlocked || G.state.level >= PERFORMER.level));
 
   // Boost-Button
   const bs = G.boostState();
@@ -205,24 +229,28 @@ function openStationsModal() {
       list.innerHTML = '';
       for (const roomDef of ROOMS) {
         list.appendChild(el('div', 'list-caption', `${roomDef.icon} ${roomDef.name} · ${roomDef.sub}`));
-        if (roomDef.id === 't2' && !G.state.t2Unlocked) {
-          // Nachbarraum noch gesperrt → Freischalt-Zeile
-          const lvlOk = G.state.level >= T2_REQ.level;
-          const afford = G.state.money >= T2_REQ.cost;
-          const row = el('div', 'station-row' + (lvlOk && afford ? '' : ' dim'));
+        // Gesperrter Raum → Freischalt-Zeile (Terminal 2 / Rooftop)
+        if (!G.roomUnlocked(roomDef.id)) {
+          const isRoof = roomDef.id === 'roof';
+          const req = isRoof ? ROOF_REQ : T2_REQ;
+          const ready = isRoof ? G.canUnlockRoof() : G.canUnlockT2();
+          const lvlOk = G.state.level >= req.level;
+          const hint = isRoof && !G.state.t2Unlocked ? 'Erst Terminal 2 freischalten'
+            : lvlOk ? 'Bereit zur Eröffnung!' : 'Ab Level ' + req.level + ' (du: Level ' + G.state.level + ')';
+          const row = el('div', 'station-row' + (ready ? '' : ' dim'));
           row.innerHTML = `
             <div class="st-icon">🔒</div>
             <div class="st-info">
-              <div class="st-name">VIP-Etage gesperrt</div>
-              <div class="st-desc">${lvlOk ? 'Bereit zur Eröffnung!' : 'Ab Level ' + T2_REQ.level + ' (du: Level ' + G.state.level + ')'}</div>
+              <div class="st-name">${roomDef.name} gesperrt</div>
+              <div class="st-desc">${hint}</div>
             </div>
-            <button class="btn-buy${lvlOk && afford ? '' : ' disabled'}">
-              <span>Freischalten</span><b>${fmt(T2_REQ.cost)} €</b>
+            <button class="btn-buy${ready ? '' : ' disabled'}">
+              <span>Freischalten</span><b>${fmt(req.cost)} €</b>
             </button>`;
           row.querySelector('.btn-buy').addEventListener('click', () => {
-            if (G.unlockT2()) {
+            if (isRoof ? G.unlockRoof() : G.unlockT2()) {
               playSfx('chest'); confetti(40); renderRows(); updateHUD();
-              toast('🎉 Terminal 2 ist eröffnet! VIP-Gäste strömen die Treppe hoch!');
+              toast(`🎉 ${roomDef.name} ist eröffnet!`);
             }
           });
           list.appendChild(row);
@@ -262,6 +290,28 @@ function openStaffModal() {
     body.appendChild(list);
     function render() {
       list.innerHTML = '';
+      // Auto-Kassierer (sammelt Geld-Pins von allein ein)
+      {
+        const lvl = G.state.autoCollect;
+        const maxed = lvl >= AUTOCOLLECT.max;
+        const cost = G.autoCollectCost();
+        const afford = !maxed && G.state.money >= cost;
+        const row = el('div', 'station-row' + (afford ? '' : ' dim'));
+        const eff = lvl > 0 ? `Sammelt alle ${autoCollectInterval(lvl)}s automatisch ein` : 'Sammelt Geld-Pins automatisch ein';
+        row.innerHTML = `
+          <div class="st-icon">🤖</div>
+          <div class="st-info">
+            <div class="st-name">Auto-Kassierer <span class="st-lvl">${lvl > 0 ? 'Stufe ' + lvl : 'Nicht aktiv'}</span></div>
+            <div class="st-desc">${eff}</div>
+          </div>
+          <button class="btn-buy${afford ? '' : ' disabled'}">
+            ${maxed ? '<b>MAX</b>' : `<span>${lvl === 0 ? 'Aktivieren' : 'Schneller'}</span><b>${fmt(cost)} €</b>`}
+          </button>`;
+        if (!maxed) row.querySelector('.btn-buy').addEventListener('click', () => {
+          if (G.buyAutoCollect()) { playSfx('buy'); confetti(10); render(); updateHUD(); }
+        });
+        list.appendChild(row);
+      }
       for (const s of STAFF) {
         const lvl = G.state.staff[s.id] || 0;
         const maxed = lvl >= s.max;
@@ -320,45 +370,52 @@ function openShopModal() {
 }
 
 // ---- Räume-Modal ----------------------------------------------------------
+function unlockedRoomCard(id) {
+  const m = ROOM_META[id];
+  const card = el('div', 'room-card unlocked');
+  const isPerf = G.state.performer.unlocked && G.state.performer.room === id;
+  card.innerHTML = `<div class="room-emoji">${m.icon}</div>
+    <div class="room-info"><b>${m.name}</b><span>${m.sub} · ${fmt(G.roomIncome(id))} €/s${isPerf ? ' · 💃 Show-Act' : ''}</span></div>
+    <div class="room-emoji">✔️</div>`;
+  return card;
+}
+
+function lockedRoomCard(id, req, canUnlock, doUnlock, extraHint) {
+  const m = ROOM_META[id];
+  const lvlOk = G.state.level >= req.level;
+  const afford = G.state.money >= req.cost;
+  const ready = canUnlock();
+  const card = el('div', 'room-card locked');
+  const hint = extraHint || (lvlOk ? 'Bereit zur Eröffnung!' : 'Ab Level ' + req.level + ' (du: ' + G.state.level + ')');
+  card.innerHTML = `<div class="room-emoji">🔒</div>
+    <div class="room-info"><b>${m.name}</b><span>${hint}</span></div>
+    <button class="btn-buy${ready ? '' : ' disabled'}"><span>Freischalten</span><b>${fmt(req.cost)} €</b></button>`;
+  card.querySelector('button').addEventListener('click', () => {
+    if (doUnlock()) {
+      playSfx('chest'); confetti(40); updateHUD();
+      toast(`🎉 ${m.name} ist eröffnet!`);
+    }
+  });
+  return card;
+}
+
 function openRoomsModal() {
-  openModal('📍 Räume', body => {
+  openModal('📍 Räume & Etagen', body => {
     const list = el('div', 'room-list');
     body.appendChild(list);
     function render() {
       list.innerHTML = '';
-      // Terminal 1
-      const r1 = el('div', 'room-card unlocked');
-      r1.innerHTML = `<div class="room-emoji">🪩</div>
-        <div class="room-info"><b>Terminal 1</b><span>Mainfloor · ${fmt(G.roomIncome('t1'))} €/s</span></div>
-        <div class="room-emoji">✔️</div>`;
-      list.appendChild(r1);
-      // Terminal 2 (Nachbarraum oben)
-      const r2 = el('div', 'room-card ' + (G.state.t2Unlocked ? 'unlocked' : 'locked'));
-      if (G.state.t2Unlocked) {
-        r2.innerHTML = `<div class="room-emoji">🥂</div>
-          <div class="room-info"><b>Terminal 2</b><span>VIP-Etage · ${fmt(G.roomIncome('t2'))} €/s</span></div>
-          <div class="room-emoji">✔️</div>`;
-      } else {
-        const lvlOk = G.state.level >= T2_REQ.level;
-        const afford = G.state.money >= T2_REQ.cost;
-        r2.innerHTML = `<div class="room-emoji">🔒</div>
-          <div class="room-info"><b>Terminal 2 · VIP</b>
-            <span>${lvlOk ? 'Bereit zur Eröffnung!' : 'Ab Level ' + T2_REQ.level + ' (du: ' + G.state.level + ')'}</span></div>
-          <button class="btn-buy${lvlOk && afford ? '' : ' disabled'}"><span>Freischalten</span><b>${fmt(T2_REQ.cost)} €</b></button>`;
-        r2.querySelector('button').addEventListener('click', () => {
-          if (G.unlockT2()) {
-            playSfx('chest'); confetti(40); closeModal(); updateHUD();
-            toast('🎉 Terminal 2 ist eröffnet! VIP-Gäste strömen rein!');
-          }
-        });
-      }
-      list.appendChild(r2);
-      // Rooftop-Teaser
-      const r3 = el('div', 'room-card teaser');
-      r3.innerHTML = `<div class="room-emoji">🌃</div>
-        <div class="room-info"><b>Rooftop „Tower“</b><span>Demnächst … 👀</span></div>
-        <button class="btn-buy disabled"><b>Bald</b></button>`;
-      list.appendChild(r3);
+      list.appendChild(unlockedRoomCard('t1'));
+      // Terminal 2
+      if (G.state.t2Unlocked) list.appendChild(unlockedRoomCard('t2'));
+      else list.appendChild(lockedRoomCard('t2', T2_REQ, G.canUnlockT2, G.unlockT2));
+      // Rooftop
+      if (G.state.roofUnlocked) list.appendChild(unlockedRoomCard('roof'));
+      else list.appendChild(lockedRoomCard('roof', ROOF_REQ, G.canUnlockRoof, G.unlockRoof,
+        G.state.t2Unlocked ? null : 'Erst Terminal 2 freischalten'));
+
+      // Show-Act (Tänzerin) — freischalten oder in einen Raum stellen
+      list.appendChild(performerCard(render));
 
       // Neueröffnung (Prestige)
       const pi = G.prestigeInfo();
@@ -370,6 +427,57 @@ function openRoomsModal() {
         <button class="btn-buy${pi.available ? '' : ' disabled'}"><b>${pi.available ? '+' + pi.gain + ' ⭐' : '⭐'}</b></button>`;
       if (pi.available) pr.querySelector('button').addEventListener('click', () => openPrestigeConfirm(pi));
       list.appendChild(pr);
+    }
+    render();
+    setRefresher(render);
+  });
+}
+
+// ---- Show-Act / Tänzerin ----------------------------------------------------
+function performerCard(refresh) {
+  const card = el('div', 'room-card ' + (G.state.performer.unlocked ? 'perf' : 'locked'));
+  if (!G.state.performer.unlocked) {
+    const lvlOk = G.state.level >= PERFORMER.level;
+    const ready = G.canUnlockPerformer();
+    card.innerHTML = `<div class="room-emoji">💃</div>
+      <div class="room-info"><b>Show-Act engagieren</b>
+        <span>${lvlOk ? `Boostet ihren Raum um x${PERFORMER.roomMult}!` : 'Ab Level ' + PERFORMER.level + ' (du: ' + G.state.level + ')'}</span></div>
+      <button class="btn-buy${ready ? '' : ' disabled'}"><span>Engagieren</span><b>${fmt(PERFORMER.cost)} €</b></button>`;
+    card.querySelector('button').addEventListener('click', () => {
+      if (G.unlockPerformer()) { playSfx('chest'); confetti(24); refresh(); updateHUD(); toast('💃 Show-Act engagiert! Stell sie in einen Raum.'); }
+    });
+  } else {
+    card.innerHTML = `<div class="room-emoji">💃</div>
+      <div class="room-info"><b>Show-Act</b><span>Boostet ihren Raum um x${PERFORMER.roomMult} Einkommen</span></div>`;
+    const btn = el('button', 'btn-flat small-flat', 'Umstellen ▸');
+    btn.addEventListener('click', () => openPerformerModal());
+    card.appendChild(btn);
+  }
+  return card;
+}
+
+function openPerformerModal() {
+  if (!G.state.performer.unlocked) { openRoomsModal(); return; }
+  openModal('💃 Show-Act platzieren', body => {
+    body.appendChild(el('div', 'list-caption', `Die Tänzerin boostet den Raum, in dem sie steht, um <b>x${PERFORMER.roomMult}</b> Einkommen & mehr Hype. Immer nur ein Raum!`));
+    const list = el('div', 'station-list');
+    body.appendChild(list);
+    function render() {
+      list.innerHTML = '';
+      for (const id of ['t1', 't2', 'roof']) {
+        if (!G.roomUnlocked(id)) continue;
+        const m = ROOM_META[id];
+        const here = G.state.performer.room === id;
+        const row = el('div', 'station-row' + (here ? ' active-row' : ''));
+        row.innerHTML = `<div class="st-icon">${m.icon}</div>
+          <div class="st-info"><div class="st-name">${m.name}</div>
+            <div class="st-desc">${fmt(G.roomIncome(id))} €/s${here ? ' · 💃 hier!' : ''}</div></div>
+          <button class="btn-buy${here ? ' disabled' : ''}"><b>${here ? '✔ hier' : 'Hierhin'}</b></button>`;
+        if (!here) row.querySelector('button').addEventListener('click', () => {
+          if (G.setPerformerRoom(id)) { playSfx('buy'); render(); updateHUD(); toast(`💃 Show-Act ist jetzt in ${m.name}!`); }
+        });
+        list.appendChild(row);
+      }
     }
     render();
     setRefresher(render);
@@ -414,6 +522,82 @@ function openQuestModal() {
         list.appendChild(row);
       }
       body.appendChild(list);
+    }
+    render();
+    setRefresher(render);
+  });
+}
+
+// ---- Täglicher Bonus / Glücksrad -------------------------------------------------
+function openDailyModal() {
+  openModal('🎁 Täglicher Bonus', body => {
+    const due = G.dailyDue();
+    body.appendChild(el('div', 'list-caption',
+      due ? `Dreh am Rad! Aktuelle Streak: <b>${G.state.daily.streak}🔥</b> — mehr Streak = mehr Belohnung.`
+          : `Heute schon abgeholt — komm morgen wieder! Streak: <b>${G.state.daily.streak}🔥</b>`));
+    const stage = el('div', 'wheel-stage');
+    const N = WHEEL.length, seg = 360 / N;
+    const grad = WHEEL.map((w, i) => `${w.color} ${i * seg}deg ${(i + 1) * seg}deg`).join(',');
+    const wheel = el('div', 'wheel');
+    wheel.style.background = `conic-gradient(${grad})`;
+    WHEEL.forEach((w, i) => {
+      const lab = el('div', 'wheel-lab', w.label);
+      lab.style.transform = `translate(-50%,-50%) rotate(${i * seg + seg / 2}deg) translateY(-60px)`;
+      wheel.appendChild(lab);
+    });
+    stage.appendChild(wheel);
+    stage.appendChild(el('div', 'wheel-pointer', '▼'));
+    stage.appendChild(el('div', 'wheel-hub', '🎡'));
+    body.appendChild(stage);
+    const btn = el('button', 'btn-big', due ? '🎡 Drehen!' : 'Schließen');
+    body.appendChild(btn);
+    let spinning = false;
+    btn.addEventListener('click', () => {
+      if (!due) { closeModal(); return; }
+      if (spinning) return;
+      spinning = true; btn.classList.add('disabled');
+      const idx = G.spinWheelIndex();
+      const target = 360 * 6 - (idx * seg + seg / 2);
+      wheel.style.transition = 'transform 3.6s cubic-bezier(.15,.72,.24,1.05)';
+      requestAnimationFrame(() => { wheel.style.transform = `rotate(${target}deg)`; });
+      setTimeout(() => {
+        const r = G.claimWheel(idx);
+        playSfx('chest'); confetti(46);
+        let msg = '🎁';
+        if (r) { if (r.money) msg = '+' + fmt(r.money) + ' €'; else if (r.gems) msg = '+' + r.gems + ' 💎'; else if (r.boost) msg = '⚡ x2 Boost!'; else if (r.drop) msg = '🔊 DROP!'; }
+        toast(`🎁 Gewonnen: ${msg}${r ? ' · Streak ' + r.streak + '🔥' : ''}`);
+        updateHUD();
+        btn.textContent = '✔ Eingesammelt — bis morgen!';
+      }, 3700);
+    });
+  });
+}
+export function maybeOpenDaily() { if (G.dailyDue()) openDailyModal(); }
+
+// ---- Erfolge / Achievements ------------------------------------------------------
+function openAchievementsModal() {
+  openModal('🏆 Erfolge', body => {
+    const list = el('div', 'quest-list');
+    body.appendChild(list);
+    function render() {
+      list.innerHTML = '';
+      for (const a of G.achievementsInfo()) {
+        const pct = a.done ? 100 : Math.min(100, a.value / a.v * 100);
+        const row = el('div', 'quest-row' + (a.done ? ' done' : ''));
+        row.innerHTML = `
+          <div class="q-check">${a.claimed ? '✔' : a.icon}</div>
+          <div class="q-info">
+            <div class="q-txt">${a.name} — ${a.txt}</div>
+            <div class="q-bar"><div class="q-fill" style="width:${pct}%"></div></div>
+          </div>`;
+        const canClaim = a.done && !a.claimed;
+        const btn = el('button', 'btn-buy gem' + (canClaim ? '' : ' disabled'), `<b>${a.claimed ? '✔' : '+' + a.gems + ' 💎'}</b>`);
+        if (canClaim) btn.addEventListener('click', () => {
+          if (G.claimAchievement(a.id)) { playSfx('chest'); confetti(16); render(); updateHUD(); }
+        });
+        row.appendChild(btn);
+        list.appendChild(row);
+      }
     }
     render();
     setRefresher(render);
@@ -516,6 +700,10 @@ export function initUI() {
       toast('Boost lädt noch … (oder ⚡ im Shop sofort starten)');
     }
   });
+  // Schwebende Seiten-Buttons
+  $('#btn-daily').addEventListener('click', openDailyModal);
+  $('#btn-ach').addEventListener('click', openAchievementsModal);
+  $('#btn-showact').addEventListener('click', openPerformerModal);
 
   // Spiel-Events
   G.on('levelup', ({ level, gems }) => {
@@ -538,6 +726,12 @@ export function initUI() {
   G.on('drop', () => { playSfx('drop'); toast('🔊 DROP! Alle rasten aus — x3 Einkommen!'); });
   G.on('celebSpawn', () => toast('🌟 Ein Promi ist im Club! Tipp ihn an!'));
   G.on('t2unlocked', () => {});
+  G.on('roofunlocked', () => { playSfx('chest'); confetti(50); toast('🌃 Rooftop eröffnet — Sky Lounge über den Dächern!'); });
+  G.on('performer', () => {});
+  G.on('autocollect', () => {});
+  G.on('event', def => { playSfx('boost'); toast(`${def.icon} ${def.name}! ${def.txt}`); });
+  G.on('eventEnd', () => {});
+  G.on('achievement', a => { playSfx('level'); toast(`🏆 Erfolg: ${a.name} · +${a.gems} 💎`); });
   G.on('boost', () => {});
 
   updateHUD();

@@ -40,9 +40,16 @@
     <!-- Upgrade-Karten -->
     <div id="upgrade-cards"></div>
 
-    <!-- Club-Ansicht (beide Terminals im Grundriss) -->
+    <!-- Club-Ansicht (alle Räume im Grundriss) -->
     <div id="club-view">
       <canvas id="club-canvas"></canvas>
+      <div id="event-banner"></div>
+      <!-- schwebende Seiten-Buttons (Tycoon-Style) -->
+      <div id="side-rail">
+        <button class="rail-btn" id="btn-daily" title="Täglicher Bonus">🎁<span class="rail-badge" id="badge-daily">!</span></button>
+        <button class="rail-btn" id="btn-ach" title="Erfolge">🏆<span class="rail-badge" id="badge-ach"></span></button>
+        <button class="rail-btn hidden" id="btn-showact" title="Show-Act">💃</button>
+      </div>
       <div id="income-rate" title="Einkommen pro Sekunde">0 €/s</div>
       <div id="hype-meter">
         <div id="hype-fill"></div>
@@ -68,6 +75,17 @@
     <div id="floats"></div>
     <div id="modal-root"></div>
     <div id="toast"></div>
+
+    <!-- Start-Splash (startet Musik & Audio zuverlässig beim ersten Tap) -->
+    <div id="splash">
+      <div class="splash-inner">
+        <div class="splash-logo">✈</div>
+        <h1 class="splash-title">AIRPORT</h1>
+        <p class="splash-sub">Club Simulator</p>
+        <button id="splash-start" class="splash-btn">▶ Tippen zum Starten</button>
+        <p class="splash-hint">🔊 Mit Sound & Clubmusik</p>
+      </div>
+    </div>
   </div>
 
   <script type="module" src="js/main.js"></script>
