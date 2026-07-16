@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#171b33">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Airport – Club Simulator</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+
+    <!-- HUD oben -->
+    <header id="hud">
+      <button id="btn-settings" title="Einstellungen">⚙️</button>
+      <div class="pill" id="hud-level"><span class="pill-icon">⭐</span><span class="pill-val">Lvl 1</span></div>
+      <div class="hud-spacer"></div>
+      <div class="pill" id="hud-gems"><span class="pill-icon">💎</span><span class="pill-val">0</span></div>
+      <div class="pill" id="hud-cash"><span class="pill-icon">💵</span><span class="pill-val">0</span></div>
+    </header>
+
+    <!-- Phasen-Leiste mit Truhen -->
+    <button id="phasebar" title="Aufgaben ansehen">
+      <div class="phase-clip">📋</div>
+      <div class="phase-track-wrap">
+        <div class="phase-label" id="phase-name">Phase 1</div>
+        <div class="phase-track">
+          <div class="phase-fill" id="phase-fill"></div>
+          <span class="phase-count" id="phase-count">0/4</span>
+        </div>
+      </div>
+      <div class="phase-chest" id="chest-mid">📦</div>
+      <div class="phase-chest" id="chest-end">🎁</div>
+    </button>
+
+    <!-- Upgrade-Karten -->
+    <div id="upgrade-cards"></div>
+
+    <!-- Club-Ansicht -->
+    <div id="club-view">
+      <div id="room-tabs"></div>
+      <canvas id="club-canvas"></canvas>
+      <div id="income-rate" title="Einkommen pro Sekunde">0 €/s</div>
+      <div id="hype-meter">
+        <div id="hype-fill"></div>
+        <span id="hype-label">🔥 Hype 0%</span>
+      </div>
+      <div id="tap-hint">👆 Tippe in den Club für Hype & Trinkgeld!</div>
+    </div>
+
+    <!-- Untere Navigation -->
+    <nav id="bottomnav">
+      <button class="nav-btn" id="btn-shop"><span class="nav-icon">🏪</span><span class="nav-label">Shop</span></button>
+      <button class="nav-btn" id="btn-stations"><span class="nav-icon">🔨</span><span class="nav-label">Ausbau</span></button>
+      <button class="nav-btn boost" id="btn-boost">
+        <span id="boost-timer" class="boost-chip">▶ Bereit</span>
+        <span class="nav-icon">💵</span>
+        <span class="nav-label" id="boost-label">x2 Einkommen</span>
+      </button>
+      <button class="nav-btn" id="btn-staff"><span class="nav-icon">👥</span><span class="nav-label">Personal</span></button>
+      <button class="nav-btn" id="btn-rooms"><span class="nav-icon">📍</span><span class="nav-label">Räume</span></button>
+    </nav>
+
+    <!-- Overlays -->
+    <div id="floats"></div>
+    <div id="modal-root"></div>
+    <div id="toast"></div>
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
