@@ -17,12 +17,34 @@ let startTime = performance.now();
 // ---------------- Iso-Projektion & Kamera ----------------
 // Welt in Tiles: x → rechts-unten, y → links-unten, z → hoch.
 const TILE = { w: 32, h: 16, z: 15 };
-const cam = { s: 1, ox: 0, oy: 0 };
+const cam = { s: 1, ox: 0, oy: 0 };        // aktuelle (animierte) Transform
+let camOver = { s: 1, ox: 0, oy: 0 };      // Übersicht
+let camRooms = {};                          // id -> Detail-Transform
+let focusRoom = null;                       // null = Übersicht, sonst Raum-Id
+let focusAmt = 0;                            // 0..1 (Detail-Fokus, animiert)
+let lastFocusRoom = 't1';                    // zuletzt fokussierter Raum (für Vignette-Ausblenden)
 
+// rohe Iso-Projektion (ohne Kamera) — für Kamera-Berechnungen
+function projRaw(x, y, z = 0) {
+  return { x: (x - y) * TILE.w * 0.5, y: (x + y) * TILE.h * 0.5 - z * TILE.z };
+}
 function iso(x, y, z = 0) {
+  const p = projRaw(x, y, z);
+  return { x: cam.ox + p.x * cam.s, y: cam.oy + p.y * cam.s };
+}
+
+// Transform, die eine Punktwolke ins View einpasst
+function fitTransform(pts, padX, padY, zoom = 1, biasY = 0) {
+  let minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
+  for (const c of pts) {
+    minX = Math.min(minX, c.x); maxX = Math.max(maxX, c.x);
+    minY = Math.min(minY, c.y); maxY = Math.max(maxY, c.y);
+  }
+  const s = Math.min((W - padX * 2) / (maxX - minX), (H - padY * 2) / (maxY - minY)) * zoom;
   return {
-    x: cam.ox + (x - y) * TILE.w * 0.5 * cam.s,
-    y: cam.oy + (x + y) * TILE.h * 0.5 * cam.s - z * TILE.z * cam.s,
+    s,
+    ox: (W - (maxX - minX) * s) / 2 - minX * s,
+    oy: (H - (maxY - minY) * s) / 2 - minY * s + biasY,
   };
 }
 
@@ -95,31 +117,45 @@ function resize() {
   setupCamera();
 }
 
-// Kamera so skalieren/verschieben, dass die ganze Szene (Räume + Vorplatz) passt
+// Übersichts- und Raum-Detail-Kameras berechnen
 function setupCamera() {
-  cam.s = 1; cam.ox = 0; cam.oy = 0;
-  // Extrempunkte der Welt inkl. Vorplatz vorne und Wandhöhe oben
-  const pts = [
-    iso(RM.klo.x - 0.6, RM.klo.y - 0.6, WALL_H + 0.6),  // hinten oben
-    iso(RM.t2.x + RM.t2.w + 0.6, RM.t2.y - 0.6, WALL_H),// rechts hinten
-    iso(RM.roof.x + RM.roof.w + 0.6, RM.roof.y + RM.roof.d + 0.6, 0), // rechts vorne
-    iso(RM.t1.x - 1.4, RM.t1.y + RM.t1.d + 0.6, 0),     // links
-    iso(ENTRY_OUT.x + 3.2, ENTRY_OUT.y + 1.4, 0),       // Vorplatz vorne unten
-    iso(ENTRY_OUT.x - 3.2, ENTRY_OUT.y + 1.4, 0),
+  // Übersicht: ganze Szene inkl. Vorplatz
+  const overPts = [
+    projRaw(RM.klo.x - 0.6, RM.klo.y - 0.6, WALL_H + 0.6),
+    projRaw(RM.t2.x + RM.t2.w + 0.6, RM.t2.y - 0.6, WALL_H),
+    projRaw(RM.roof.x + RM.roof.w + 0.6, RM.roof.y + RM.roof.d + 0.6, 0),
+    projRaw(RM.t1.x - 1.4, RM.t1.y + RM.t1.d + 0.6, 0),
+    projRaw(ENTRY_OUT.x + 3.2, ENTRY_OUT.y + 1.4, 0),
+    projRaw(ENTRY_OUT.x - 3.2, ENTRY_OUT.y + 1.4, 0),
   ];
-  let minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
-  for (const c of pts) {
-    minX = Math.min(minX, c.x); maxX = Math.max(maxX, c.x);
-    minY = Math.min(minY, c.y); maxY = Math.max(maxY, c.y);
+  camOver = fitTransform(overPts, W * 0.03, H * 0.03, 1.12, H * 0.03);
+
+  // Raum-Detail: einzelnen Raum groß einpassen (Nachbarn dürfen am Rand bleiben)
+  camRooms = {};
+  for (const id in RM) {
+    const r = RM[id];
+    const m = 0.8;
+    const pts = [
+      projRaw(r.x - m, r.y - m, WALL_H + 0.5),
+      projRaw(r.x + r.w + m, r.y - m, WALL_H),
+      projRaw(r.x + r.w + m, r.y + r.d + m, 0),
+      projRaw(r.x - m, r.y + r.d + m, 0),
+    ];
+    camRooms[id] = fitTransform(pts, W * 0.02, H * 0.18, 1.0, 0);
   }
-  const padX = W * 0.03, padY = H * 0.03;
-  const ZOOM = 1.12;   // etwas näher dran, damit der Club dominiert
-  const s = Math.min((W - padX * 2) / (maxX - minX), (H - padY * 2) / (maxY - minY)) * ZOOM;
-  cam.s = s;
-  minX *= s; maxX *= s; minY *= s; maxY *= s;
-  cam.ox = (W - (maxX - minX)) / 2 - minX;
-  cam.oy = (H - (maxY - minY)) / 2 - minY + H * 0.03;   // vertikal zentriert, minimal tiefer
+
+  if (!focusRoom) Object.assign(cam, camOver);
 }
+
+// Raum betreten / verlassen (von Tap oder UI aufgerufen)
+export function enterRoom(id) {
+  if (!roomUnlocked(id) || !RM[id]) return false;
+  focusRoom = id;
+  return true;
+}
+export function exitRoom() { focusRoom = null; }
+export function currentRoom() { return focusRoom; }
+export function inRoomView() { return focusAmt > 0.5; }
 
 // ---------------- Interaktion ----------------
 let onTapFeedback = null;
@@ -154,22 +190,31 @@ function onTap(e) {
       }
     }
   }
-  // Geld-Pins einsammeln (an den Konsum-Stationen)
+  // Geld-Pins einsammeln (Iso-Übersicht ODER Top-Down-Detail)
+  const roomV = inRoomView();
   for (const [stId, anchorId] of Object.entries(PIN_AT)) {
     if ((state.stationCash[stId] || 0) < 1) continue;
     const a = A[anchorId];
-    const s = iso(a.x, a.y, 1.15);
-    if (Math.hypot(mx - s.x, my - s.y) < 30) {
+    if (roomV && a.room !== lastFocusRoom) continue;
+    const s = roomV ? (() => { const p = detailProj(a.x, a.y); return { x: p.x, y: p.y - dTileW() * 0.5 }; })() : iso(a.x, a.y, 1.15);
+    if (Math.hypot(mx - s.x, my - s.y) < (roomV ? 40 : 30)) {
       const amount = collectStation(stId);
       if (amount > 0 && onTapFeedback) onTapFeedback({ type: 'collect', x: e.clientX, y: e.clientY, amount });
       return;
     }
   }
-  // Tap auf gesperrten Raum → passender Freischalt-Dialog
-  for (const id of ['t2', 'roof']) {
-    if (!roomUnlocked(id) && pointInQuad(mx, my, roomFloorQuad(RM[id]))) {
-      if (onTapFeedback) onTapFeedback({ type: 'locked', room: id });
-      return;
+  // In der Übersicht: Tap auf einen Raum wählt ihn aus
+  if (!inRoomView()) {
+    for (const id of ['roof', 't2', 't1', 'klo']) {
+      if (pointInQuad(mx, my, roomFloorQuad(RM[id]))) {
+        if (roomUnlocked(id)) {
+          enterRoom(id);
+          if (onTapFeedback) onTapFeedback({ type: 'enterRoom', room: id });
+        } else {
+          if (onTapFeedback) onTapFeedback({ type: 'locked', room: id });
+        }
+        return;
+      }
     }
   }
   // Sonst: kleiner Hype-Schub (optional)
@@ -368,11 +413,12 @@ function screenShadow(sx, sy, rx, ry) {
   ctx.beginPath(); ctx.ellipse(sx, sy, rx, ry, 0, 0, Math.PI * 2); ctx.fill();
 }
 
-// ---------------- Figuren (Iso-Billboard, detailliert) ----------------
+// ---------------- Figuren (Billboard, detailliert) ----------------
 function drawPerson(wx, wy, o = {}) {
-  const s = (o.s || 1) * cam.s * 1.0;
   const p = iso(wx, wy, 0);
-  const px = p.x, py = p.y - (o.lift || 0);
+  drawPersonAt(p.x, p.y - (o.lift || 0), (o.s || 1) * cam.s, o);
+}
+function drawPersonAt(px, py, s, o = {}) {
   ctx.save();
   if (o.alpha !== undefined) ctx.globalAlpha = o.alpha;
   screenShadow(px, py, 7 * s, 3.2 * s);
@@ -760,6 +806,30 @@ function drawLockOverlay(r, title, hint) {
   ctx.fillText(hint, c.x, c.y + 26 * cam.s);
 }
 
+// ---------------- Fokus-Vignette (Raum-Detail) ----------------
+function drawFocusVignette(id, amt) {
+  const r = RM[id];
+  if (!r) return;
+  // Bildschirm-Umfang des Raums bestimmen
+  const cs = [iso(r.x, r.y, 0), iso(r.x + r.w, r.y, 0), iso(r.x + r.w, r.y + r.d, 0), iso(r.x, r.y + r.d, 0),
+              iso(r.x + r.w / 2, r.y + r.d / 2, WALL_H)];
+  let cx = 0, cy = 0;
+  for (const c of cs) { cx += c.x; cy += c.y; }
+  cx /= cs.length; cy /= cs.length;
+  let rad = 0;
+  for (const c of cs) rad = Math.max(rad, Math.hypot(c.x - cx, c.y - cy));
+  rad *= 1.35;
+  ctx.save();
+  ctx.fillStyle = `rgba(8,5,20,${0.7 * amt})`;
+  ctx.fillRect(0, 0, W, H);
+  ctx.globalCompositeOperation = 'destination-out';
+  const g = ctx.createRadialGradient(cx, cy - rad * 0.1, rad * 0.5, cx, cy - rad * 0.1, rad);
+  g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(cx, cy - rad * 0.1, rad, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+
 // ---------------- Geld-Pins ----------------
 function drawCashPins(t) {
   let idx = 0;
@@ -801,6 +871,167 @@ function updateParticles(dt) {
   }
 }
 
+// ============================================================
+//  Top-Down-Detailansicht eines Raums (v2-Look, überarbeitet)
+//  Bildschirmfüllende Draufsicht, gespeist aus derselben Sim.
+// ============================================================
+function dPad() { return { x: W * 0.05, top: H * 0.088, bot: H * 0.055 }; }
+function detailProj(wx, wy) {
+  const r = RM[lastFocusRoom], p = dPad();
+  return { x: p.x + (wx - r.x) / r.w * (W - 2 * p.x), y: p.top + (wy - r.y) / r.d * (H - p.top - p.bot) };
+}
+function dTileW() { const r = RM[lastFocusRoom], p = dPad(); return (W - 2 * p.x) / r.w; }
+function dPersonScale() { return dTileW() / 10.5; }
+
+function dRect(wx, wy, ww, wd, fill, stroke, rad = 8) {
+  const a = detailProj(wx, wy), b = detailProj(wx + ww, wy + wd);
+  ctx.beginPath(); ctx.roundRect(a.x, a.y, b.x - a.x, b.y - a.y, rad);
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 2; ctx.stroke(); }
+}
+function dLabel(wx, wy, txt, color, px = 11) {
+  const p = detailProj(wx, wy);
+  ctx.font = `800 ${px}px system-ui, sans-serif`; ctx.textAlign = 'center';
+  ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillText(txt, p.x + 1, p.y + 1);
+  ctx.fillStyle = color; ctx.fillText(txt, p.x, p.y);
+}
+function dTiles(wx, wy, ww, wd, cols, rows, palette, t, beat) {
+  const a = detailProj(wx, wy), b = detailProj(wx + ww, wy + wd);
+  const cw = (b.x - a.x) / cols, ch = (b.y - a.y) / rows;
+  for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) {
+    const pulse = 0.5 + 0.5 * Math.sin(beat + i + j);
+    let col;
+    if (palette === 'vip') col = `hsl(${42 + ((i + j) % 3) * 8}, 88%, ${34 + pulse * 22}%)`;
+    else if (palette === 'roof') col = `hsl(${(t * 30 + (i + j) * 24) % 360}, 70%, ${30 + pulse * 18}%)`;
+    else col = `hsl(${((i + j) * 42 + t * 80) % 360}, 85%, ${dropActive() ? 52 + pulse * 16 : 40 + pulse * 14}%)`;
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.roundRect(a.x + i * cw + 1.5, a.y + j * ch + 1.5, cw - 3, ch - 3, 4); ctx.fill();
+  }
+  ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.roundRect(a.x - 2, a.y - 2, b.x - a.x + 4, b.y - a.y + 4, 8); ctx.stroke();
+}
+function dPerson(wx, wy, o) {
+  const p = detailProj(wx, wy);
+  drawPersonAt(p.x, p.y, dPersonScale() * (o.s || 1), o);
+}
+
+const ROOM_BG = { t1: '#2c2450', klo: '#46586a', t2: '#3a1f42', roof: '#182036' };
+
+function drawRoomDetail(id, t, beat) {
+  const r = RM[id];
+  // Hintergrund + Rahmen (Clubwände)
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  const bg = ROOM_BG[id] || '#241a44';
+  g.addColorStop(0, bg); g.addColorStop(1, '#140e28');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  const pad = dPad();
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.beginPath(); ctx.roundRect(pad.x - 8, pad.top - 8, W - 2 * pad.x + 16, H - pad.top - pad.bot + 16, 16); ctx.fill();
+
+  if (id === 't1') {
+    dTiles(2.3, 9.4, 5.4, 4.2, 6, 5, 'main', t, beat);
+    dLabel(5, 9.0, 'DANCEFLOOR', 'rgba(255,255,255,0.5)', 10);
+    // Bar links
+    dRect(0.35, 8.0, 0.5, 5.0, '#4a3320', '#33220f', 5);
+    dRect(0.85, 8.2, 1.0, 4.6, '#7a5330', '#33220f', 6);
+    const bottles = ['🍾','🥃','🍷','🍹','🧉'];
+    ctx.font = `${dTileW()*0.5}px sans-serif`; ctx.textAlign = 'center';
+    for (let i = 0; i < 5; i++) { const p = detailProj(0.6, 8.5 + i * 0.9); ctx.fillText(bottles[i], p.x, p.y); }
+    dLabel(1.3, 7.6, '🍹 BAR', '#ffd9a8', 11);
+    dPerson(1.35, 9.5, { s: 1, color: '#f5f0e6', skin: '#f0b98c', hair: '#5a3617', bob: Math.sin(t*2.5)*2 });
+    // DJ-Pult oben
+    dRect(2.8, 6.9, 3.4, 1.3, '#4a3a7d', '#6a58a0', 8);
+    dRect(3.2, 7.15, 2.6, 0.8, '#5a4a9a', '#2f2557', 6);
+    for (const dx of [3.9, 5.1]) { const p = detailProj(dx, 7.55); ctx.strokeStyle = '#8b5cf6'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(p.x, p.y, dTileW()*0.28, t*4, t*4 + Math.PI*1.4); ctx.stroke(); }
+    for (const bx of [2.5, 6.2]) { dRect(bx, 6.9, 0.6, 1.3, '#141024', '#0d0a1c', 5);
+      const p = detailProj(bx+0.3, 7.55); ctx.fillStyle = `rgba(170,130,255,${0.4+0.45*Math.abs(Math.sin(beat))})`;
+      ctx.beginPath(); ctx.arc(p.x, p.y, dTileW()*(0.3+Math.abs(Math.sin(beat))*0.12), 0, 7); ctx.fill(); }
+    dPerson(4.5, 7.4, { s: 1.15, color: '#3b2f7a', skin: '#f0b98c', hair: '#1a1a22', headphones: true, arms: beat, bob: Math.sin(beat)*2 });
+    dLabel(4.5, 6.6, '🎧 DJ', '#c9b6ff', 11);
+    // Shot-Bar rechts
+    dRect(7.2, 7.9, 1.4, 2.4, '#6a2f80', '#7d3a95', 7);
+    dLabel(7.9, 7.5, '🥃 SHOTS', `hsl(${(t*80)%360},80%,68%)`, 10);
+    // Garderobe unten rechts
+    dRect(6.0, 12.7, 2.8, 1.2, '#8a5c9e', '#4d2c5e', 7);
+    ctx.font = `${dTileW()*0.5}px sans-serif`;
+    for (let i=0;i<4;i++){ const p=detailProj(6.4+i*0.6,13.3); ctx.fillText('🧥',p.x,p.y); }
+    dLabel(7.4, 12.4, 'GARDEROBE', '#e9d5ff', 10);
+    // Eingang unten
+    dRect(3.4, 14.6, 1.6, 0.5, '#8b5cf6', '#6d3fd4', 4);
+    dPerson(4.2, 14.9, { s: 1.2, color: '#22222e', skin: '#c68a53', hair: '#1a1a22', shades: true });
+  } else if (id === 'klo') {
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1.5;
+    for (let i = 1; i < r.w; i++) { const p1 = detailProj(r.x+i, r.y), p2 = detailProj(r.x+i, r.y+r.d); ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y); ctx.stroke(); }
+    for (let j = 1; j < r.d; j++) { const p1 = detailProj(r.x, r.y+j), p2 = detailProj(r.x+r.w, r.y+j); ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y); ctx.stroke(); }
+    for (let k = 0; k < 3; k++) { dRect(r.x+0.4+k*1.2, r.y+0.5, 0.9, 1.2, '#7a8fa5', '#46545f', 6);
+      const p = detailProj(r.x+0.85+k*1.2, r.y+1.1); ctx.font = `${dTileW()*0.6}px sans-serif`; ctx.textAlign='center'; ctx.fillText('🚽', p.x, p.y); }
+    dLabel(r.x+r.w/2, r.y+0.2, '🚻 WC', '#dfeaf5', 13);
+  } else if (id === 't2') {
+    dTiles(12.4, 2.4, 4.2, 3.2, 5, 4, 'vip', t, beat);
+    dLabel(14.5, 2.0, 'VIP DANCEFLOOR', 'rgba(255,215,120,0.6)', 10);
+    dRect(9.9, 0.9, 2.6, 1.0, '#8a6a3a', '#b28a4a', 7);
+    dLabel(11.2, 0.5, '🍾 CHAMPAGNE', '#ffe9a8', 10);
+    if (roomUnlocked('t2')) dPerson(11.2, 1.5, { s: 1, color: '#1c1c28', skin: '#f0b98c', hair: '#c98b2d', bob: Math.sin(t*2.2)*2 });
+    for (const [ax, ay] of [[16.2,6.4],[17.3,2.4]]) { dRect(ax-1.2, ay-0.5, 2.4, 1.0, '#c24e72', '#7a2846', 8);
+      dRect(ax-1.2, ay-0.8, 2.4, 0.35, '#a63a5c', '#611d33', 6); dLabel(ax, ay-1.0, '🛋️', '#ffd0e0', 13); }
+    for (const [tx, ty] of [[13.2,5.5],[15.5,3.2]]) { dRect(tx-0.35, ty-0.35, 0.7, 0.7, '#3a2044', '#1f1026', 6);
+      const p=detailProj(tx,ty); ctx.font=`${dTileW()*0.5}px sans-serif`; ctx.textAlign='center'; ctx.fillText('🍾',p.x,p.y); }
+  } else if (id === 'roof') {
+    // Sternenhimmel
+    ctx.save(); ctx.fillStyle = 'rgba(255,255,255,0.8)';
+    for (let i=0;i<40;i++){ const p=detailProj(r.x+((i*2.7)%r.w), r.y+((i*1.7)%r.d)); ctx.globalAlpha=(0.25+0.5*Math.abs(Math.sin(t*2+i)))*Math.min(1,focusAmt*1.15); ctx.fillRect(p.x,p.y,2,2);} ctx.restore();
+    dTiles(11.8, 10.8, 4.2, 3.2, 5, 4, 'roof', t, beat);
+    dLabel(13.9, 10.4, 'SKY FLOOR', 'rgba(160,220,255,0.6)', 10);
+    dRect(9.9, 10.8, 2.6, 1.0, '#2f6f8a', '#3f93b0', 7);
+    dLabel(11.2, 10.4, '🍸 SKYBAR', '#a8ecff', 10);
+    dRect(A.pool.x-1.5, A.pool.y-1.1, 3.0, 2.2, '#2f7fd6', 'rgba(255,255,255,0.35)', 10);
+    dLabel(A.pool.x, A.pool.y-1.4, '🏊 POOL', '#bfe6ff', 10);
+  }
+
+  // Performer im Detail (falls hier)
+  if (state.performer.unlocked && state.performer.room === id) {
+    const c = { t1:[6.0,8.8], t2:[15.0,5.2], roof:[13.5,14.5] }[id] || [6,9];
+    dRect(c[0]-0.8, c[1]-0.8, 1.6, 1.6, '#ff5e8a', '#a32e52', 8);
+    dPerson(c[0], c[1], { s: 1.15, color: '#ff4fa3', skin: '#f0b98c', hair: '#1a1a22', female: true, arms: beat*1.5, dancing: true, bob: Math.sin(beat*1.5)*3 });
+  }
+
+  // Gäste in diesem Raum (nach y sortiert)
+  const gs = guests.filter(g => roomOf(g.x, g.y) === id).sort((a, b) => a.y - b.y);
+  for (const g of gs) {
+    const dancing = g.mode === 'act' && (g.act === 'dance' || g.act === 'vipdance' || g.act === 'roofbar');
+    const bob = dancing ? Math.sin(beat + g.bobPhase) * (dropActive() ? 4 : 2.5) : 0;
+    dPerson(g.x, g.y, { s: g.celeb ? 1.3 : g.vip ? 1.08 : 1, color: g.color, skin: g.skin, hair: g.hair, female: g.female,
+      bob, arms: dancing ? beat + g.bobPhase : null, dancing, drink: g.mode === 'act' ? g.drink : null,
+      alpha: g.alpha, glow: g.celeb, star: g.celeb, bobPhase: g.bobPhase });
+  }
+
+  // Geld-Pins dieses Raums
+  for (const [stId, anchorId] of Object.entries(PIN_AT)) {
+    if (A[anchorId].room !== id) continue;
+    const amount = state.stationCash[stId] || 0;
+    if (amount < 1) continue;
+    const a = A[anchorId], p = detailProj(a.x, a.y);
+    drawPinAt(p.x, p.y - dTileW() * 0.5, amount, t, stId.length);
+  }
+}
+
+// ein Geld-Pin an Bildschirmkoordinaten
+function drawPinAt(px, py, amount, t, seed) {
+  const bounce = Math.sin(t * 3 + seed) * 2.5;
+  py -= bounce;
+  const label = fmt(amount);
+  ctx.font = `800 ${Math.max(10, 11 * (lastFocusRoom && focusAmt > 0.5 ? 1.15 : 1))}px system-ui, sans-serif`;
+  const tw = ctx.measureText(label).width, bw = tw + 28, bh = 20;
+  ctx.fillStyle = '#2ea84a'; ctx.beginPath(); ctx.moveTo(px, py + bh/2 + 8); ctx.lineTo(px-6, py+bh/2-1); ctx.lineTo(px+6, py+bh/2-1); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#38c95c'; ctx.beginPath(); ctx.roundRect(px-bw/2, py-bh/2, bw, bh, bh/2); ctx.fill();
+  ctx.strokeStyle = '#1d7a33'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.roundRect(px-bw/2, py-bh/2, bw, bh, bh/2); ctx.stroke();
+  ctx.fillStyle = '#fff'; ctx.textAlign = 'left'; ctx.font = '12px sans-serif';
+  ctx.fillText('💶', px-bw/2+6, py+4);
+  ctx.font = `800 12px system-ui, sans-serif`; ctx.fillText(label, px-bw/2+23, py+4);
+  ctx.textAlign = 'center';
+}
+
 // ---------------- Frame ----------------
 let lastFrame = 0;
 let incomeCache = 0, incomeTimer = 0;
@@ -813,6 +1044,15 @@ export function renderFrame(now) {
   const bpm = dropActive() ? 160 : 126;
   const beat = t * (bpm / 60) * Math.PI;
   tickerX -= dt * 40 * cam.s;
+
+  // Kamera zum Ziel animieren (Übersicht ↔ Raum-Detail)
+  const target = focusRoom ? (camRooms[focusRoom] || camOver) : camOver;
+  const k = 1 - Math.pow(0.0015, dt);
+  cam.s += (target.s - cam.s) * k;
+  cam.ox += (target.ox - cam.ox) * k;
+  cam.oy += (target.oy - cam.oy) * k;
+  focusAmt += ((focusRoom ? 1 : 0) - focusAmt) * k;
+  if (focusRoom) lastFocusRoom = focusRoom;
 
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
 
@@ -849,6 +1089,14 @@ export function renderFrame(now) {
   if (!state.roofUnlocked) drawLockOverlay(RM.roof, 'Rooftop', state.t2Unlocked ? 'Antippen zum Freischalten' : 'Erst Terminal 2');
 
   drawCashPins(t);
+
+  // Raum-Detailansicht (Top-Down) über die Iso-Übersicht blenden
+  if (focusAmt > 0.01) {
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, focusAmt * 1.2);
+    drawRoomDetail(lastFocusRoom, t, beat);
+    ctx.restore();
+  }
 
   // Partikel
   for (const p of particles) {

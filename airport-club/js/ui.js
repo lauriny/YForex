@@ -8,6 +8,7 @@ import {
   autoCollectInterval, MILESTONE_STEP, fmt, fmtTime, costOf, milestoneMult, nextMilestone,
 } from './data.js';
 import { playSfx, setMusic } from './sfx.js';
+import { enterRoom, exitRoom } from './render.js';
 
 const ROOM_META = {
   t1:   { icon: '🪩', name: 'Terminal 1',        sub: 'Mainfloor' },
@@ -372,11 +373,12 @@ function openShopModal() {
 // ---- Räume-Modal ----------------------------------------------------------
 function unlockedRoomCard(id) {
   const m = ROOM_META[id];
-  const card = el('div', 'room-card unlocked');
+  const card = el('div', 'room-card unlocked clickable');
   const isPerf = G.state.performer.unlocked && G.state.performer.room === id;
   card.innerHTML = `<div class="room-emoji">${m.icon}</div>
     <div class="room-info"><b>${m.name}</b><span>${m.sub} · ${fmt(G.roomIncome(id))} €/s${isPerf ? ' · 💃 Show-Act' : ''}</span></div>
-    <div class="room-emoji">✔️</div>`;
+    <div class="room-emoji enter-arrow">→</div>`;
+  card.addEventListener('click', () => { closeModal(); openRoomView(id); });
   return card;
 }
 
@@ -704,6 +706,8 @@ export function initUI() {
   $('#btn-daily').addEventListener('click', openDailyModal);
   $('#btn-ach').addEventListener('click', openAchievementsModal);
   $('#btn-showact').addEventListener('click', openPerformerModal);
+  // Zurück aus der Raum-Detailansicht
+  $('#room-back').addEventListener('click', closeRoomView);
 
   // Spiel-Events
   G.on('levelup', ({ level, gems }) => {
@@ -737,8 +741,27 @@ export function initUI() {
   updateHUD();
 }
 
+// ------------------------------------------------------------------
+//  Raum-Detailansicht (Zoom in einen Raum)
+// ------------------------------------------------------------------
+function showRoomHud(id) {
+  const m = ROOM_META[id];
+  $('#room-title').textContent = `${m.icon} ${m.name}`;
+  $('#room-hud').classList.remove('hidden');
+  $('#side-rail').classList.add('dim-hide');
+  $('#tap-hint').classList.add('dim-hide');
+}
+function hideRoomHud() {
+  $('#room-hud').classList.add('hidden');
+  $('#side-rail').classList.remove('dim-hide');
+  $('#tap-hint').classList.remove('dim-hide');
+}
+function openRoomView(id) { if (enterRoom(id)) { showRoomHud(id); playSfx('click'); } }
+function closeRoomView() { exitRoom(); hideRoomHud(); playSfx('click'); }
+
 // Feedback vom Canvas (Taps)
 export function canvasFeedback(fb) {
+  if (fb.type === 'enterRoom') { showRoomHud(fb.room); playSfx('click'); return; }
   if (fb.type === 'tap') {
     floatText({ x: fb.x, y: fb.y - 10 }, '+🔥 Hype', 'float-buy');
     playSfx('tap');
