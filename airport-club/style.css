@@ -861,6 +861,256 @@ button { font-family: inherit; border: none; background: none; cursor: pointer; 
 .room-card.perf { border-color: #ff85b3; background: #fdeef4; }
 .btn-flat.small-flat { width: auto; margin: 0; padding: 8px 12px; font-size: 12px; flex: none; }
 
+/* ============================================================
+   PREMIUM 2.0 — chunky/bubbly UI, plastische Tiefe, Gradients
+   (Senior-Mobile-Game-Politur; überschreibt Basiswerte oben)
+   ============================================================ */
+:root {
+  --edge-purple: #4a279e;
+  --edge-green:  #1a7d33;
+  --edge-red:    #b0333f;
+  --edge-cream:  #cbb188;
+  --glass-hi: inset 0 2px 0 rgba(255,255,255,0.45);
+  --soft-drop: 0 10px 22px rgba(8,4,24,0.45);
+}
+
+/* Reicherer App-Hintergrund */
+#app {
+  background:
+    radial-gradient(130% 70% at 50% -15%, #3a2f7a 0%, #211a49 42%, #100c26 78%, #0a0718 100%);
+}
+
+/* ---------- HUD-Pillen: plastisch mit Glas-Highlight ---------- */
+.pill {
+  background: linear-gradient(180deg, #333a70 0%, #232849 55%, #191d38 100%);
+  border: 2px solid rgba(255,255,255,0.16);
+  border-radius: 999px;
+  box-shadow: 0 5px 0 rgba(0,0,0,0.30), 0 8px 16px rgba(0,0,0,0.4), var(--glass-hi);
+  padding: 6px 14px 6px 9px;
+}
+.pill-icon {
+  filter: drop-shadow(0 2px 2px rgba(0,0,0,0.5));
+  font-size: 16px;
+}
+.pill-val { font-size: 15.5px; }
+#btn-settings {
+  width: 40px; height: 40px; border-radius: 14px;
+  background: linear-gradient(180deg, #333a70, #1c2140);
+  box-shadow: 0 5px 0 rgba(0,0,0,0.3), 0 8px 14px rgba(0,0,0,0.4), var(--glass-hi);
+  display: grid; place-items: center;
+}
+#btn-settings:active { transform: translateY(3px) rotate(30deg); box-shadow: 0 1px 0 rgba(0,0,0,0.3); }
+
+/* ---------- Phasen-Leiste ---------- */
+#phasebar {
+  background: linear-gradient(180deg, #fdf7ea 0%, #f6e8cf 100%);
+  border: 3px solid #fffaf0;
+  border-radius: 20px;
+  box-shadow: 0 6px 0 var(--edge-cream), 0 12px 20px rgba(0,0,0,0.3), var(--glass-hi);
+}
+.phase-track {
+  background: linear-gradient(180deg, #14162b, #0c0e1d);
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.6);
+  height: 17px;
+}
+.phase-fill {
+  background: linear-gradient(180deg, #9dfbb0 0%, #43d95e 45%, #26af49 100%);
+  box-shadow: inset 0 2px 0 rgba(255,255,255,0.55), inset 0 -3px 6px rgba(0,0,0,0.25);
+}
+.phase-chest { filter: drop-shadow(0 3px 3px rgba(0,0,0,0.4)); }
+
+/* ---------- Upgrade-Karten ---------- */
+.up-card {
+  background: linear-gradient(180deg, #fffaf0 0%, #f4e6cd 100%);
+  border: 3px solid #fffdf7;
+  border-radius: 18px;
+  box-shadow: 0 6px 0 var(--edge-cream), 0 11px 18px rgba(0,0,0,0.28), var(--glass-hi);
+}
+.up-card:active { transform: translateY(4px); box-shadow: 0 2px 0 var(--edge-cream), var(--glass-hi); }
+.up-card.affordable {
+  border-color: #b6ffc4;
+  box-shadow: 0 6px 0 var(--edge-green), 0 0 18px rgba(67,217,94,0.6), var(--glass-hi);
+}
+.up-progress { background: linear-gradient(180deg, #14162b, #0c0e1d); box-shadow: inset 0 2px 3px rgba(0,0,0,0.6); }
+.up-fill { background: linear-gradient(180deg, #9dfbb0, #26af49); box-shadow: inset 0 1px 0 rgba(255,255,255,0.5); }
+
+/* ---------- Club-Ansicht: tiefer 3D-Rahmen ---------- */
+#club-view {
+  border: 4px solid #3a2f7a;
+  border-radius: 26px;
+  box-shadow:
+    0 10px 0 rgba(0,0,0,0.35),
+    0 20px 34px rgba(0,0,0,0.5),
+    inset 0 4px 14px rgba(0,0,0,0.65),
+    inset 0 -2px 0 rgba(255,255,255,0.08);
+}
+
+/* ---------- Hype-Leiste: vibrant + glossy ---------- */
+#hype-meter {
+  height: 26px; border-radius: 999px;
+  background: linear-gradient(180deg, #171b33, #0d0f1f);
+  border: 2px solid rgba(255,255,255,0.18);
+  box-shadow: inset 0 2px 5px rgba(0,0,0,0.7), 0 3px 8px rgba(0,0,0,0.4);
+}
+#hype-fill {
+  background: linear-gradient(90deg, #ffb23d, #ff5e8a 40%, #b06dff 72%, #4fd7f7);
+  background-size: 200% 100%;
+  box-shadow: inset 0 2px 0 rgba(255,255,255,0.5), inset 0 -4px 8px rgba(0,0,0,0.3), 0 0 14px rgba(255,110,150,0.6);
+  animation: hypeShine 3s linear infinite;
+}
+@keyframes hypeShine { 0% { background-position: 0% 0; } 100% { background-position: 200% 0; } }
+#hype-meter.dropping #hype-fill {
+  background: linear-gradient(90deg, #b06dff, #6a8bff 40%, #4fd7f7 70%, #9dfbff);
+  background-size: 200% 100%;
+}
+#income-rate {
+  background: linear-gradient(180deg, rgba(30,36,64,0.92), rgba(18,22,42,0.92));
+  border: 2px solid rgba(255,255,255,0.16);
+  box-shadow: 0 4px 10px rgba(0,0,0,0.45), var(--glass-hi);
+  border-radius: 999px; padding: 5px 12px;
+}
+
+/* ---------- Schwebende Seiten-Buttons ---------- */
+.rail-btn {
+  width: 46px; height: 46px; border-radius: 16px;
+  background: linear-gradient(180deg, #b79bff 0%, #8b5cf6 52%, #6d3fd4 100%);
+  border: 2px solid rgba(255,255,255,0.35);
+  box-shadow: 0 6px 0 var(--edge-purple), 0 10px 16px rgba(0,0,0,0.45), var(--glass-hi);
+}
+.rail-btn:active { transform: translateY(4px); box-shadow: 0 2px 0 var(--edge-purple), var(--glass-hi); }
+
+/* ---------- Bottom-Nav: saftige 3D-Buttons ---------- */
+.nav-btn {
+  border-radius: 20px;
+  padding: 11px 4px 9px;
+  background: linear-gradient(180deg, #b79bff 0%, #8b5cf6 50%, #6d3fd4 100%);
+  border: 2px solid rgba(255,255,255,0.3);
+  box-shadow: 0 6px 0 var(--edge-purple), 0 11px 16px rgba(0,0,0,0.45), var(--glass-hi);
+}
+.nav-btn:active { transform: translateY(5px); box-shadow: 0 1px 0 var(--edge-purple), var(--glass-hi); }
+.nav-icon { font-size: 23px; filter: drop-shadow(0 3px 2px rgba(0,0,0,0.4)); }
+.nav-label { font-size: 10px; }
+.nav-btn.boost {
+  background: linear-gradient(180deg, #c9adff 0%, #9a6dff 50%, #7a3fe0 100%);
+  box-shadow: 0 6px 0 #5b2ab0, 0 11px 18px rgba(0,0,0,0.5), var(--glass-hi);
+}
+.nav-btn.boost.active {
+  background: linear-gradient(180deg, #b6ffc4 0%, #43d95e 50%, #26af49 100%);
+  border-color: #d6ffdd;
+  box-shadow: 0 6px 0 var(--edge-green), 0 0 22px rgba(67,217,94,0.65), var(--glass-hi);
+}
+.nav-btn.boost.cooldown { filter: saturate(0.45) brightness(0.82); }
+.boost-chip {
+  background: linear-gradient(180deg, #2a2f55, #16192e);
+  border: 2px solid rgba(255,255,255,0.22);
+  box-shadow: 0 3px 8px rgba(0,0,0,0.5), var(--glass-hi);
+  top: -13px; padding: 3px 11px;
+}
+
+/* ---------- Buttons allgemein: chunky + gloss ---------- */
+.btn-buy {
+  border-radius: 14px;
+  background: linear-gradient(180deg, #9dfbb0 0%, #43d95e 48%, #2aa347 100%);
+  border: 2px solid #d6ffdd;
+  box-shadow: 0 5px 0 var(--edge-green), 0 8px 12px rgba(0,0,0,0.35), var(--glass-hi);
+}
+.btn-buy:active { transform: translateY(4px); box-shadow: 0 1px 0 var(--edge-green), var(--glass-hi); }
+.btn-buy.gem {
+  background: linear-gradient(180deg, #f7bcff 0%, #c56cf0 48%, #9b3fd4 100%);
+  border-color: #ffd9ff;
+  box-shadow: 0 5px 0 #6d2a99, 0 8px 12px rgba(0,0,0,0.35), var(--glass-hi);
+}
+.btn-buy.disabled {
+  background: linear-gradient(180deg, #cfc8bb, #b0a999);
+  border-color: #ddd6c8;
+  box-shadow: 0 5px 0 #8d877c, var(--glass-hi);
+}
+.btn-big {
+  border-radius: 18px;
+  background: linear-gradient(180deg, #9dfbb0 0%, #43d95e 48%, #2aa347 100%);
+  border: 2px solid #d6ffdd;
+  box-shadow: 0 6px 0 var(--edge-green), 0 10px 16px rgba(0,0,0,0.4), var(--glass-hi);
+}
+.btn-big:active { transform: translateY(4px); box-shadow: 0 2px 0 var(--edge-green), var(--glass-hi); }
+.btn-big.gemtint {
+  background: linear-gradient(180deg, #f7bcff, #c56cf0 48%, #9b3fd4);
+  border-color: #ffd9ff; box-shadow: 0 6px 0 #6d2a99, 0 10px 16px rgba(0,0,0,0.4), var(--glass-hi);
+}
+.mode-btn {
+  border-radius: 12px;
+  background: linear-gradient(180deg, #fffaf0, #f0e0c4);
+  border: 2px solid #fffdf7;
+  box-shadow: 0 4px 0 var(--edge-cream), var(--glass-hi);
+}
+.mode-btn.active {
+  background: linear-gradient(180deg, #b79bff, #8b5cf6 55%, #6d3fd4);
+  border-color: rgba(255,255,255,0.4); color: #fff;
+  box-shadow: 0 4px 0 var(--edge-purple), var(--glass-hi);
+}
+
+/* ---------- Modal-Sheet + Listenkarten ---------- */
+.modal-sheet {
+  background: linear-gradient(180deg, #fffdf7 0%, #f6e9d2 100%);
+  border: 4px solid #fffdf7;
+  border-radius: 30px 30px 0 0;
+  box-shadow: 0 -8px 30px rgba(0,0,0,0.5), inset 0 3px 0 rgba(255,255,255,0.8);
+}
+.modal-x {
+  background: linear-gradient(180deg, #ff8391, #ff5e6c 55%, #e03b49);
+  box-shadow: 0 4px 0 var(--edge-red), 0 6px 10px rgba(0,0,0,0.35), var(--glass-hi);
+  border-radius: 14px; width: 34px; height: 34px;
+}
+.modal-x:active { transform: translateY(3px); box-shadow: 0 1px 0 var(--edge-red); }
+.station-row, .room-card, .quest-row {
+  background: linear-gradient(180deg, #fffaf0 0%, #f3e4c9 100%);
+  border: 3px solid #fffdf7;
+  border-radius: 16px;
+  box-shadow: 0 5px 0 var(--edge-cream), 0 8px 14px rgba(0,0,0,0.22), var(--glass-hi);
+}
+.station-row.active-row { background: linear-gradient(180deg, #f0ffef, #d7f6d4); border-color: #b6ffc4; box-shadow: 0 5px 0 var(--edge-green), var(--glass-hi); }
+.st-icon {
+  background: radial-gradient(120% 120% at 30% 20%, #ffffff, #efe4cf);
+  border: 2px solid #fffdf7;
+  border-radius: 14px;
+  box-shadow: inset 0 2px 0 rgba(255,255,255,0.9), 0 3px 6px rgba(0,0,0,0.18);
+}
+.q-check { box-shadow: inset 0 2px 4px rgba(0,0,0,0.5), var(--glass-hi); }
+.quest-row.done .q-check { background: linear-gradient(180deg, #6ee787, #26af49); }
+
+/* Truhen-/Offline-Box */
+.chest-box {
+  background: linear-gradient(180deg, #fffdf7, #f6e9d2);
+  border: 4px solid #ffe08a;
+  box-shadow: 0 12px 0 rgba(0,0,0,0.3), 0 20px 40px rgba(0,0,0,0.5), 0 0 44px rgba(255,217,60,0.4), inset 0 3px 0 rgba(255,255,255,0.8);
+}
+.chest-rewards span {
+  background: linear-gradient(180deg, #333a70, #1a1f3d);
+  box-shadow: 0 4px 0 rgba(0,0,0,0.3), var(--glass-hi);
+  border-radius: 999px;
+}
+
+/* Toast */
+#toast {
+  background: linear-gradient(180deg, #333a70, #1a1f3d);
+  border: 2px solid rgba(255,255,255,0.2);
+  box-shadow: 0 8px 20px rgba(0,0,0,0.5), var(--glass-hi);
+  border-radius: 16px;
+}
+
+/* Raum-Detail-Kopfzeile */
+#room-back {
+  background: linear-gradient(180deg, #b79bff, #8b5cf6 52%, #6d3fd4);
+  border: 2px solid rgba(255,255,255,0.35);
+  box-shadow: 0 5px 0 var(--edge-purple), 0 8px 12px rgba(0,0,0,0.4), var(--glass-hi);
+  border-radius: 16px;
+}
+#room-back:active { transform: translateY(4px); box-shadow: 0 1px 0 var(--edge-purple); }
+#room-title {
+  background: linear-gradient(180deg, rgba(40,46,80,0.92), rgba(22,26,46,0.92));
+  border: 2px solid rgba(255,255,255,0.18);
+  box-shadow: 0 4px 10px rgba(0,0,0,0.45), var(--glass-hi);
+}
+
 /* Desktop: hübsch einrahmen */
 @media (min-width: 560px) {
   body { background: radial-gradient(100% 100% at 50% 0%, #1c1440 0%, #08060f 100%); }

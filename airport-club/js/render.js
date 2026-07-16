@@ -916,10 +916,13 @@ function dTiles(wx, wy, ww, wd, cols, rows, palette, t, beat) {
     const tx = a.x + i * cw + 1.5, ty = a.y + j * ch + 1.5, tw = cw - 3, th = ch - 3;
     ctx.fillStyle = `hsl(${hue},72%,${Math.max(10, light - 24)}%)`;               // dunkle Kante (Höhe)
     ctx.beginPath(); ctx.roundRect(tx, ty + th - bev, tw, bev + 2.5, 3); ctx.fill();
-    ctx.fillStyle = `hsl(${hue},88%,${light}%)`;                                  // Oberseite
+    const tg = ctx.createLinearGradient(0, ty, 0, ty + th);                       // Oberseite mit Verlauf
+    tg.addColorStop(0, `hsl(${hue},95%,${Math.min(78, light + 14)}%)`);
+    tg.addColorStop(1, `hsl(${hue},85%,${Math.max(14, light - 5)}%)`);
+    ctx.fillStyle = tg;
     ctx.beginPath(); ctx.roundRect(tx, ty, tw, th - bev * 0.5, 3); ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.25)';                                     // Glanz
-    ctx.beginPath(); ctx.roundRect(tx + 2, ty + 2, tw - 4, th * 0.24, 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';                                      // Glanz
+    ctx.beginPath(); ctx.roundRect(tx + 2, ty + 1.5, tw - 4, th * 0.26, 2); ctx.fill();
   }
   ctx.strokeStyle = 'rgba(255,255,255,0.28)'; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.roundRect(a.x - 3, a.y - 3, W0 + 6, H0 + 6, 8); ctx.stroke();
@@ -934,11 +937,23 @@ function dShadow(wx, wy, ww, wd) {
 function dBox(wx, wy, ww, wd, z, top, front, stroke, rad = 6) {
   const a = detailProj(wx, wy), b = detailProj(wx + ww, wy + wd);
   const x = a.x, y = a.y, w = b.x - a.x, h = b.y - a.y;
-  ctx.fillStyle = front;
+  // Frontfläche (unten dunkler für Tiefe)
+  const fg = ctx.createLinearGradient(0, y + h - z, 0, y + h + rad);
+  fg.addColorStop(0, front); fg.addColorStop(1, 'rgba(0,0,0,0.4)');
+  ctx.fillStyle = fg;
   ctx.beginPath(); ctx.roundRect(x, y + h - z, w, z + rad, rad); ctx.fill();
+  // Deckfläche
   ctx.fillStyle = top;
   ctx.beginPath(); ctx.roundRect(x, y - z, w, h, rad); ctx.fill();
+  // Glanz-Sheen oben
+  const sg = ctx.createLinearGradient(0, y - z, 0, y - z + h * 0.7);
+  sg.addColorStop(0, 'rgba(255,255,255,0.28)'); sg.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = sg;
+  ctx.beginPath(); ctx.roundRect(x, y - z, w, h * 0.7, rad); ctx.fill();
   if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.roundRect(x, y - z, w, h, rad); ctx.stroke(); }
+  // helle Oberkante
+  ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(x + rad, y - z + 1.2); ctx.lineTo(x + w - rad, y - z + 1.2); ctx.stroke();
 }
 function dPerson(wx, wy, o) {
   const p = detailProj(wx, wy);
