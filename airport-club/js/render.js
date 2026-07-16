@@ -881,7 +881,7 @@ function detailProj(wx, wy) {
   return { x: p.x + (wx - r.x) / r.w * (W - 2 * p.x), y: p.top + (wy - r.y) / r.d * (H - p.top - p.bot) };
 }
 function dTileW() { const r = RM[lastFocusRoom], p = dPad(); return (W - 2 * p.x) / r.w; }
-function dPersonScale() { return dTileW() / 10.5; }
+function dPersonScale() { return dTileW() / 34; }
 
 function dRect(wx, wy, ww, wd, fill, stroke, rad = 8) {
   const a = detailProj(wx, wy), b = detailProj(wx + ww, wy + wd);
@@ -903,7 +903,7 @@ function dTiles(wx, wy, ww, wd, cols, rows, palette, t, beat) {
     let col;
     if (palette === 'vip') col = `hsl(${42 + ((i + j) % 3) * 8}, 88%, ${34 + pulse * 22}%)`;
     else if (palette === 'roof') col = `hsl(${(t * 30 + (i + j) * 24) % 360}, 70%, ${30 + pulse * 18}%)`;
-    else col = `hsl(${((i + j) * 42 + t * 80) % 360}, 85%, ${dropActive() ? 52 + pulse * 16 : 40 + pulse * 14}%)`;
+    else col = `hsl(${((i + j) * 55 + t * 90) % 360}, 85%, ${dropActive() ? 52 + pulse * 16 : 37 + pulse * 13}%)`;
     ctx.fillStyle = col;
     ctx.beginPath(); ctx.roundRect(a.x + i * cw + 1.5, a.y + j * ch + 1.5, cw - 3, ch - 3, 4); ctx.fill();
   }
@@ -915,74 +915,109 @@ function dPerson(wx, wy, o) {
   drawPersonAt(p.x, p.y, dPersonScale() * (o.s || 1), o);
 }
 
-const ROOM_BG = { t1: '#2c2450', klo: '#46586a', t2: '#3a1f42', roof: '#182036' };
+const FLOORCOL = { t1: '#463a72', klo: '#46586a', t2: '#3d1f42', roof: '#12203a' };
+const GRASS = { t1: true, klo: true, t2: true, roof: false };
+
+// grüner Wiesen-Hintergrund wie in v2
+function drawGrassBg() {
+  ctx.fillStyle = '#7ec24f'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = 'rgba(255,255,255,0.05)';
+  const cell = W / 8;
+  for (let i = 0; i < 8; i++) for (let j = 0; j < Math.ceil(H / cell); j++) if ((i + j) % 2 === 0) ctx.fillRect(i * cell, j * cell, cell, cell);
+  const bush = (x, y, rr) => { ctx.fillStyle = '#3f9142'; ctx.beginPath(); ctx.arc(x, y, rr, 0, 7); ctx.fill();
+    ctx.fillStyle = '#54ad55'; ctx.beginPath(); ctx.arc(x - rr * 0.3, y - rr * 0.3, rr * 0.5, 0, 7); ctx.fill(); };
+  bush(W * 0.05, H * 0.16, 11); bush(W * 0.95, H * 0.22, 13); bush(W * 0.04, H * 0.82, 12); bush(W * 0.96, H * 0.8, 11);
+}
 
 function drawRoomDetail(id, t, beat) {
   const r = RM[id];
-  // Hintergrund + Rahmen (Clubwände)
-  const g = ctx.createLinearGradient(0, 0, 0, H);
-  const bg = ROOM_BG[id] || '#241a44';
-  g.addColorStop(0, bg); g.addColorStop(1, '#140e28');
-  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
   const pad = dPad();
-  ctx.fillStyle = 'rgba(0,0,0,0.25)';
-  ctx.beginPath(); ctx.roundRect(pad.x - 8, pad.top - 8, W - 2 * pad.x + 16, H - pad.top - pad.bot + 16, 16); ctx.fill();
+  // Hintergrund: Wiese (v2) oder Nachthimmel (Rooftop)
+  if (GRASS[id]) drawGrassBg();
+  else {
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#241a4a'); g.addColorStop(1, '#0e0a1e'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    ctx.save(); ctx.fillStyle = '#fff';
+    for (let i = 0; i < 46; i++) { ctx.globalAlpha = (0.25 + 0.4 * Math.abs(Math.sin(i * 1.3))) * Math.min(1, focusAmt * 1.2); ctx.fillRect((i * 97) % W, (i * 53) % (H * 0.55), 1.6, 1.6); }
+    ctx.restore();
+  }
+  // Cremefarbene Clubwände (v2-Gebäude) + farbiger Boden
+  const fx = pad.x - 16, fy = pad.top - 16, fw = W - 2 * pad.x + 32, fh = H - pad.top - pad.bot + 32;
+  ctx.fillStyle = 'rgba(20,30,10,0.25)'; roundRectP(fx + 4, fy + 8, fw, fh, 22); ctx.fill();
+  ctx.fillStyle = '#e8d5b8'; roundRectP(fx, fy, fw, fh, 22); ctx.fill();
+  ctx.fillStyle = '#d9c39f'; roundRectP(fx, fy + fh - 13, fw, 13, 10); ctx.fill();
+  ctx.fillStyle = FLOORCOL[id] || '#463a72'; roundRectP(pad.x - 6, pad.top - 6, W - 2 * pad.x + 12, H - pad.top - pad.bot + 12, 12); ctx.fill();
 
   if (id === 't1') {
-    dTiles(2.3, 9.4, 5.4, 4.2, 6, 5, 'main', t, beat);
-    dLabel(5, 9.0, 'DANCEFLOOR', 'rgba(255,255,255,0.5)', 10);
-    // Bar links
-    dRect(0.35, 8.0, 0.5, 5.0, '#4a3320', '#33220f', 5);
-    dRect(0.85, 8.2, 1.0, 4.6, '#7a5330', '#33220f', 6);
-    const bottles = ['🍾','🥃','🍷','🍹','🧉'];
-    ctx.font = `${dTileW()*0.5}px sans-serif`; ctx.textAlign = 'center';
-    for (let i = 0; i < 5; i++) { const p = detailProj(0.6, 8.5 + i * 0.9); ctx.fillText(bottles[i], p.x, p.y); }
-    dLabel(1.3, 7.6, '🍹 BAR', '#ffd9a8', 11);
-    dPerson(1.35, 9.5, { s: 1, color: '#f5f0e6', skin: '#f0b98c', hair: '#5a3617', bob: Math.sin(t*2.5)*2 });
-    // DJ-Pult oben
-    dRect(2.8, 6.9, 3.4, 1.3, '#4a3a7d', '#6a58a0', 8);
-    dRect(3.2, 7.15, 2.6, 0.8, '#5a4a9a', '#2f2557', 6);
-    for (const dx of [3.9, 5.1]) { const p = detailProj(dx, 7.55); ctx.strokeStyle = '#8b5cf6'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(p.x, p.y, dTileW()*0.28, t*4, t*4 + Math.PI*1.4); ctx.stroke(); }
-    for (const bx of [2.5, 6.2]) { dRect(bx, 6.9, 0.6, 1.3, '#141024', '#0d0a1c', 5);
-      const p = detailProj(bx+0.3, 7.55); ctx.fillStyle = `rgba(170,130,255,${0.4+0.45*Math.abs(Math.sin(beat))})`;
-      ctx.beginPath(); ctx.arc(p.x, p.y, dTileW()*(0.3+Math.abs(Math.sin(beat))*0.12), 0, 7); ctx.fill(); }
-    dPerson(4.5, 7.4, { s: 1.15, color: '#3b2f7a', skin: '#f0b98c', hair: '#1a1a22', headphones: true, arms: beat, bob: Math.sin(beat)*2 });
-    dLabel(4.5, 6.6, '🎧 DJ', '#c9b6ff', 11);
-    // Shot-Bar rechts
-    dRect(7.2, 7.9, 1.4, 2.4, '#6a2f80', '#7d3a95', 7);
-    dLabel(7.9, 7.5, '🥃 SHOTS', `hsl(${(t*80)%360},80%,68%)`, 10);
-    // Garderobe unten rechts
-    dRect(6.0, 12.7, 2.8, 1.2, '#8a5c9e', '#4d2c5e', 7);
-    ctx.font = `${dTileW()*0.5}px sans-serif`;
-    for (let i=0;i<4;i++){ const p=detailProj(6.4+i*0.6,13.3); ctx.fillText('🧥',p.x,p.y); }
-    dLabel(7.4, 12.4, 'GARDEROBE', '#e9d5ff', 10);
-    // Eingang unten
-    dRect(3.4, 14.6, 1.6, 0.5, '#8b5cf6', '#6d3fd4', 4);
-    dPerson(4.2, 14.9, { s: 1.2, color: '#22222e', skin: '#c68a53', hair: '#1a1a22', shades: true });
+    // Dancefloor zentral (v2-Kacheln)
+    const fl = { x: 2.7, y: 9.4, w: 4.7, d: 4.5 };
+    dTiles(fl.x, fl.y, fl.w, fl.d, 6, 6, 'main', t, beat);
+    dLabel(fl.x + fl.w / 2, fl.y - 0.3, 'DANCEFLOOR', 'rgba(255,255,255,0.45)', 10);
+    // DJ-Lichtkegel (additiv) über den Floor
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    const djp = detailProj(4.5, 8.5), fb = detailProj(fl.x + fl.w / 2, fl.y + fl.d);
+    for (let i = 0; i < 3; i++) { const ang = Math.sin(t * (0.7 + i * 0.3) + i * 2) * 0.5;
+      ctx.fillStyle = `hsla(${(t * 60 + i * 120) % 360},90%,65%,${dropActive() ? 0.14 : 0.07})`;
+      ctx.beginPath(); ctx.moveTo(djp.x, djp.y);
+      ctx.lineTo(djp.x + Math.sin(ang) * W * 0.26 - W * 0.13, fb.y);
+      ctx.lineTo(djp.x + Math.sin(ang) * W * 0.26 + W * 0.13, fb.y);
+      ctx.closePath(); ctx.fill(); }
+    ctx.restore();
+    // DJ-Pult + Boxen + DJ
+    for (const bx of [2.35, 6.1]) { dRect(bx, 7.25, 0.55, 1.25, '#141024', '#0d0a1c', 5);
+      const p = detailProj(bx + 0.27, 7.87); ctx.fillStyle = `rgba(170,130,255,${0.4 + 0.45 * Math.abs(Math.sin(beat))})`;
+      ctx.beginPath(); ctx.arc(p.x, p.y, dTileW() * (0.16 + Math.abs(Math.sin(beat)) * 0.09), 0, 7); ctx.fill(); }
+    dRect(2.9, 7.2, 3.15, 1.3, '#37295e', '#5a4a8a', 8);
+    dRect(3.3, 7.45, 2.35, 0.8, '#5a4a9a', '#2f2557', 6);
+    for (const dx of [3.95, 5.0]) { const p = detailProj(dx, 7.85); ctx.strokeStyle = '#8b5cf6'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(p.x, p.y, dTileW() * 0.2, t * 4, t * 4 + Math.PI * 1.4); ctx.stroke(); }
+    dPerson(4.5, 8.1, { s: 1.15, color: '#3b2f7a', skin: '#f0b98c', hair: '#1a1a22', headphones: true, arms: beat, bob: Math.sin(beat) * 2 });
+    dLabel(4.5, 7.0, '🎧 DJ', '#c9b6ff', 10);
+    // Bar links (braun, Regal + Flaschen + Barkeeper)
+    dRect(0.3, 8.2, 0.5, 5.2, '#4a3320', '#33220f', 5);
+    const bottles = ['🍾','🥃','🍷','🍹','🧉']; ctx.font = `${dTileW() * 0.4}px sans-serif`; ctx.textAlign = 'center';
+    for (let i = 0; i < 5; i++) { const p = detailProj(0.55, 8.7 + i * 0.95); ctx.fillText(bottles[i], p.x, p.y); }
+    dRect(0.85, 8.4, 1.0, 4.8, '#6b4a2f', '#33220f', 6);
+    dLabel(1.35, 7.9, '🍹 BAR', '#ffd9a8', 10);
+    dPerson(1.35, 9.1, { s: 1.1, color: '#f5f0e6', skin: '#f0b98c', hair: '#5a3617', bob: Math.sin(t * 2.5) * 2 });
+    // Shot-Bar rechts oben
+    dRect(7.55, 8.5, 1.2, 2.3, '#5d2a70', '#7d3a95', 7);
+    ctx.font = `${dTileW() * 0.5}px sans-serif`;
+    { const p1 = detailProj(7.95, 9.2), p2 = detailProj(8.35, 10.0); ctx.fillText('🥃', p1.x, p1.y); ctx.fillText('🥃', p2.x, p2.y); }
+    dLabel(8.1, 8.2, 'SHOTS', `hsl(${(t * 80) % 360},80%,68%)`, 10);
+    // Garderobe rechts unten
+    dRect(7.3, 12.6, 1.5, 1.3, '#8a5c9e', '#4d2c5e', 7);
+    ctx.font = `${dTileW() * 0.4}px sans-serif`;
+    for (let i = 0; i < 3; i++) { const p = detailProj(7.55 + i * 0.45, 13.25); ctx.fillText('🧥', p.x, p.y); }
+    dLabel(8.05, 12.3, 'GARDEROBE', '#e9d5ff', 9);
+    // Eingang unten: roter Teppich + Vordach + AIRPORT + Türsteher
+    const c1 = detailProj(3.6, 13.9), c2 = detailProj(5.4, 15.3), sp = (c2.x - c1.x) * 0.18;
+    ctx.fillStyle = '#b3243a'; ctx.beginPath(); ctx.moveTo(c1.x, c1.y); ctx.lineTo(c2.x, c1.y); ctx.lineTo(c2.x + sp, c2.y); ctx.lineTo(c1.x - sp, c2.y); ctx.closePath(); ctx.fill();
+    dRect(3.5, 13.7, 2.0, 0.4, '#8b5cf6', '#6d3fd4', 4);
+    dLabel(2.3, 14.3, '✈ AIRPORT', `hsl(${(t * 40) % 360},90%,65%)`, 11);
+    dPerson(4.5, 14.3, { s: 1.25, color: '#22222e', skin: '#c68a53', hair: '#1a1a22', shades: true });
   } else if (id === 'klo') {
     ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1.5;
     for (let i = 1; i < r.w; i++) { const p1 = detailProj(r.x+i, r.y), p2 = detailProj(r.x+i, r.y+r.d); ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y); ctx.stroke(); }
     for (let j = 1; j < r.d; j++) { const p1 = detailProj(r.x, r.y+j), p2 = detailProj(r.x+r.w, r.y+j); ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y); ctx.stroke(); }
-    for (let k = 0; k < 3; k++) { dRect(r.x+0.4+k*1.2, r.y+0.5, 0.9, 1.2, '#7a8fa5', '#46545f', 6);
-      const p = detailProj(r.x+0.85+k*1.2, r.y+1.1); ctx.font = `${dTileW()*0.6}px sans-serif`; ctx.textAlign='center'; ctx.fillText('🚽', p.x, p.y); }
-    dLabel(r.x+r.w/2, r.y+0.2, '🚻 WC', '#dfeaf5', 13);
+    for (let k = 0; k < 3; k++) { dRect(r.x+0.4+k*1.2, r.y+0.6, 0.9, 1.3, '#7a8fa5', '#46545f', 6);
+      const p = detailProj(r.x+0.85+k*1.2, r.y+1.25); ctx.font = `${dTileW()*0.6}px sans-serif`; ctx.textAlign='center'; ctx.fillText('🚽', p.x, p.y); }
+    dLabel(r.x+r.w/2, r.y+0.25, '🚻 WC', '#dfeaf5', 13);
   } else if (id === 't2') {
-    dTiles(12.4, 2.4, 4.2, 3.2, 5, 4, 'vip', t, beat);
-    dLabel(14.5, 2.0, 'VIP DANCEFLOOR', 'rgba(255,215,120,0.6)', 10);
+    const fl = { x: 12.2, y: 2.4, w: 4.4, d: 3.4 };
+    dTiles(fl.x, fl.y, fl.w, fl.d, 5, 4, 'vip', t, beat);
+    dLabel(fl.x + fl.w / 2, fl.y - 0.3, 'VIP DANCEFLOOR', 'rgba(255,215,120,0.6)', 10);
     dRect(9.9, 0.9, 2.6, 1.0, '#8a6a3a', '#b28a4a', 7);
     dLabel(11.2, 0.5, '🍾 CHAMPAGNE', '#ffe9a8', 10);
-    if (roomUnlocked('t2')) dPerson(11.2, 1.5, { s: 1, color: '#1c1c28', skin: '#f0b98c', hair: '#c98b2d', bob: Math.sin(t*2.2)*2 });
+    if (roomUnlocked('t2')) dPerson(11.2, 1.6, { s: 1.1, color: '#1c1c28', skin: '#f0b98c', hair: '#c98b2d', bob: Math.sin(t*2.2)*2 });
     for (const [ax, ay] of [[16.2,6.4],[17.3,2.4]]) { dRect(ax-1.2, ay-0.5, 2.4, 1.0, '#c24e72', '#7a2846', 8);
-      dRect(ax-1.2, ay-0.8, 2.4, 0.35, '#a63a5c', '#611d33', 6); dLabel(ax, ay-1.0, '🛋️', '#ffd0e0', 13); }
+      dRect(ax-1.2, ay-0.85, 2.4, 0.4, '#a63a5c', '#611d33', 6); dLabel(ax, ay-1.05, '🛋️', '#ffd0e0', 13); }
     for (const [tx, ty] of [[13.2,5.5],[15.5,3.2]]) { dRect(tx-0.35, ty-0.35, 0.7, 0.7, '#3a2044', '#1f1026', 6);
       const p=detailProj(tx,ty); ctx.font=`${dTileW()*0.5}px sans-serif`; ctx.textAlign='center'; ctx.fillText('🍾',p.x,p.y); }
   } else if (id === 'roof') {
-    // Sternenhimmel
-    ctx.save(); ctx.fillStyle = 'rgba(255,255,255,0.8)';
-    for (let i=0;i<40;i++){ const p=detailProj(r.x+((i*2.7)%r.w), r.y+((i*1.7)%r.d)); ctx.globalAlpha=(0.25+0.5*Math.abs(Math.sin(t*2+i)))*Math.min(1,focusAmt*1.15); ctx.fillRect(p.x,p.y,2,2);} ctx.restore();
-    dTiles(11.8, 10.8, 4.2, 3.2, 5, 4, 'roof', t, beat);
-    dLabel(13.9, 10.4, 'SKY FLOOR', 'rgba(160,220,255,0.6)', 10);
+    const fl = { x: 11.8, y: 10.8, w: 4.2, d: 3.2 };
+    dTiles(fl.x, fl.y, fl.w, fl.d, 5, 4, 'roof', t, beat);
+    dLabel(fl.x + fl.w / 2, fl.y - 0.3, 'SKY FLOOR', 'rgba(160,220,255,0.6)', 10);
     dRect(9.9, 10.8, 2.6, 1.0, '#2f6f8a', '#3f93b0', 7);
     dLabel(11.2, 10.4, '🍸 SKYBAR', '#a8ecff', 10);
     dRect(A.pool.x-1.5, A.pool.y-1.1, 3.0, 2.2, '#2f7fd6', 'rgba(255,255,255,0.35)', 10);
@@ -991,8 +1026,8 @@ function drawRoomDetail(id, t, beat) {
 
   // Performer im Detail (falls hier)
   if (state.performer.unlocked && state.performer.room === id) {
-    const c = { t1:[6.0,8.8], t2:[15.0,5.2], roof:[13.5,14.5] }[id] || [6,9];
-    dRect(c[0]-0.8, c[1]-0.8, 1.6, 1.6, '#ff5e8a', '#a32e52', 8);
+    const c = { t1:[6.2,9.0], t2:[15.0,5.2], roof:[13.5,14.5] }[id] || [6,9];
+    dRect(c[0]-0.7, c[1]-0.7, 1.4, 1.4, '#ff5e8a', '#a32e52', 8);
     dPerson(c[0], c[1], { s: 1.15, color: '#ff4fa3', skin: '#f0b98c', hair: '#1a1a22', female: true, arms: beat*1.5, dancing: true, bob: Math.sin(beat*1.5)*3 });
   }
 
