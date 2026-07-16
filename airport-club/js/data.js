@@ -12,6 +12,9 @@ export const ROOF_REQ = { level: 20, cost: 250_000_000 };
 // ---- Show-Act (bewegliche Tänzerin) ----------------------------
 export const PERFORMER = { level: 14, cost: 12_000_000, roomMult: 2.2, hypeMult: 1.6 };
 
+// ---- Club-Ausbau (Gebäude vergrößern) --------------------------
+export const CLUB_EXPAND = { max: 5, baseCost: 300_000, growth: 14 };
+
 // ---- Auto-Kassierer (sammelt Geld-Pins von allein ein) ---------
 export const AUTOCOLLECT = { baseCost: 400_000, growth: 5.5, max: 6 };
 export function autoCollectInterval(lvl) {   // Sekunden zwischen Einsammel-Runden

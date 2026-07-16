@@ -9,6 +9,7 @@ import {
   eventDef, eventGuestMult, incomePerSec,
 } from './game.js';
 import { fmt, CASH_STATIONS } from './data.js';
+import { musicBpm } from './sfx.js';
 
 let canvas, ctx, W = 0, H = 0, DPR = 1;
 let particles = [];
@@ -103,7 +104,29 @@ export function initCanvas(el) {
   ctx = canvas.getContext('2d');
   resize();
   new ResizeObserver(resize).observe(canvas.parentElement);
-  canvas.addEventListener('pointerdown', onTap);
+  canvas.addEventListener('pointerdown', onPointerDown);
+  canvas.addEventListener('pointermove', onPointerMove);
+  canvas.addEventListener('pointerup', onPointerUp);
+  canvas.addEventListener('pointercancel', () => { ptr = null; });
+}
+
+// Pointer/Wisch: unterscheidet Tippen (Aktion) von Ziehen (Raum verschieben)
+let ptr = null;
+function onPointerDown(e) {
+  ptr = { x0: e.clientX, y0: e.clientY, lx: e.clientX, ly: e.clientY, moved: false };
+  try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+}
+function onPointerMove(e) {
+  if (!ptr) return;
+  const dx = e.clientX - ptr.lx, dy = e.clientY - ptr.ly;
+  ptr.lx = e.clientX; ptr.ly = e.clientY;
+  if (Math.abs(e.clientX - ptr.x0) + Math.abs(e.clientY - ptr.y0) > 8) ptr.moved = true;
+  if (inRoomView() && detailScale() > 1.01) { detailPan.x += dx; detailPan.y += dy; clampPan(); }
+}
+function onPointerUp(e) {
+  if (!ptr) return;
+  const moved = ptr.moved; ptr = null;
+  if (!moved) handleTap(e);
 }
 
 function resize() {
@@ -151,6 +174,7 @@ function setupCamera() {
 export function enterRoom(id) {
   if (!roomUnlocked(id) || !RM[id]) return false;
   focusRoom = id;
+  detailPan.x = 0; detailPan.y = 0;   // Wisch-Position zurücksetzen
   return true;
 }
 export function exitRoom() { focusRoom = null; }
@@ -174,7 +198,7 @@ function roomFloorQuad(r) {
   return [iso(r.x, r.y), iso(r.x + r.w, r.y), iso(r.x + r.w, r.y + r.d), iso(r.x, r.y + r.d)];
 }
 
-function onTap(e) {
+function handleTap(e) {
   const rect = canvas.getBoundingClientRect();
   const mx = e.clientX - rect.left, my = e.clientY - rect.top;
 
@@ -235,7 +259,8 @@ function inRoom(r, mx = 0.6) { return { x: rnd(r.x + mx, r.x + r.w - mx), y: rnd
 function targetGuestCount() {
   let base = 6 + Math.floor(totalLevels() / 7);
   if (state.roofUnlocked) base += 6; else if (state.t2Unlocked) base += 3;
-  return Math.min(38, Math.floor(base * eventGuestMult()));
+  base += (state.clubSize || 0) * 6;   // größerer Club → mehr Gäste
+  return Math.min(64, Math.floor(base * eventGuestMult()));
 }
 
 function spawnGuest(celeb = false) {
@@ -494,6 +519,28 @@ function drawPersonAt(px, py, s, o = {}) {
     ctx.arc(px, cy - 9 * s, 3.6 * s, Math.PI, 2 * Math.PI);
   }
   ctx.fill();
+
+  // Gesicht (animiert: Blinzeln + Mund im Takt)
+  if (!o.shades) {
+    const hy = cy - 7.5 * s, now = performance.now() / 1000;
+    const blink = Math.sin(now * 1.7 + (o.bobPhase || 0) * 5) > 0.94;
+    ctx.fillStyle = '#241a22';
+    if (blink) {
+      ctx.fillRect(px - 2.1 * s, hy - 0.25 * s, 1.3 * s, 0.5 * s);
+      ctx.fillRect(px + 0.8 * s, hy - 0.25 * s, 1.3 * s, 0.5 * s);
+    } else {
+      ctx.beginPath(); ctx.arc(px - 1.45 * s, hy, 0.82 * s, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(px + 1.45 * s, hy, 0.82 * s, 0, 7); ctx.fill();
+    }
+    const my = cy - 5.3 * s;
+    if (o.dancing) {
+      const mo = 0.35 + 0.55 * Math.abs(Math.sin(o.arms != null ? o.arms : now * 6));
+      ctx.beginPath(); ctx.ellipse(px, my, 1.05 * s, mo * 1.3 * s, 0, 0, 7); ctx.fill();
+    } else {
+      ctx.strokeStyle = '#241a22'; ctx.lineWidth = 0.7 * s;
+      ctx.beginPath(); ctx.arc(px, my - 0.6 * s, 1.35 * s, 0.18 * Math.PI, 0.82 * Math.PI); ctx.stroke();
+    }
+  }
 
   // Accessoires
   if (o.headphones) {
@@ -901,11 +948,24 @@ function updateParticles(dt) {
 //  Bildschirmfüllende Draufsicht, gespeist aus derselben Sim.
 // ============================================================
 function dPad() { return { x: W * 0.05, top: H * 0.088, bot: H * 0.055 }; }
+// Club-Ausbau vergrößert den Detail-Raum (skaliert um die Mitte) → per Wisch navigierbar
+let detailPan = { x: 0, y: 0 };
+function detailScale() { return 1 + (state.clubSize || 0) * 0.34; }
 function detailProj(wx, wy) {
   const r = RM[lastFocusRoom], p = dPad();
-  return { x: p.x + (wx - r.x) / r.w * (W - 2 * p.x), y: p.top + (wy - r.y) / r.d * (H - p.top - p.bot) };
+  const fw = W - 2 * p.x, fh = H - p.top - p.bot;
+  const bx = p.x + (wx - r.x) / r.w * fw, by = p.top + (wy - r.y) / r.d * fh;
+  const S = detailScale(), cx = W / 2, cy = p.top + fh / 2;
+  return { x: cx + (bx - cx) * S + detailPan.x, y: cy + (by - cy) * S + detailPan.y };
 }
-function dTileW() { const r = RM[lastFocusRoom], p = dPad(); return (W - 2 * p.x) / r.w; }
+function dTileW() { const r = RM[lastFocusRoom], p = dPad(); return (W - 2 * p.x) / r.w * detailScale(); }
+function clampPan() {
+  const p = dPad(), S = detailScale();
+  const ox = (W - 2 * p.x) * (S - 1) / 2 + 24;
+  const oy = (H - p.top - p.bot) * (S - 1) / 2 + 40;
+  detailPan.x = Math.max(-ox, Math.min(ox, detailPan.x));
+  detailPan.y = Math.max(-oy, Math.min(oy, detailPan.y));
+}
 function dPersonScale() { return dTileW() / 34; }
 // Optik-Stufe einer Station (0..3) für „krasser werdende" Möbel
 function lvlTier(lvl) { return lvl >= 75 ? 3 : lvl >= 40 ? 2 : lvl >= 15 ? 1 : 0; }
@@ -1030,7 +1090,7 @@ function drawRoomDetail(id, t, beat) {
 
   if (id === 't1') {
     const fl = { x: 2.55, y: 9.4, w: 4.0, d: 4.4 };
-    dTiles(fl.x, fl.y, fl.w, fl.d, 6, 6, 'main', t, beat);
+    dTiles(fl.x, fl.y, fl.w, fl.d, 6 + (state.clubSize || 0), 6 + (state.clubSize || 0), 'main', t, beat);
     dLabel(fl.x + fl.w / 2, fl.y - 0.35, 'DANCEFLOOR', 'rgba(255,255,255,0.5)', 10);
     // DJ-Lichtkegel (additiv)
     ctx.save(); ctx.globalCompositeOperation = 'lighter';
@@ -1238,7 +1298,7 @@ export function renderFrame(now) {
   const dt = Math.min(0.1, (now - lastFrame) / 1000) || 0.016;
   lastFrame = now;
   const t = (now - startTime) / 1000;
-  const bpm = dropActive() ? 160 : 126;
+  const bpm = musicBpm() * (dropActive() ? 1.25 : 1);
   const beat = t * (bpm / 60) * Math.PI;
   tickerX -= dt * 40 * cam.s;
 

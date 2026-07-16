@@ -66,10 +66,24 @@ export function playSfx(name) {
 //  der bei jedem Kick wegduckt (das typische Club-Pumpen).
 //  Im DROP: 16tel-Hats, offener Filter, Extra-Energie.
 // ============================================================
-const BPM = 126;
-const STEP = 60 / BPM / 4;                    // 16tel-Note
-const ROOTS = [55, 55, 43.65, 43.65, 65.41, 65.41, 49, 49]; // A1 A1 F1 F1 C2 C2 G1 G1
-const BASSPAT = [1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1];
+// Verschiedene Musikrichtungen (prozedural) — umschaltbar
+const MUSIC_STYLES = {
+  house:  { name: 'House',       bpm: 124, kickF: [150, 44], kickDec: 0.24, bCut: [320, 900], bWave: 'sawtooth',
+            hats: '8',      clap: true,  stab: true,  stabCut: [1100, 2400], roots: [55, 55, 43.65, 43.65, 65.41, 65.41, 49, 49],
+            bassPat: [1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1] },
+  techno: { name: 'Techno',      bpm: 132, kickF: [160, 40], kickDec: 0.20, bCut: [240, 620], bWave: 'square',
+            hats: 'off',    clap: false, stab: false, stabCut: [900, 2000],  roots: [41.2, 41.2, 41.2, 41.2, 55, 55, 49, 49],
+            bassPat: [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0] },
+  rave:   { name: 'Rave/EDM',    bpm: 150, kickF: [180, 46], kickDec: 0.30, bCut: [420, 1200], bWave: 'sawtooth',
+            hats: '16',     clap: true,  stab: true,  stabCut: [1600, 3000], roots: [55, 55, 65.41, 65.41, 49, 49, 58.27, 58.27],
+            bassPat: [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0] },
+  afro:   { name: 'Afro House',  bpm: 114, kickF: [140, 42], kickDec: 0.26, bCut: [300, 760], bWave: 'sawtooth',
+            hats: 'shaker', clap: true,  stab: true,  stabCut: [1300, 2200], roots: [49, 49, 55, 55, 43.65, 43.65, 58.27, 58.27],
+            bassPat: [1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0] },
+};
+export const MUSIC_ORDER = ['house', 'techno', 'rave', 'afro'];
+let M = MUSIC_STYLES.house;
+let STEP = 60 / M.bpm / 4;                     // 16tel-Note
 
 let music = null; // { master, bus, noise, timer, nextT, step }
 
@@ -99,16 +113,16 @@ function kick(t) {
   const o = a.createOscillator();
   const g = a.createGain();
   o.type = 'sine';
-  o.frequency.setValueAtTime(150, t);
-  o.frequency.exponentialRampToValueAtTime(44, t + 0.11);
+  o.frequency.setValueAtTime(M.kickF[0], t);
+  o.frequency.exponentialRampToValueAtTime(M.kickF[1], t + 0.11);
   g.gain.setValueAtTime(0.85, t);
-  g.gain.exponentialRampToValueAtTime(0.001, t + 0.24);
+  g.gain.exponentialRampToValueAtTime(0.001, t + M.kickDec);
   o.connect(g).connect(music.master);
-  o.start(t); o.stop(t + 0.26);
+  o.start(t); o.stop(t + M.kickDec + 0.03);
   // Sidechain: Bus duckt weg und pumpt zurück
   music.bus.gain.cancelScheduledValues(t);
   music.bus.gain.setValueAtTime(0.07, t);
-  music.bus.gain.linearRampToValueAtTime(0.3, t + 0.28);
+  music.bus.gain.linearRampToValueAtTime(0.3, t + Math.min(0.32, STEP * 4 * 0.95));
 }
 
 function bass(t, freq, open) {
@@ -116,10 +130,10 @@ function bass(t, freq, open) {
   const o = a.createOscillator();
   const f = a.createBiquadFilter();
   const g = a.createGain();
-  o.type = 'sawtooth';
+  o.type = M.bWave;
   o.frequency.value = freq;
   f.type = 'lowpass';
-  f.frequency.value = open ? 900 : 320;
+  f.frequency.value = open ? M.bCut[1] : M.bCut[0];
   g.gain.setValueAtTime(0.62, t);
   g.gain.exponentialRampToValueAtTime(0.01, t + STEP * 0.9);
   o.connect(f).connect(g).connect(music.bus);
@@ -137,7 +151,7 @@ function stab(t, root, open) {
       o.frequency.value = root * ratio;
       o.detune.value = det;
       f.type = 'lowpass';
-      f.frequency.value = open ? 2400 : 1100;
+      f.frequency.value = open ? M.stabCut[1] : M.stabCut[0];
       g.gain.setValueAtTime(0.05, t);
       g.gain.exponentialRampToValueAtTime(0.001, t + 0.32);
       o.connect(f).connect(g).connect(music.bus);
@@ -146,22 +160,42 @@ function stab(t, root, open) {
   }
 }
 
+function tom(t) {   // Afro-Log-Drum
+  const a = actx, o = a.createOscillator(), g = a.createGain();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(165, t); o.frequency.exponentialRampToValueAtTime(78, t + 0.18);
+  g.gain.setValueAtTime(0.28, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+  o.connect(g).connect(music.bus); o.start(t); o.stop(t + 0.24);
+}
+
 function playMusicStep(s, t) {
   const bar = Math.floor(s / 16) % 8;
   const st = s % 16;
   const drop = dropActive();
   if (st % 4 === 0) kick(t);
-  if (st === 4 || st === 12) noiseHit(t, { bp: 1500, gain: 0.12, dur: 0.14 });          // Clap
-  if (drop ? true : st % 2 === 0)                                                        // Hats
-    noiseHit(t, { hp: 8500, gain: st % 4 === 2 ? 0.075 : 0.04, dur: st % 4 === 2 ? 0.08 : 0.04 });
-  if (BASSPAT[st]) bass(t, st % 8 === 6 ? ROOTS[bar] * 2 : ROOTS[bar], drop);
-  if (st === 0 || (st === 10 && bar % 2 === 1)) stab(t, ROOTS[bar], drop);
+  if (M.clap && (st === 4 || st === 12)) noiseHit(t, { bp: 1500, gain: 0.12, dur: 0.14 });   // Clap
+  // Hi-Hats je nach Stil
+  let playHat = false, hg = 0.045, hd = 0.045, hp = 8500;
+  if (drop) { playHat = true; hg = st % 4 === 2 ? 0.08 : 0.045; hd = 0.05; }
+  else if (M.hats === '16') { playHat = true; hg = st % 2 === 0 ? 0.055 : 0.032; }
+  else if (M.hats === '8') { playHat = st % 2 === 0; hg = st % 4 === 2 ? 0.075 : 0.04; hd = st % 4 === 2 ? 0.08 : 0.04; }
+  else if (M.hats === 'off') { playHat = st % 4 === 2; hg = 0.075; hd = 0.06; }
+  else if (M.hats === 'shaker') { playHat = true; hg = st % 4 === 2 ? 0.06 : 0.028; hd = 0.03; hp = 9500; }
+  if (playHat) noiseHit(t, { hp, gain: hg, dur: hd });
+  // Bass
+  if (M.bassPat[st]) bass(t, st % 8 === 6 ? M.roots[bar] * 2 : M.roots[bar], drop);
+  // Stabs
+  if (M.stab && (st === 0 || (st === 10 && bar % 2 === 1))) stab(t, M.roots[bar], drop);
+  // Afro-Log-Drum
+  if (M.name === 'Afro House' && (st === 6 || st === 14)) tom(t);
 }
 
 export function startMusic() {
   if (music || !state.settings.music) return;
   const a = ctx();
   if (!a) return;
+  M = MUSIC_STYLES[state.settings.musicStyle] || MUSIC_STYLES.house;
+  STEP = 60 / M.bpm / 4;
   const master = a.createGain();
   master.gain.value = 0.30;
   const comp = a.createDynamicsCompressor();
@@ -194,6 +228,27 @@ export function stopMusic() {
 export function setMusic(on) {
   state.settings.music = on;
   if (on) startMusic(); else stopMusic();
+}
+
+// ---- Musikrichtung wechseln ----
+export function setMusicStyle(style) {
+  if (!MUSIC_STYLES[style]) return;
+  state.settings.musicStyle = style;
+  M = MUSIC_STYLES[style];
+  STEP = 60 / M.bpm / 4;
+  if (music) { stopMusic(); startMusic(); }   // sofort mit neuem Stil weiterlaufen
+}
+export function cycleMusicStyle() {
+  const cur = state.settings.musicStyle || 'house';
+  const next = MUSIC_ORDER[(MUSIC_ORDER.indexOf(cur) + 1) % MUSIC_ORDER.length];
+  setMusicStyle(next);
+  return MUSIC_STYLES[next].name;
+}
+export function currentMusicStyleName() {
+  return (MUSIC_STYLES[state.settings.musicStyle] || M).name;
+}
+export function musicBpm() {
+  return (MUSIC_STYLES[state.settings.musicStyle] || M).bpm;
 }
 
 export function pauseAudio(hidden) {

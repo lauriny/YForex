@@ -4,10 +4,10 @@
 import * as G from './game.js';
 import {
   STATIONS, STATION_MAP, STAFF, STAFF_MAP, SHOP, ROOMS,
-  T2_REQ, ROOF_REQ, PERFORMER, AUTOCOLLECT, WHEEL, ACHIEVEMENTS,
+  T2_REQ, ROOF_REQ, PERFORMER, AUTOCOLLECT, CLUB_EXPAND, WHEEL, ACHIEVEMENTS,
   autoCollectInterval, MILESTONE_STEP, fmt, fmtTime, costOf, milestoneMult, nextMilestone,
 } from './data.js';
-import { playSfx, setMusic } from './sfx.js';
+import { playSfx, setMusic, cycleMusicStyle, currentMusicStyleName } from './sfx.js';
 import { enterRoom, exitRoom } from './render.js';
 
 const ROOM_META = {
@@ -225,6 +225,26 @@ function openStationsModal() {
       modeBar.querySelectorAll('.mode-btn').forEach(b =>
         b.classList.toggle('active', String(buyMode) === b.dataset.mode));
       list.innerHTML = '';
+      // Club-Ausbau (Gebäude vergrößern) — ganz oben
+      {
+        const maxed = G.state.clubSize >= CLUB_EXPAND.max;
+        const cost = G.clubExpandCost();
+        const afford = !maxed && G.state.money >= cost;
+        const row = el('div', 'station-row hilite' + (afford ? '' : ' dim'));
+        row.innerHTML = `
+          <div class="st-icon">🏗️</div>
+          <div class="st-info">
+            <div class="st-name">Club vergrößern <span class="st-lvl">Stufe ${G.state.clubSize}/${CLUB_EXPAND.max}</span></div>
+            <div class="st-desc">${maxed ? 'Maximale Größe erreicht' : 'Größeres Gebäude & mehr Gäste · (wischen zum Navigieren)'}</div>
+          </div>
+          <button class="btn-buy${afford ? '' : ' disabled'}">
+            ${maxed ? '<b>MAX</b>' : `<span>Ausbauen</span><b>${fmt(cost)} €</b>`}
+          </button>`;
+        if (!maxed) row.querySelector('.btn-buy').addEventListener('click', () => {
+          if (G.buyClubExpand()) { playSfx('chest'); confetti(30); renderRows(); updateHUD(); toast('🏗️ Der Club ist gewachsen! Wisch zum Navigieren.'); }
+        });
+        list.appendChild(row);
+      }
       for (const roomDef of ROOMS) {
         list.appendChild(el('div', 'list-caption', `${roomDef.icon} ${roomDef.name} · ${roomDef.sub}`));
         // Gesperrter Raum → Freischalt-Zeile (Terminal 2 / Rooftop)
@@ -610,6 +630,7 @@ function openSettingsModal() {
   openModal('⚙️ Einstellungen', body => {
     body.innerHTML = `
       <button class="btn-flat" id="set-music">${G.state.settings.music ? '🎵 Musik: an' : '🎵 Musik: aus'}</button>
+      <button class="btn-flat" id="set-style">🎚️ Stil: ${currentMusicStyleName()}</button>
       <button class="btn-flat" id="set-sound">${G.state.settings.sound ? '🔊 Sound: an' : '🔇 Sound: aus'}</button>
       <button class="btn-flat danger" id="set-reset">🗑️ Spielstand löschen</button>
       <p class="modal-text small">„Airport“ Club Simulator · Spielstand wird automatisch lokal gespeichert.<br>
@@ -618,6 +639,12 @@ function openSettingsModal() {
       setMusic(!G.state.settings.music);
       G.save();
       e.target.textContent = G.state.settings.music ? '🎵 Musik: an' : '🎵 Musik: aus';
+    });
+    body.querySelector('#set-style').addEventListener('click', e => {
+      const name = cycleMusicStyle();
+      G.save();
+      e.target.textContent = '🎚️ Stil: ' + name;
+      toast('🎶 Musik: ' + name);
     });
     body.querySelector('#set-sound').addEventListener('click', e => {
       G.state.settings.sound = !G.state.settings.sound;

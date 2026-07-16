@@ -3,7 +3,7 @@
 // ============================================================
 import {
   STATIONS, STATION_MAP, STAFF, STAFF_MAP, SHOP, CASH_STATIONS,
-  T2_REQ, ROOF_REQ, PERFORMER, AUTOCOLLECT, autoCollectInterval,
+  T2_REQ, ROOF_REQ, PERFORMER, AUTOCOLLECT, CLUB_EXPAND, autoCollectInterval,
   BOOST, DROP, OFFLINE, CELEB, PRESTIGE,
   EVENTS, EVENT_GAP, WHEEL, DAILY_MIN_GAP_H, DAILY_STREAK_MAX, ACHIEVEMENTS,
   getPhase, chestReward, costOf, bulkCost, maxAffordable, milestoneMult,
@@ -36,6 +36,7 @@ export const state = {
   roofUnlocked: false,
   stationCash: {},         // id -> aufgelaufener, einsammelbarer Umsatz
   autoCollect: 0,          // Stufe des Auto-Kassierers (0 = aus)
+  clubSize: 0,             // Club-Ausbaustufe (Gebäude größer)
   performer: { unlocked: false, room: 't1' },
   event: null,             // { id, expires }
   nextEventAt: Date.now() + 180_000,
@@ -51,7 +52,7 @@ export const state = {
   questsDone: {},          // "phase:i" -> true
   midChestClaimed: false,
   stats: { drops: 0, celebs: 0, boostsUsed: 0, chests: 0, prestiges: 0 },
-  settings: { sound: true, music: true },
+  settings: { sound: true, music: true, musicStyle: 'house' },
   createdAt: Date.now(),
 };
 
@@ -243,6 +244,21 @@ export function hireStaff(id) {
   state.money -= cost;
   state.staff[id] = lvl + 1;
   emit('staff', { id, level: state.staff[id] });
+  save();
+  return true;
+}
+
+// ---- Club-Ausbau (Gebäude vergrößern) ---------------------------------
+export function clubExpandCost() {
+  return CLUB_EXPAND.baseCost * Math.pow(CLUB_EXPAND.growth, state.clubSize);
+}
+export function buyClubExpand() {
+  if (state.clubSize >= CLUB_EXPAND.max) return false;
+  const cost = clubExpandCost();
+  if (state.money < cost) return false;
+  state.money -= cost;
+  state.clubSize++;
+  emit('clubexpand', { size: state.clubSize });
   save();
   return true;
 }
@@ -520,6 +536,7 @@ export function doPrestige() {
   state.roofUnlocked = false;
   state.stationCash = {};
   state.autoCollect = 0;
+  state.clubSize = 0;
   state.performer.room = 't1';   // Tänzerin bleibt engagiert, zurück auf Mainfloor
   state.hype = 0;
   state.event = null;
