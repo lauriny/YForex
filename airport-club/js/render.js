@@ -504,6 +504,11 @@ function drawPersonAt(px, py, s, o = {}) {
     ctx.beginPath(); ctx.arc(px + 4.4 * s, cy - 7.6 * s, 1.7 * s, 0, 7); ctx.fill();
   }
   if (o.shades) { ctx.fillStyle = '#111'; roundRectP(px - 3.4 * s, cy - 9 * s, 6.8 * s, 2 * s, 1); ctx.fill(); }
+  if (o.earpiece) {
+    ctx.strokeStyle = '#2a2a2a'; ctx.lineWidth = 1.2 * s; ctx.beginPath();
+    ctx.moveTo(px + 4.2 * s, cy - 8.4 * s); ctx.lineTo(px + 5 * s, cy - 3.5 * s); ctx.stroke();
+    ctx.fillStyle = '#3a3a3a'; ctx.beginPath(); ctx.arc(px + 4.3 * s, cy - 8.1 * s, 1 * s, 0, 7); ctx.fill();
+  }
   ctx.restore();
 
   if (o.drink) {
@@ -902,6 +907,8 @@ function detailProj(wx, wy) {
 }
 function dTileW() { const r = RM[lastFocusRoom], p = dPad(); return (W - 2 * p.x) / r.w; }
 function dPersonScale() { return dTileW() / 34; }
+// Optik-Stufe einer Station (0..3) für „krasser werdende" Möbel
+function lvlTier(lvl) { return lvl >= 75 ? 3 : lvl >= 40 ? 2 : lvl >= 15 ? 1 : 0; }
 
 function dRect(wx, wy, ww, wd, fill, stroke, rad = 8) {
   const a = detailProj(wx, wy), b = detailProj(wx + ww, wy + wd);
@@ -1061,13 +1068,36 @@ function drawRoomDetail(id, t, beat) {
       ctx.beginPath(); ctx.arc(p.x, p.y - u * 0.72, u * 0.18, t * 4, t * 4 + Math.PI * 1.4); ctx.stroke(); }
     dPerson(4.45, 8.1, { s: 1.15, color: '#3b2f7a', skin: '#f0b98c', hair: '#1a1a22', headphones: true, arms: beat, bob: Math.sin(beat) * 2, groundZ: u * 0.5 });
     dLabel(4.45, 6.95, '🎧 DJ', '#c9b6ff', 10);
+    // DJ-Optik-Upgrades: je höher die DJ-Stufe, desto mehr Gear
+    const djT = lvlTier(state.stations.dj || 0);
+    if (djT >= 1) {   // LED-Wand mit Equalizer über dem Pult
+      const sx = detailProj(3.35, 7.12), ex = detailProj(5.65, 7.12), sw = ex.x - sx.x, sh = u * 0.72;
+      const topY = sx.y - u * 1.15 - sh;
+      ctx.fillStyle = '#080814'; ctx.beginPath(); ctx.roundRect(sx.x, topY, sw, sh, 4); ctx.fill();
+      const bars = 9;
+      for (let i = 0; i < bars; i++) { const bh = (0.25 + 0.7 * Math.abs(Math.sin(beat + i * 0.6))) * (sh - 4);
+        ctx.fillStyle = `hsl(${(t * 80 + i * 32) % 360},92%,60%)`;
+        ctx.fillRect(sx.x + 3 + i * (sw - 6) / bars, topY + sh - 2 - bh, (sw - 6) / bars - 2, bh); }
+      ctx.strokeStyle = 'rgba(150,200,255,0.5)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.roundRect(sx.x, topY, sw, sh, 4); ctx.stroke();
+    }
+    if (djT >= 2) {   // Laserstrahlen über den Floor
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      const o = detailProj(4.5, 8.05), floorB = detailProj(4.5, fl.y + fl.d);
+      for (let i = 0; i < 5; i++) { const ang = Math.sin(t * 2.2 + i * 1.5) * 0.7;
+        ctx.strokeStyle = `hsla(${(t * 130 + i * 72) % 360},95%,62%,0.55)`; ctx.lineWidth = djT >= 3 ? 2 : 1.4;
+        ctx.beginPath(); ctx.moveTo(o.x, o.y - u * 0.9); ctx.lineTo(o.x + Math.sin(ang) * W * 0.32, floorB.y); ctx.stroke(); }
+      ctx.restore();
+    }
     // === Bar (Top-Tier): Regal mit Backlight, Theke, Zapfhähne, Deko, Barkeeper ===
     dShadow(0.3, 8.85, 1.75, 4.35);
     dBox(0.3, 8.9, 0.55, 4.15, u * 1.25, '#3a2817', '#20130a', '#503a22');
+    const barT = lvlTier(state.stations.bar || 0);
     { const a = detailProj(0.36, 9.05), c = detailProj(0.82, 12.9);
       const sg = ctx.createLinearGradient(a.x, a.y - u * 1.2, a.x, c.y);
-      sg.addColorStop(0, 'rgba(90,190,255,0.32)'); sg.addColorStop(1, 'rgba(255,120,200,0.22)');
-      ctx.fillStyle = sg; ctx.fillRect(a.x, a.y - u * 1.2, c.x - a.x, c.y - (a.y - u * 1.2)); }
+      const al = 0.24 + barT * 0.13;
+      sg.addColorStop(0, `rgba(90,190,255,${al})`); sg.addColorStop(1, `rgba(255,120,200,${al * 0.7})`);
+      ctx.fillStyle = sg; ctx.fillRect(a.x, a.y - u * 1.2, c.x - a.x, c.y - (a.y - u * 1.2));
+      if (barT >= 2) { ctx.strokeStyle = 'rgba(130,220,255,0.6)'; ctx.lineWidth = 2; ctx.strokeRect(a.x, a.y - u * 1.2, c.x - a.x, c.y - (a.y - u * 1.2)); } }
     ctx.font = `${u * 0.32}px sans-serif`; ctx.textAlign = 'center';
     const shelf = ['🍾','🥃','🍷','🍸','🍶','🥂','🍾','🧉'];
     for (let row = 0; row < 2; row++) for (let i = 0; i < 4; i++) { const p = detailProj(0.44 + row * 0.26, 9.35 + i * 0.95); ctx.fillText(shelf[row * 4 + i], p.x, p.y - u * (1.2 - row * 0.42)); }
@@ -1090,28 +1120,32 @@ function drawRoomDetail(id, t, beat) {
     dLabel(8.05, 8.28, 'SHOTS', `hsl(${(t * 80) % 360},80%,68%)`, 10);
     // === Garderobe: zwei Rollständer (Garderobenwagen) mit Klamotten + Garderobiere ===
     const rack = (rx, ry, rw) => {
-      dShadow(rx, ry, rw, 0.3);
-      const l = detailProj(rx, ry), rt = detailProj(rx + rw, ry), railY = l.y - u * 1.05;
-      ctx.lineWidth = 3;
-      for (const px of [l.x + 3, rt.x - 3]) {
+      dShadow(rx, ry, rw, 0.28);
+      const l = detailProj(rx, ry), rt = detailProj(rx + rw, ry), railY = l.y - u * 0.92;
+      ctx.lineWidth = 2.5;
+      for (const px of [l.x + 2.5, rt.x - 2.5]) {
         ctx.strokeStyle = '#9aa0ad'; ctx.beginPath(); ctx.moveTo(px, railY); ctx.lineTo(px, l.y); ctx.stroke();
-        ctx.fillStyle = '#2b2b34'; ctx.beginPath(); ctx.arc(px - 2, l.y, 2.3, 0, 7); ctx.fill(); ctx.beginPath(); ctx.arc(px + 2, l.y, 2.3, 0, 7); ctx.fill();
+        ctx.fillStyle = '#2b2b34'; ctx.beginPath(); ctx.arc(px - 2, l.y, 2, 0, 7); ctx.fill(); ctx.beginPath(); ctx.arc(px + 2, l.y, 2, 0, 7); ctx.fill();
       }
       ctx.strokeStyle = '#c3c7d0'; ctx.beginPath(); ctx.moveTo(l.x, railY); ctx.lineTo(rt.x, railY); ctx.stroke();
       const clothes = ['🧥','👗','🧥','👚','🧥','👕'];
-      ctx.font = `${u * 0.48}px sans-serif`; ctx.textAlign = 'center';
+      ctx.font = `${u * 0.4}px sans-serif`; ctx.textAlign = 'center';
       const n = Math.max(3, Math.round(rw / 0.42));
-      for (let i = 0; i < n; i++) { const x = l.x + (rt.x - l.x) * (i + 0.5) / n; ctx.fillText(clothes[i % clothes.length], x, railY + u * 0.5); }
+      for (let i = 0; i < n; i++) { const x = l.x + (rt.x - l.x) * (i + 0.5) / n; ctx.fillText(clothes[i % clothes.length], x, railY + u * 0.42); }
     };
-    rack(6.55, 13.1, 2.0);
-    rack(6.75, 13.62, 1.7);
-    dPerson(6.4, 13.4, { s: 1.0, color: '#c98fe0', skin: '#f0b98c', hair: '#3a2350', bob: Math.sin(t * 2) * 1.4 });
-    dLabel(7.6, 12.6, 'GARDEROBE', '#e9d5ff', 9);
-    // Eingang: roter Teppich + AIRPORT + Türsteher
+    rack(6.95, 13.2, 1.6);
+    rack(7.1, 13.66, 1.35);
+    dPerson(7.0, 13.45, { s: 0.95, color: '#c98fe0', skin: '#f0b98c', hair: '#3a2350', bob: Math.sin(t * 2) * 1.4 });
+    dLabel(7.85, 12.78, 'GARDEROBE', '#e9d5ff', 9);
+    // Eingang: roter Teppich + AIRPORT + Türsteher (wächst mit Einlass-Stufe)
     const c1 = detailProj(3.6, 13.9), c2 = detailProj(5.4, 15.3), sp = (c2.x - c1.x) * 0.18;
     ctx.fillStyle = '#b3243a'; ctx.beginPath(); ctx.moveTo(c1.x, c1.y); ctx.lineTo(c2.x, c1.y); ctx.lineTo(c2.x + sp, c2.y); ctx.lineTo(c1.x - sp, c2.y); ctx.closePath(); ctx.fill();
     dLabel(2.3, 14.3, '✈ AIRPORT', `hsl(${(t * 40) % 360},90%,65%)`, 11);
-    dPerson(4.5, 14.2, { s: 1.25, color: '#22222e', skin: '#c68a53', hair: '#1a1a22', shades: true });
+    const einLvl = state.stations.einlass || 0, einT = lvlTier(einLvl);
+    const bs = 1.2 + Math.min(0.6, einLvl * 0.013);   // breiter/größer je Stufe
+    const bounce = (bx, suit) => dPerson(bx, 14.25, { s: bs, color: suit, pants: '#14141c', skin: '#8c5a33', hair: '#1a1a22', shades: true, earpiece: true });
+    bounce(einT >= 1 ? 3.75 : 4.5, einT >= 3 ? '#1a1a26' : '#22222e');
+    if (einT >= 1) bounce(5.25, einT >= 3 ? '#1a1a26' : '#2a2a38');   // zweiter Türsteher
   } else if (id === 'klo') {
     ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1.5;
     for (let i = 1; i < r.w; i++) { const p1 = detailProj(r.x+i, r.y+1.6), p2 = detailProj(r.x+i, r.y+r.d); ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y); ctx.stroke(); }

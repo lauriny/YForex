@@ -23,20 +23,6 @@
       <div class="pill" id="hud-cash"><span class="pill-icon">💵</span><span class="pill-val">0</span></div>
     </header>
 
-    <!-- Phasen-Leiste mit Truhen -->
-    <button id="phasebar" title="Aufgaben ansehen">
-      <div class="phase-clip">📋</div>
-      <div class="phase-track-wrap">
-        <div class="phase-label" id="phase-name">Phase 1</div>
-        <div class="phase-track">
-          <div class="phase-fill" id="phase-fill"></div>
-          <span class="phase-count" id="phase-count">0/4</span>
-        </div>
-      </div>
-      <div class="phase-chest" id="chest-mid">📦</div>
-      <div class="phase-chest" id="chest-end">🎁</div>
-    </button>
-
     <!-- Upgrade-Karten -->
     <div id="upgrade-cards"></div>
 
@@ -51,6 +37,7 @@
       </div>
       <!-- schwebende Seiten-Buttons (Tycoon-Style) -->
       <div id="side-rail">
+        <button class="rail-btn" id="btn-quests" title="Aufgaben & Phase"><span class="rail-emoji">📋</span><span class="rail-prog" id="rail-prog">0/4</span></button>
         <button class="rail-btn" id="btn-daily" title="Täglicher Bonus">🎁<span class="rail-badge" id="badge-daily">!</span></button>
         <button class="rail-btn" id="btn-ach" title="Erfolge">🏆<span class="rail-badge" id="badge-ach"></span></button>
         <button class="rail-btn hidden" id="btn-showact" title="Show-Act">💃</button>

@@ -36,12 +36,9 @@ export function updateHUD() {
   $('#hud-cash .pill-val').textContent = fmt(G.state.money);
   $('#income-rate').textContent = fmt(G.incomePerSec()) + ' €/s';
 
-  // Phasen-Leiste
+  // Phasen-Fortschritt (jetzt im Seiten-Button 📋)
   const p = G.phaseInfo();
-  $('#phase-name').textContent = `Phase ${p.idx + 1} · ${p.name}`;
-  $('#phase-count').textContent = `${p.doneCount}/${p.total}`;
-  $('#phase-fill').style.width = (p.doneCount / p.total * 100) + '%';
-  $('#chest-mid').classList.toggle('chest-open', G.state.midChestClaimed);
+  const rp = $('#rail-prog'); if (rp) rp.textContent = `${p.doneCount}/${p.total}`;
 
   // Hype
   const hypePct = G.dropActive() ? 100 : G.state.hype;
@@ -544,7 +541,9 @@ function openDailyModal() {
     wheel.style.background = `conic-gradient(${grad})`;
     WHEEL.forEach((w, i) => {
       const lab = el('div', 'wheel-lab', w.label);
-      lab.style.transform = `translate(-50%,-50%) rotate(${i * seg + seg / 2}deg) translateY(-60px)`;
+      const th = (i * seg + seg / 2) * Math.PI / 180;   // Winkel der Segmentmitte (0 = oben)
+      const R = 52;                                       // Radius, auf dem der Text sitzt
+      lab.style.transform = `translate(-50%,-50%) translate(${Math.sin(th) * R}px, ${-Math.cos(th) * R}px)`;
       wheel.appendChild(lab);
     });
     stage.appendChild(wheel);
@@ -689,7 +688,7 @@ export function offlinePopup(away, money) {
 // ------------------------------------------------------------------
 export function initUI() {
   $('#btn-settings').addEventListener('click', openSettingsModal);
-  $('#phasebar').addEventListener('click', openQuestModal);
+  $('#btn-quests').addEventListener('click', openQuestModal);
   $('#btn-shop').addEventListener('click', openShopModal);
   $('#btn-staff').addEventListener('click', openStaffModal);
   $('#btn-rooms').addEventListener('click', openRoomsModal);
