@@ -217,15 +217,15 @@ function onTap(e) {
       }
     }
   }
-  // Sonst: kleiner Hype-Schub (optional)
-  tapHype();
-  spawnScreenParticle(mx, my, '🔥', 12, 0.8);
-  if (onTapFeedback) onTapFeedback({ type: 'tap', x: e.clientX, y: e.clientY });
+  // Leerer Tap: nichts (Hype entsteht nur automatisch durch den Betrieb)
 }
 
 // ============================================================
 //  Gäste-Simulation (Zustandsautomat auf Iso-Grid)
 // ============================================================
+// Lokaler Toiletten-Ausgang je Raum (Gäste bleiben im Raum sichtbar)
+const WC_DOOR = { t1: { x: 8.5, y: 11.5 }, t2: { x: 17.6, y: 7.9 }, roof: { x: 17.4, y: 16.6 } };
+const BACKSTAGE = { x: 2.3, y: 7.45 };   // hinter/neben dem DJ in Terminal 1
 let guests = [];
 function rnd(a, b) { return a + Math.random() * (b - a); }
 function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -288,16 +288,18 @@ function chooseAct(g) {
     return 'leave';
   }
   if (state.roofUnlocked && r < 0.10) return 'roofbar';
-  if (r < 0.40) return 'dance';
-  if (r < 0.58) return 'bar';
-  if (r < 0.70) return 'shots';
-  if (r < 0.80) return 'wc';
-  if (r < 0.87) return 'ward';
+  const inT1 = roomOf(g.x, g.y) === 't1';
+  if (r < 0.38) return 'dance';
+  if (r < 0.55) return 'bar';
+  if (r < 0.67) return 'shots';
+  if (r < 0.76) return 'wc';
+  if (r < 0.83) return 'ward';
+  if (r < 0.88 && inT1) return 'backstage';
   if (r < 0.93 && state.t2Unlocked) return 'vipdance';
   return 'leave';
 }
 
-function actTarget(act) {
+function actTarget(act, g) {
   switch (act) {
     case 'dance':    return inRoom({ x: 2.5, y: 9.5, w: 5, d: 4 });
     case 'vipdance': return inRoom({ x: 12.5, y: 2.5, w: 4, d: 3.5 });
@@ -308,7 +310,11 @@ function actTarget(act) {
     case 'champ':    return { x: A.vipbar.x + rnd(-0.8, 1), y: A.vipbar.y + 1.3 };
     case 'sofa':     return Math.random() < 0.5 ? { x: A.tables.x + rnd(-0.8, 0.8), y: A.tables.y + 0.9 }
                                                 : { x: A.chill.x + rnd(-0.8, 0.8), y: A.chill.y + 0.9 };
-    case 'wc':       return { x: A.toilet.x + rnd(-0.5, 0.5), y: A.toilet.y + 1 };
+    case 'wc': {      // lokaler WC-Ausgang im aktuellen Raum
+      const d = WC_DOOR[roomOf(g.x, g.y)] || { x: A.toilet.x, y: A.toilet.y };
+      return { x: d.x + rnd(-0.3, 0.3), y: d.y };
+    }
+    case 'backstage': return { x: BACKSTAGE.x + rnd(-0.4, 0.4), y: BACKSTAGE.y };
     case 'ward':     return { x: A.garderobe.x - 0.6, y: A.garderobe.y + 0.6 };
     case 'leave':    return ENTRY_OUT;
     default:         return inRoom(RM.t1);
@@ -323,7 +329,7 @@ function stationForAct(act) {
 
 function pushActivity(g, act) {
   g.act = act;
-  const t = actTarget(act);
+  const t = actTarget(act, g);
   g.mode = 'walk';
   g.path = routeTo(g, t.x, t.y);
 }
@@ -333,6 +339,7 @@ function actDuration(act) {
     case 'bar': case 'shots': case 'champ': case 'roofbar': return rnd(3.5, 7);
     case 'sofa': return rnd(5, 10);
     case 'wc': return rnd(2.5, 4.5);
+    case 'backstage': return rnd(5, 11);
     case 'ward': return rnd(1.5, 2.5);
     default: return 2;
   }
@@ -1028,26 +1035,49 @@ function drawRoomDetail(id, t, beat) {
       ctx.beginPath(); ctx.arc(p.x, p.y - u * 0.72, u * 0.18, t * 4, t * 4 + Math.PI * 1.4); ctx.stroke(); }
     dPerson(4.5, 8.05, { s: 1.15, color: '#3b2f7a', skin: '#f0b98c', hair: '#1a1a22', headphones: true, arms: beat, bob: Math.sin(beat) * 2, groundZ: u * 0.5 });
     dLabel(4.5, 6.9, '🎧 DJ', '#c9b6ff', 10);
-    // Bar (Regal hoch + Theke) + Flaschen + Barkeeper
-    dShadow(0.3, 8.2, 1.6, 5.0);
+    // Backstage (hinterm DJ, links)
+    dShadow(1.95, 7.2, 0.95, 0.6);
+    dBox(1.95, 7.2, 0.95, 0.5, u * 1.1, '#2a1e50', '#160e30', '#3d2c70');
+    { const bp = detailProj(2.42, 7.45); ctx.fillStyle = '#120b28';
+      ctx.beginPath(); ctx.roundRect(bp.x - u * 0.24, bp.y - u * 1.0, u * 0.48, u * 0.9, 3); ctx.fill();
+      ctx.fillStyle = 'rgba(139,92,246,0.45)'; ctx.beginPath(); ctx.roundRect(bp.x - u * 0.24, bp.y - u * 1.0, u * 0.15, u * 0.9, 3); ctx.fill(); }
+    dLabel(2.42, 6.82, 'BACKSTAGE', '#c9b6ff', 8);
+    // Bar links (Regal + Theke + Deko + Barkeeper)
+    dShadow(0.3, 8.2, 1.7, 5.0);
     dBox(0.3, 8.2, 0.55, 5.1, u * 1.15, '#4a3320', '#2c1d0e', '#5e4326');
-    const bottles = ['🍾','🥃','🍷','🍹','🧉']; ctx.font = `${u * 0.4}px sans-serif`; ctx.textAlign = 'center';
-    for (let i = 0; i < 5; i++) { const p = detailProj(0.57, 8.7 + i * 0.95); ctx.fillText(bottles[i], p.x, p.y - u * 1.15); }
-    dBox(0.9, 8.5, 1.0, 4.6, u * 0.55, '#7a5330', '#4a3320', '#8a5f36');
-    dLabel(1.4, 7.95, '🍹 BAR', '#ffd9a8', 10);
-    dPerson(1.4, 9.0, { s: 1.1, color: '#f5f0e6', skin: '#f0b98c', hair: '#5a3617', bob: Math.sin(t * 2.5) * 2, groundZ: u * 0.25 });
-    // Shot-Bar
-    dShadow(7.55, 8.5, 1.2, 2.3);
-    dBox(7.55, 8.5, 1.2, 2.3, u * 0.6, '#6a2f80', '#41224d', '#7d3a95');
-    ctx.font = `${u * 0.5}px sans-serif`;
-    { const p1 = detailProj(7.95, 9.2), p2 = detailProj(8.35, 10.0); ctx.fillText('🥃', p1.x, p1.y - u * 0.6); ctx.fillText('🥃', p2.x, p2.y - u * 0.6); }
-    dLabel(8.1, 8.2, 'SHOTS', `hsl(${(t * 80) % 360},80%,68%)`, 10);
-    // Garderobe
-    dShadow(7.3, 12.6, 1.5, 1.3);
-    dBox(7.3, 12.6, 1.5, 1.3, u * 0.6, '#8a5c9e', '#552f68', '#a06fb4');
-    ctx.font = `${u * 0.4}px sans-serif`;
-    for (let i = 0; i < 3; i++) { const p = detailProj(7.55 + i * 0.45, 13.2); ctx.fillText('🧥', p.x, p.y - u * 0.6); }
-    dLabel(8.05, 12.3, 'GARDEROBE', '#e9d5ff', 9);
+    const bottles = ['🍾','🥃','🍷','🍸','🍾','🧉']; ctx.font = `${u * 0.36}px sans-serif`; ctx.textAlign = 'center';
+    for (let i = 0; i < 6; i++) { const p = detailProj(0.57, 8.55 + i * 0.78); ctx.fillText(bottles[i], p.x, p.y - u * 1.15); }
+    dBox(0.9, 8.5, 1.05, 4.6, u * 0.55, '#7a5330', '#4a3320', '#8a5f36');
+    const barTop = ['🍸','🍹','🧉','🍺','🍸']; ctx.font = `${u * 0.34}px sans-serif`;
+    for (let i = 0; i < 5; i++) { const p = detailProj(1.5, 8.95 + i * 0.78); ctx.fillText(barTop[i], p.x, p.y - u * 0.55); }
+    dLabel(1.45, 7.95, '🍹 BAR', '#ffd9a8', 10);
+    dPerson(1.35, 8.8, { s: 1.1, color: '#f5f0e6', skin: '#f0b98c', hair: '#5a3617', bob: Math.sin(t * 2.5) * 2, groundZ: u * 0.55 });
+    // Shot-Bar rechts (Regal + Theke + Gläserreihen + Barkeeper)
+    dShadow(7.5, 8.35, 1.45, 2.5);
+    dBox(7.5, 8.35, 1.4, 0.42, u * 1.1, '#4a2058', '#2a1233', '#5d2a70');
+    ctx.font = `${u * 0.32}px sans-serif`;
+    for (let i = 0; i < 4; i++) { const p = detailProj(7.68 + i * 0.34, 8.55); ctx.fillText(['🍾','🥃','🍶','🍾'][i], p.x, p.y - u * 1.1); }
+    dBox(7.5, 8.8, 1.4, 1.9, u * 0.55, '#6a2f80', '#41224d', '#7d3a95');
+    ctx.font = `${u * 0.28}px sans-serif`;
+    for (let ri = 0; ri < 3; ri++) for (let ci = 0; ci < 3; ci++) { const p = detailProj(7.72 + ci * 0.32, 9.15 + ri * 0.42); ctx.fillText('🥃', p.x, p.y - u * 0.55); }
+    dPerson(8.2, 8.72, { s: 1.0, color: '#3a1846', skin: '#c68a53', hair: '#1a1a22', bob: Math.sin(t * 3) * 1.6, groundZ: u * 0.55 });
+    dLabel(8.15, 8.05, 'SHOTS', `hsl(${(t * 80) % 360},80%,68%)`, 10);
+    // WC-Ausgang (rechte Wand, zwischen Shots & Garderobe)
+    { const d = WC_DOOR.t1; dShadow(d.x - 0.45, d.y - 0.2, 0.9, 0.5);
+      dBox(d.x - 0.45, d.y - 0.3, 0.9, 0.5, u * 1.0, '#3b4a58', '#222b34', '#5a6b7e');
+      const p = detailProj(d.x, d.y); ctx.fillStyle = '#0c0f16';
+      ctx.beginPath(); ctx.roundRect(p.x - u * 0.26, p.y - u * 0.92, u * 0.52, u * 0.82, 3); ctx.fill();
+      dLabel(d.x, d.y - 1.12, '🚻 WC', '#dfeaf5', 10); }
+    // Garderobe (3D-Schrank + Kleiderstange + Garderobiere)
+    dShadow(7.15, 12.4, 1.8, 1.8);
+    dBox(7.15, 12.45, 1.75, 0.5, u * 1.3, '#6b4080', '#3a2350', '#8a5c9e');
+    { const r1 = detailProj(7.35, 12.9), r2 = detailProj(8.8, 12.9);
+      ctx.strokeStyle = '#d8c2a0'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(r1.x, r1.y - u * 0.95); ctx.lineTo(r2.x, r2.y - u * 0.95); ctx.stroke(); }
+    ctx.font = `${u * 0.44}px sans-serif`; ctx.textAlign = 'center';
+    for (let i = 0; i < 4; i++) { const p = detailProj(7.45 + i * 0.4, 12.9); ctx.fillText('🧥', p.x, p.y - u * 0.7); }
+    dBox(7.2, 13.35, 1.65, 0.5, u * 0.5, '#8a5c9e', '#4d2c5e', '#a06fb4');
+    dPerson(8.05, 12.9, { s: 1.0, color: '#c98fe0', skin: '#f0b98c', hair: '#3a2350', bob: Math.sin(t * 2) * 1.4, groundZ: u * 0.5 });
+    dLabel(8.0, 12.02, 'GARDEROBE', '#e9d5ff', 9);
     // Eingang: roter Teppich + AIRPORT + Türsteher
     const c1 = detailProj(3.6, 13.9), c2 = detailProj(5.4, 15.3), sp = (c2.x - c1.x) * 0.18;
     ctx.fillStyle = '#b3243a'; ctx.beginPath(); ctx.moveTo(c1.x, c1.y); ctx.lineTo(c2.x, c1.y); ctx.lineTo(c2.x + sp, c2.y); ctx.lineTo(c1.x - sp, c2.y); ctx.closePath(); ctx.fill();
@@ -1094,8 +1124,9 @@ function drawRoomDetail(id, t, beat) {
     dPerson(c[0], c[1], { s: 1.15, color: '#ff4fa3', skin: '#f0b98c', hair: '#1a1a22', female: true, arms: beat*1.5, dancing: true, bob: Math.sin(beat*1.5)*3, groundZ: u * 0.35 });
   }
 
-  // Gäste in diesem Raum (nach y sortiert)
-  const gs = guests.filter(g => roomOf(g.x, g.y) === id).sort((a, b) => a.y - b.y);
+  // Gäste NUR wenn strikt innerhalb der Raumgrenzen (kein Rauslaufen aus dem Bild)
+  const gs = guests.filter(g => g.x >= r.x && g.x <= r.x + r.w && g.y >= r.y && g.y <= r.y + r.d)
+    .sort((a, b) => a.y - b.y);
   for (const g of gs) {
     const dancing = g.mode === 'act' && (g.act === 'dance' || g.act === 'vipdance' || g.act === 'roofbar');
     const bob = dancing ? Math.sin(beat + g.bobPhase) * (dropActive() ? 4 : 2.5) : 0;

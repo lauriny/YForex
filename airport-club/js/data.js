@@ -18,12 +18,10 @@ export function autoCollectInterval(lvl) {   // Sekunden zwischen Einsammel-Rund
   return lvl <= 0 ? Infinity : Math.max(2, 20 - lvl * 3);
 }
 
-export const BOOST = { dur: 300, cd: 600, mult: 2 };      // x2-Einkommen: 5 min an, 10 min Cooldown
+export const BOOST = { dur: 300, cd: 300, mult: 2 };      // x2-Einkommen: 5 min an, dann 5 min CD → alle 10 min nutzbar
 export const DROP  = { dur: 12, mult: 3 };                // Hype-DROP: 12 s x3
-export const HYPE_PER_TAP = 3;                            // % Hype pro Tap
-export const HYPE_DECAY = 4;                              // % Hype-Verfall pro Sekunde
-export const OFFLINE = { cap: 8 * 3600, eff: 0.4 };       // Offline: max 8 h, 40 % Effizienz
-export const CELEB = { minGap: 150, maxGap: 330, stay: 20 }; // Promi-Gast (Sekunden)
+export const OFFLINE = { cap: 8 * 3600, eff: 0.3 };       // Offline: max 8 h, 30 % Effizienz
+export const CELEB = { minGap: 180, maxGap: 360, stay: 20 }; // Promi-Gast (Sekunden)
 export const PRESTIGE = { minLevel: 25, div: 5e10, multPerStar: 0.25 };
 
 // ---- Live-Events (Happy Hour / Rush) ---------------------------
@@ -209,8 +207,8 @@ export function getPhase(i) {
 
 export function chestReward(phaseIdx, kind) { // kind: 'mid' | 'end'
   return kind === 'mid'
-    ? { gems: 3 + Math.floor(phaseIdx / 2), minutes: 3 }
-    : { gems: 6 + phaseIdx,                 minutes: 8 };
+    ? { gems: 1 + Math.floor(phaseIdx / 3), minutes: 2 }
+    : { gems: 2 + Math.floor(phaseIdx / 2), minutes: 5 };
 }
 
 // ---- Zahlen & Kosten --------------------------------------------

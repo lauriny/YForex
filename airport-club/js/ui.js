@@ -713,7 +713,7 @@ export function initUI() {
   G.on('levelup', ({ level, gems }) => {
     playSfx('level');
     confetti(24);
-    toast(`⭐ Level ${level}! +${gems} 💎`);
+    toast(`⭐ Level ${level}!` + (gems ? ` +${gems} 💎` : ''));
   });
   G.on('milestone', ({ id, level }) => {
     const st = STATION_MAP[id];

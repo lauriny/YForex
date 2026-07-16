@@ -4,7 +4,7 @@
 import {
   STATIONS, STATION_MAP, STAFF, STAFF_MAP, SHOP, CASH_STATIONS,
   T2_REQ, ROOF_REQ, PERFORMER, AUTOCOLLECT, autoCollectInterval,
-  BOOST, DROP, HYPE_PER_TAP, OFFLINE, CELEB, PRESTIGE,
+  BOOST, DROP, OFFLINE, CELEB, PRESTIGE,
   EVENTS, EVENT_GAP, WHEEL, DAILY_MIN_GAP_H, DAILY_STREAK_MAX, ACHIEVEMENTS,
   getPhase, chestReward, costOf, bulkCost, maxAffordable, milestoneMult,
 } from './data.js';
@@ -135,7 +135,7 @@ export function dropDuration() {
 
 // Spielerlevel leitet sich aus dem Lebenszeit-Umsatz ab (bewusst flach)
 export function levelFor(lifetime) {
-  return 1 + Math.max(0, Math.floor(Math.log(1 + lifetime / 100) / Math.log(2.7)));
+  return 1 + Math.max(0, Math.floor(Math.log(1 + lifetime / 160) / Math.log(2.9)));
 }
 
 // ---- Geld ----------------------------------------------------------
@@ -146,8 +146,9 @@ export function addMoney(n, source) {
   const newLevel = levelFor(state.lifetime);
   while (newLevel > state.level) {
     state.level++;
-    const gems = 1 + Math.floor(state.level / 5);
-    state.gems += gems;
+    // Diamanten bewusst selten: nur alle 5 Level ein Diamant
+    const gems = state.level % 5 === 0 ? 1 : 0;
+    if (gems) state.gems += gems;
     emit('levelup', { level: state.level, gems });
   }
   if (source) emit('money', { n, source });
@@ -286,8 +287,8 @@ export function depositAtStation(id) {
   if (!CASH_STATIONS.includes(id)) return 0;
   const income = stationIncome(id) * globalMult();
   if (income <= 0) return 0;
-  const amount = income * (4 + Math.random() * 4);
-  const cap = income * 40; // max. 40 s Stations-Einkommen pro Kasse
+  const amount = income * (2 + Math.random() * 2);
+  const cap = income * 24; // max. 24 s Stations-Einkommen pro Kasse
   const cur = state.stationCash[id] || 0;
   const add = Math.min(amount, Math.max(0, cap - cur));
   if (add <= 0) return 0;
@@ -309,19 +310,15 @@ export function totalStationCash() {
 }
 
 // ---- Hype & DROP ----------------------------------------------------------
-// Hype füllt sich von allein (DJ-Stufe, Ausbau & Tänzerin beschleunigen das).
+// Hype baut sich AUTOMATISCH durch den Betrieb auf (kein Tippen!):
+// mehr Gäste/DJ/Ausbau/Tänzerin/Events → schneller voll → DROP.
 export function hypeFillSeconds() {
-  let base = Math.max(35, 90 - (state.stations.dj || 0) * 0.8 - totalLevels() * 0.02);
+  let base = Math.max(30, 100 - (state.stations.dj || 0) * 1.0 - totalLevels() * 0.03);
   if (state.performer.unlocked) base /= PERFORMER.hypeMult;
+  if (eventActive()) base *= 0.55;   // Events heizen den Hype an
   return base;
 }
-export function tapHype() {
-  if (!dropActive()) {
-    state.hype = Math.min(100, state.hype + HYPE_PER_TAP);
-    if (state.hype >= 100) triggerDrop();
-  }
-  return 0;
-}
+export function tapHype() { return 0; }   // (deaktiviert – Hype entsteht nicht mehr durch Tippen)
 export function triggerDrop() {
   state.hype = 0;
   state.dropUntil = Date.now() + dropDuration() * 1000;
@@ -339,8 +336,8 @@ export function tapCeleb() {
   state.celeb = null;
   state.stats.celebs++;
   scheduleCeleb();
-  const money = incomePerSec() * (25 + Math.random() * 25);
-  const gems = Math.random() < 0.35 ? 1 + Math.floor(Math.random() * 2) : 0;
+  const money = incomePerSec() * (12 + Math.random() * 13);
+  const gems = Math.random() < 0.15 ? 1 : 0;
   addMoney(money, 'celeb');
   state.gems += gems;
   emit('celeb', { money, gems });
