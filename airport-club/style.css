@@ -1111,6 +1111,25 @@ button { font-family: inherit; border: none; background: none; cursor: pointer; 
   box-shadow: 0 4px 10px rgba(0,0,0,0.45), var(--glass-hi);
 }
 
+/* ---------- Kompakteres Kopf-Layout (mehr Platz fürs Spielfeld) ---------- */
+#hud { padding: 8px 12px 3px; gap: 7px; }
+.pill { padding: 4px 12px 4px 8px; }
+.pill-icon { font-size: 15px; }
+.pill-val { font-size: 14px; min-width: 26px; }
+#btn-settings { width: 36px; height: 36px; font-size: 19px; border-radius: 12px; }
+#phasebar { margin: 4px 12px 2px; padding: 5px 10px; border-radius: 16px; }
+.phase-clip { font-size: 19px; }
+.phase-track { height: 14px; }
+.phase-count { font-size: 10px; }
+.phase-chest { font-size: 19px; }
+#upgrade-cards { padding: 3px 12px 6px; gap: 7px; }
+.up-card { padding: 5px 7px 6px; border-radius: 14px; }
+.up-title { font-size: 9.5px; min-height: 22px; line-height: 1.18; }
+.up-progress { height: 12px; margin: 3px 0; }
+.up-count { font-size: 9px; }
+.up-cost { font-size: 11px; }
+#club-view { margin: 0 12px; }
+
 /* Desktop: hübsch einrahmen */
 @media (min-width: 560px) {
   body { background: radial-gradient(100% 100% at 50% 0%, #1c1440 0%, #08060f 100%); }
