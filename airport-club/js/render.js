@@ -121,7 +121,7 @@ function onPointerMove(e) {
   const dx = e.clientX - ptr.lx, dy = e.clientY - ptr.ly;
   ptr.lx = e.clientX; ptr.ly = e.clientY;
   if (Math.abs(e.clientX - ptr.x0) + Math.abs(e.clientY - ptr.y0) > 8) ptr.moved = true;
-  if (inRoomView() && detailScale() > 1.01) { detailPan.x += dx; detailPan.y += dy; clampPan(); }
+  if (inRoomView()) { const z = detailZoom(); detailCam.x -= dx / z; detailCam.y -= dy / z; clampPan(); }
 }
 function onPointerUp(e) {
   if (!ptr) return;
@@ -174,7 +174,9 @@ function setupCamera() {
 export function enterRoom(id) {
   if (!roomUnlocked(id) || !RM[id]) return false;
   focusRoom = id;
-  detailPan.x = 0; detailPan.y = 0;   // Wisch-Position zurücksetzen
+  detailCam.x = RM[id].x + RM[id].w / 2;   // Kamera auf den gewählten Raum
+  detailCam.y = RM[id].y + RM[id].d / 2;
+  clampPan();
   return true;
 }
 export function exitRoom() { focusRoom = null; }
@@ -219,7 +221,7 @@ function handleTap(e) {
   for (const [stId, anchorId] of Object.entries(PIN_AT)) {
     if ((state.stationCash[stId] || 0) < 1) continue;
     const a = A[anchorId];
-    if (roomV && a.room !== lastFocusRoom) continue;
+    if (roomV && !roomUnlocked(a.room)) continue;
     const s = roomV ? (() => { const p = detailProj(a.x, a.y); return { x: p.x, y: p.y - dTileW() * 1.05 }; })() : iso(a.x, a.y, 1.15);
     if (Math.hypot(mx - s.x, my - s.y) < (roomV ? 40 : 30)) {
       const amount = collectStation(stId);
@@ -329,7 +331,10 @@ function chooseAct(g) {
 
 function actTarget(act, g) {
   switch (act) {
-    case 'dance':    return inRoom({ x: 2.5, y: 9.5, w: 5, d: 4 });
+    case 'dance': {   // Tanzfläche wächst mit dem Club-Ausbau (deckt sich mit dem gezeichneten Floor)
+      const cs = state.clubSize || 0;
+      return inRoom({ x: 2.55 - 0.15 * cs, y: 9.4 - 0.2 * cs, w: Math.min(5.7, 4.0 + 0.55 * cs), d: Math.min(5.4, 4.4 + 0.35 * cs) });
+    }
     case 'vipdance': return inRoom({ x: 12.5, y: 2.5, w: 4, d: 3.5 });
     case 'roofbar':  return Math.random() < 0.5 ? { x: A.skybar.x + rnd(-0.8, 1.2), y: A.skybar.y + 0.9 }
                                                  : { x: A.pool.x + rnd(-1, 1), y: A.pool.y - 1 };
@@ -948,23 +953,23 @@ function updateParticles(dt) {
 //  Bildschirmfüllende Draufsicht, gespeist aus derselben Sim.
 // ============================================================
 function dPad() { return { x: W * 0.05, top: H * 0.088, bot: H * 0.055 }; }
-// Club-Ausbau vergrößert den Detail-Raum (skaliert um die Mitte) → per Wisch navigierbar
-let detailPan = { x: 0, y: 0 };
-function detailScale() { return 1 + (state.clubSize || 0) * 0.34; }
+// Detailansicht = zusammenhängender Grundriss; Kamera schwenkt per Wisch durchs Gebäude.
+let detailCam = { x: 4.5, y: 11 };   // Weltpunkt in Bildschirmmitte
+function detailZoom() { return ((W - 2 * dPad().x) / 9) * (1 + (state.clubSize || 0) * 0.1); }  // px pro Welt-Einheit
+function detailViewCy() { const p = dPad(); return p.top + (H - p.top - p.bot) / 2; }
 function detailProj(wx, wy) {
-  const r = RM[lastFocusRoom], p = dPad();
-  const fw = W - 2 * p.x, fh = H - p.top - p.bot;
-  const bx = p.x + (wx - r.x) / r.w * fw, by = p.top + (wy - r.y) / r.d * fh;
-  const S = detailScale(), cx = W / 2, cy = p.top + fh / 2;
-  return { x: cx + (bx - cx) * S + detailPan.x, y: cy + (by - cy) * S + detailPan.y };
+  const z = detailZoom();
+  return { x: W / 2 + (wx - detailCam.x) * z, y: detailViewCy() + (wy - detailCam.y) * z };
 }
-function dTileW() { const r = RM[lastFocusRoom], p = dPad(); return (W - 2 * p.x) / r.w * detailScale(); }
+function dTileW() { return detailZoom(); }
+const CLUB_BB = { x0: -1.2, y0: -1.2, x1: 20.2, y1: 19.6 };   // Gebäude-Grenzen für Wisch-Clamping
 function clampPan() {
-  const p = dPad(), S = detailScale();
-  const ox = (W - 2 * p.x) * (S - 1) / 2 + 24;
-  const oy = (H - p.top - p.bot) * (S - 1) / 2 + 40;
-  detailPan.x = Math.max(-ox, Math.min(ox, detailPan.x));
-  detailPan.y = Math.max(-oy, Math.min(oy, detailPan.y));
+  const z = detailZoom(), p = dPad();
+  const hw = W / (2 * z), hh = (H - p.top - p.bot) / (2 * z);
+  const cxMin = CLUB_BB.x0 + hw, cxMax = CLUB_BB.x1 - hw;
+  const cyMin = CLUB_BB.y0 + hh, cyMax = CLUB_BB.y1 - hh;
+  detailCam.x = cxMin <= cxMax ? Math.max(cxMin, Math.min(cxMax, detailCam.x)) : (CLUB_BB.x0 + CLUB_BB.x1) / 2;
+  detailCam.y = cyMin <= cyMax ? Math.max(cyMin, Math.min(cyMax, detailCam.y)) : (CLUB_BB.y0 + CLUB_BB.y1) / 2;
 }
 function dPersonScale() { return dTileW() / 34; }
 // Optik-Stufe einer Station (0..3) für „krasser werdende" Möbel
@@ -1061,35 +1066,35 @@ function drawGrassBg() {
   bush(W * 0.05, H * 0.16, 11); bush(W * 0.95, H * 0.22, 13); bush(W * 0.04, H * 0.82, 12); bush(W * 0.96, H * 0.8, 11);
 }
 
+// Ein einzelner Raum (Boden + Wände + Möbel) an seiner Weltposition im Grundriss
 function drawRoomDetail(id, t, beat) {
   const r = RM[id];
-  const pad = dPad();
-  // Hintergrund: Wiese (v2) oder Nachthimmel (Rooftop)
-  if (GRASS[id]) drawGrassBg();
-  else {
-    const g = ctx.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, '#241a4a'); g.addColorStop(1, '#0e0a1e'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-    ctx.save(); ctx.fillStyle = '#fff';
-    for (let i = 0; i < 46; i++) { ctx.globalAlpha = (0.25 + 0.4 * Math.abs(Math.sin(i * 1.3))) * Math.min(1, focusAmt * 1.2); ctx.fillRect((i * 97) % W, (i * 53) % (H * 0.55), 1.6, 1.6); }
-    ctx.restore();
-  }
-  // Cremefarbene Clubwände (v2-Gebäude) + farbiger Boden
-  const fx = pad.x - 16, fy = pad.top - 16, fw = W - 2 * pad.x + 32, fh = H - pad.top - pad.bot + 32;
-  ctx.fillStyle = 'rgba(20,30,10,0.25)'; roundRectP(fx + 4, fy + 8, fw, fh, 22); ctx.fill();
-  ctx.fillStyle = '#e8d5b8'; roundRectP(fx, fy, fw, fh, 22); ctx.fill();
-  ctx.fillStyle = '#d9c39f'; roundRectP(fx, fy + fh - 13, fw, 13, 10); ctx.fill();
-  ctx.fillStyle = FLOORCOL[id] || '#463a72'; roundRectP(pad.x - 6, pad.top - 6, W - 2 * pad.x + 12, H - pad.top - pad.bot + 12, 12); ctx.fill();
-  // 3D-Rückwand (Höhe hinten) + Schlagschatten auf den Boden
   const u = dTileW();
-  const wallH = u * 1.15;
-  ctx.fillStyle = '#c9b39a'; roundRectP(pad.x - 6, pad.top - 6, W - 2 * pad.x + 12, wallH, 10); ctx.fill();
-  ctx.fillStyle = '#b89f82'; ctx.fillRect(pad.x - 6, pad.top - 6 + wallH - 4, W - 2 * pad.x + 12, 4);
-  const wsh = ctx.createLinearGradient(0, pad.top - 6 + wallH, 0, pad.top - 6 + wallH + u * 0.9);
-  wsh.addColorStop(0, 'rgba(0,0,0,0.33)'); wsh.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = wsh; ctx.fillRect(pad.x - 6, pad.top - 6 + wallH, W - 2 * pad.x + 12, u * 0.9);
+  const a0 = detailProj(r.x, r.y), c0 = detailProj(r.x + r.w, r.y + r.d);
+  const rw = c0.x - a0.x, rh = c0.y - a0.y;
+  // Boden
+  ctx.fillStyle = FLOORCOL[id] || '#463a72';
+  ctx.beginPath(); ctx.roundRect(a0.x, a0.y, rw, rh, 6); ctx.fill();
+  // Rückwand (Höhe) am oberen Raumrand + Schlagschatten auf den Boden
+  const wallH = u * 1.0;
+  ctx.fillStyle = '#c9b39a'; ctx.fillRect(a0.x, a0.y - wallH, rw, wallH);
+  ctx.fillStyle = '#b89f82'; ctx.fillRect(a0.x, a0.y - 4, rw, 4);
+  const wsh = ctx.createLinearGradient(0, a0.y, 0, a0.y + u * 0.8);
+  wsh.addColorStop(0, 'rgba(0,0,0,0.3)'); wsh.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = wsh; ctx.fillRect(a0.x, a0.y, rw, u * 0.8);
+  if (!roomUnlocked(id)) {
+    ctx.fillStyle = 'rgba(8,5,20,0.62)'; ctx.beginPath(); ctx.roundRect(a0.x, a0.y, rw, rh, 6); ctx.fill();
+    const cc = detailProj(r.x + r.w / 2, r.y + r.d / 2); ctx.textAlign = 'center';
+    ctx.font = `${Math.min(30, u * 0.7)}px sans-serif`; ctx.fillText('🔒', cc.x, cc.y - u * 0.2);
+    ctx.fillStyle = '#fff'; ctx.font = `800 ${Math.max(10, u * 0.26)}px system-ui, sans-serif`; ctx.fillText(r.name, cc.x, cc.y + u * 0.55);
+    ctx.fillStyle = '#ffd93c'; ctx.font = `700 ${Math.max(8, u * 0.2)}px system-ui, sans-serif`;
+    ctx.fillText(id === 'roof' && !state.t2Unlocked ? 'Erst Terminal 2' : 'Antippen zum Freischalten', cc.x, cc.y + u * 1.05);
+    return;
+  }
 
   if (id === 't1') {
-    const fl = { x: 2.55, y: 9.4, w: 4.0, d: 4.4 };
+    const cs = state.clubSize || 0;
+    const fl = { x: 2.55 - 0.15 * cs, y: 9.4 - 0.2 * cs, w: Math.min(5.7, 4.0 + 0.55 * cs), d: Math.min(5.4, 4.4 + 0.35 * cs) };
     dTiles(fl.x, fl.y, fl.w, fl.d, 6 + (state.clubSize || 0), 6 + (state.clubSize || 0), 'main', t, beat);
     dLabel(fl.x + fl.w / 2, fl.y - 0.35, 'DANCEFLOOR', 'rgba(255,255,255,0.5)', 10);
     // DJ-Lichtkegel (additiv)
@@ -1238,17 +1243,36 @@ function drawRoomDetail(id, t, beat) {
     dRect(A.pool.x-1.4, A.pool.y-1.0, 2.8, 2.0, '#2f7fd6', 'rgba(255,255,255,0.35)', 10);
     dLabel(A.pool.x, A.pool.y-1.35, '🏊 POOL', '#bfe6ff', 10);
   }
+}
 
-  // Performer im Detail (falls hier) — auf 3D-Bühne
-  if (state.performer.unlocked && state.performer.room === id) {
-    const c = { t1:[6.2,9.0], t2:[15.0,5.2], roof:[13.5,14.5] }[id] || [6,9];
+// Zusammenhängender Grundriss: Gebäude + alle Räume + Gäste + Pins in Weltkoordinaten.
+// Per Wisch schwenkt die Kamera (detailCam) durchs Gebäude — Wände sind Teil des Baus.
+function drawClub(t, beat) {
+  drawGrassBg();
+  // Gebäude-Fundament (cremefarben) mit Schlagschatten — bewegt sich mit dem Grundriss
+  const bb0 = detailProj(CLUB_BB.x0, CLUB_BB.y0), bb1 = detailProj(CLUB_BB.x1, CLUB_BB.y1);
+  const bw = bb1.x - bb0.x, bh = bb1.y - bb0.y;
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.beginPath(); ctx.roundRect(bb0.x + 7, bb0.y + 12, bw, bh, 18); ctx.fill();
+  ctx.fillStyle = '#d8c6ab';
+  ctx.beginPath(); ctx.roundRect(bb0.x, bb0.y, bw, bh, 18); ctx.fill();
+  ctx.fillStyle = '#c9b79b';
+  ctx.beginPath(); ctx.roundRect(bb0.x + 6, bb0.y + 6, bw - 12, bh - 12, 14); ctx.fill();
+
+  // Räume (Boden + Wände + Möbel) in Tiefen-Reihenfolge — hinten zuerst
+  for (const id of ['klo', 't2', 'roof', 't1']) drawRoomDetail(id, t, beat);
+
+  // Performer auf 3D-Bühne im zugewiesenen Raum
+  if (state.performer.unlocked && roomUnlocked(state.performer.room)) {
+    const pid = state.performer.room, u = dTileW();
+    const c = { t1:[6.2,9.0], t2:[15.0,5.2], roof:[13.5,14.5] }[pid] || [6,9];
     dShadow(c[0]-0.7, c[1]-0.7, 1.4, 1.4);
     dBox(c[0]-0.7, c[1]-0.7, 1.4, 1.4, u * 0.35, '#ff5e8a', '#a32e52', '#ff85b3');
     dPerson(c[0], c[1], { s: 1.15, color: '#ff4fa3', skin: '#f0b98c', hair: '#1a1a22', female: true, arms: beat*1.5, dancing: true, bob: Math.sin(beat*1.5)*3, groundZ: u * 0.35 });
   }
 
-  // Gäste NUR wenn strikt innerhalb der Raumgrenzen (kein Rauslaufen aus dem Bild)
-  const gs = guests.filter(g => g.x >= r.x && g.x <= r.x + r.w && g.y >= r.y && g.y <= r.y + r.d)
+  // Gäste (alle sichtbaren im Gebäude), tiefensortiert nach Welt-y
+  const gs = guests.filter(g => g.x >= CLUB_BB.x0 && g.x <= CLUB_BB.x1 && g.y >= CLUB_BB.y0 && g.y <= CLUB_BB.y1)
     .sort((a, b) => a.y - b.y);
   for (const g of gs) {
     const dancing = g.mode === 'act' && (g.act === 'dance' || g.act === 'vipdance' || g.act === 'roofbar');
@@ -1263,12 +1287,13 @@ function drawRoomDetail(id, t, beat) {
       emote, alpha: g.alpha, glow: g.celeb, star: g.celeb, bobPhase: g.bobPhase });
   }
 
-  // Geld-Pins dieses Raums
+  // Geld-Pins aller freigeschalteten Räume
   for (const [stId, anchorId] of Object.entries(PIN_AT)) {
-    if (A[anchorId].room !== id) continue;
+    const a = A[anchorId];
+    if (!roomUnlocked(a.room)) continue;
     const amount = state.stationCash[stId] || 0;
     if (amount < 1) continue;
-    const a = A[anchorId], p = detailProj(a.x, a.y);
+    const p = detailProj(a.x, a.y);
     drawPinAt(p.x, p.y - dTileW() * 1.05, amount, t, stId.length);
   }
 }
@@ -1351,7 +1376,7 @@ export function renderFrame(now) {
   if (focusAmt > 0.01) {
     ctx.save();
     ctx.globalAlpha = Math.min(1, focusAmt * 1.2);
-    drawRoomDetail(lastFocusRoom, t, beat);
+    drawClub(t, beat);
     ctx.restore();
   }
 
