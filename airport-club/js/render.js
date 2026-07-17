@@ -241,7 +241,7 @@ function handleTap(e) {
   }
   // In der Iso-Übersicht: Tap auf einen Raum wählt ihn aus
   if (!inRoomView()) {
-    for (const id of ['roof', 't2', 't1', 'klo']) {
+    for (const id of ['roof', 't2', 't1']) {   // WC gehört zu Terminal 1
       if (pointInQuad(mx, my, roomFloorQuad(RM[id]))) {
         if (roomUnlocked(id)) {
           enterRoom(id);
@@ -261,7 +261,9 @@ function handleTap(e) {
 // ============================================================
 // Lokaler Toiletten-Ausgang je Raum (Gäste bleiben im Raum sichtbar)
 // WC-Ausgang zeigt in die Richtung, in der das Klo in der Übersicht liegt (oben-links)
-const WC_DOOR = { t1: { x: 1.05, y: 8.55 }, t2: { x: 17.6, y: 7.9 }, roof: { x: 17.4, y: 16.6 } };
+const WC_DOOR = { t1: { x: 1.8, y: 7.35 }, t2: { x: 17.6, y: 7.9 }, roof: { x: 17.4, y: 16.6 } };   // t1: Tür zum WC-Anbau oben-links
+// WC-Anbau: kleiner Raum direkt über Terminal 1 (Teil von T1, kein eigener wechselbarer Raum)
+const WC_ANNEX = { x: 0.4, y: 4.9, w: 3.0, d: 2.0 };
 const BACKSTAGE = { x: 7.35, y: 7.7 };   // oben-rechts, neben dem DJ in Terminal 1
 let guests = [];
 function rnd(a, b) { return a + Math.random() * (b - a); }
@@ -982,15 +984,17 @@ let detailCam = { x: 4.5, y: 11 };   // Weltmittelpunkt des gezeigten Raums
 let detailScale = 40;                // px pro Welt-Einheit (pro Raum eingepasst)
 let framedRoom = 't1';               // aktuell gezeigter Raum
 let roomFade = 0;                    // kurzer Überblend-Effekt beim Raumwechsel
-const ROOM_ORDER = ['t1', 'klo', 't2', 'roof'];
+const ROOM_ORDER = ['t1', 't2', 'roof'];   // WC ist als Anbau Teil von Terminal 1, kein eigener Raum
 const CLUB_BB = { x0: -1.2, y0: -1.2, x1: 20.2, y1: 19.6 };   // (nur noch für Iso-Kamerarechnung)
-// passt einen Raum (inkl. Rückwand oben) formatfüllend in die Detailfläche ein
+// passt einen Raum (inkl. Rückwand oben, bei T1 inkl. WC-Anbau) formatfüllend in die Detailfläche ein
 function roomFrame(id) {
   const r = RM[id], p = dPad();
   const aw = W - 2 * p.x, ah = H - p.top - p.bot;
   const wallPad = 1.15;                       // Platz für die Rückwand-Höhe (Welt-Einheiten)
-  const s = Math.min(aw / (r.w + 0.6), ah / (r.d + wallPad + 0.4));
-  return { x: r.x + r.w / 2, y: r.y + r.d / 2 - wallPad / 2, s };
+  let x0 = r.x - 0.3, y0 = r.y - wallPad, x1 = r.x + r.w + 0.3, y1 = r.y + r.d + 0.2;
+  if (id === 't1') { y0 = WC_ANNEX.y - 1.0; x0 = Math.min(x0, WC_ANNEX.x - 0.3); }   // WC-Anbau oben mit einrahmen
+  const s = Math.min(aw / (x1 - x0), ah / (y1 - y0));
+  return { x: (x0 + x1) / 2, y: (y0 + y1) / 2, s };
 }
 function frameRoom(id, fade = true) {
   const f = roomFrame(id); detailCam.x = f.x; detailCam.y = f.y; detailScale = f.s; framedRoom = id;
@@ -1108,15 +1112,43 @@ const OBSTACLES = [
   { x: 13.7, y: 13.8, w: 3.2,  d: 2.4,  room: 'roof' }, // Pool
 ];
 
-// grüner Wiesen-Hintergrund wie in v2
+// Industriegebiet drumherum: Asphalt + Fassaden benachbarter Gebäude (keine Wiese)
 function drawGrassBg() {
-  ctx.fillStyle = '#7ec24f'; ctx.fillRect(0, 0, W, H);
-  ctx.fillStyle = 'rgba(255,255,255,0.05)';
-  const cell = W / 8;
-  for (let i = 0; i < 8; i++) for (let j = 0; j < Math.ceil(H / cell); j++) if ((i + j) % 2 === 0) ctx.fillRect(i * cell, j * cell, cell, cell);
-  const bush = (x, y, rr) => { ctx.fillStyle = '#3f9142'; ctx.beginPath(); ctx.arc(x, y, rr, 0, 7); ctx.fill();
-    ctx.fillStyle = '#54ad55'; ctx.beginPath(); ctx.arc(x - rr * 0.3, y - rr * 0.3, rr * 0.5, 0, 7); ctx.fill(); };
-  bush(W * 0.05, H * 0.16, 11); bush(W * 0.95, H * 0.22, 13); bush(W * 0.04, H * 0.82, 12); bush(W * 0.96, H * 0.8, 11);
+  // Asphalt-Boden
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#3b3f45'); g.addColorStop(1, '#2c2f34');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // Asphalt-Platten-Raster + ein paar Ölflecken
+  ctx.strokeStyle = 'rgba(0,0,0,0.18)'; ctx.lineWidth = 1;
+  const cell = W / 6;
+  for (let x = cell; x < W; x += cell) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+  for (let y = cell; y < H; y += cell) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+  ctx.fillStyle = 'rgba(0,0,0,0.12)';
+  for (const [fx, fy, r] of [[0.2, 0.28, 22], [0.8, 0.66, 26], [0.5, 0.9, 20]]) { ctx.beginPath(); ctx.ellipse(W * fx, H * fy, r, r * 0.5, 0, 0, 7); ctx.fill(); }
+  // Fassade eines Nachbargebäudes als Streifen (Wellblech/Fenster) an einer Kante
+  const facade = (x, y, w, h, vertical) => {
+    const fg = ctx.createLinearGradient(x, y, vertical ? x + w : x, vertical ? y : y + h);
+    fg.addColorStop(0, '#5a5f68'); fg.addColorStop(1, '#40444c');
+    ctx.fillStyle = fg; ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = 'rgba(0,0,0,0.28)';                    // Kanten-Schatten zum Hof hin
+    if (vertical) ctx.fillRect(x + (w > 0 && x < W / 2 ? w - 5 : 0), y, 5, h);
+    else ctx.fillRect(x, y + (y < H / 2 ? h - 5 : 0), w, 5);
+    ctx.fillStyle = 'rgba(20,22,26,0.75)';                 // Fensterreihen
+    const step = 26;
+    if (vertical) { for (let yy = y + 12; yy < y + h - 12; yy += step) for (let xx = x + 6; xx < x + w - 6; xx += 16) ctx.fillRect(xx, yy, 10, 14); }
+    else { for (let xx = x + 12; xx < x + w - 12; xx += step) for (let yy = y + 6; yy < y + h - 6; yy += 16) ctx.fillRect(xx, yy, 14, 10); }
+  };
+  const bw = Math.max(30, W * 0.11), bh = Math.max(30, H * 0.07);
+  facade(0, 0, bw, H, true);            // linkes Gebäude
+  facade(W - bw, 0, bw, H, true);       // rechtes Gebäude
+  facade(0, 0, W, bh, false);           // Gebäude oben
+  // Container / Deko im Hof
+  const crate = (cx, cy, w, h, col) => { ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(cx + 3, cy + 4, w, h);
+    ctx.fillStyle = col; ctx.fillRect(cx, cy, w, h);
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.lineWidth = 1; ctx.strokeRect(cx + 1.5, cy + 1.5, w - 3, h - 3);
+    ctx.strokeStyle = 'rgba(0,0,0,0.35)'; for (let rx = cx + 6; rx < cx + w - 3; rx += 6) { ctx.beginPath(); ctx.moveTo(rx, cy + 2); ctx.lineTo(rx, cy + h - 2); ctx.stroke(); } };
+  crate(W * 0.03, H * 0.42, 26, 34, '#b6653a'); crate(W * 0.03, H * 0.55, 26, 30, '#3a6ea5');
+  crate(W - W * 0.03 - 26, H * 0.5, 26, 32, '#4f8a4a');
 }
 
 // Ein einzelner Raum (Boden + Wände + Möbel) an seiner Weltposition im Grundriss
@@ -1175,13 +1207,7 @@ function drawRoomDetail(id, t, beat) {
       ctx.lineTo(djp.x + Math.sin(ang) * W * 0.24 + W * 0.12, fb.y);
       ctx.closePath(); ctx.fill(); }
     ctx.restore();
-    // WC-Ausgang (linke Wand über der Bar → Richtung Klo wie in der Übersicht)
-    { dShadow(0.3, 8.05, 1.05, 0.5);
-      dBox(0.3, 8.05, 1.05, 0.5, u * 1.05, '#3b4a58', '#202a33', '#5a6b7e');
-      const p = detailProj(0.8, 8.1); ctx.fillStyle = '#0c0f16';
-      ctx.beginPath(); ctx.roundRect(p.x - u * 0.28, p.y - u * 0.95, u * 0.56, u * 0.88, 3); ctx.fill();
-      ctx.fillStyle = 'rgba(120,180,220,0.5)'; ctx.beginPath(); ctx.roundRect(p.x - u * 0.28, p.y - u * 0.95, u * 0.56, u * 0.15, 3); ctx.fill();
-      dLabel(1.55, 8.02, '🚻 WC', '#dfeaf5', 10); }
+    // (WC ist jetzt der Anbau oben-links, gezeichnet in drawWcAnnex)
     // Backstage (oben-rechts, neben DJ)
     { dShadow(6.75, 7.0, 1.2, 0.5);
       dBox(6.75, 7.0, 1.2, 0.5, u * 1.15, '#2a1e50', '#160e30', '#3d2c70');
@@ -1488,11 +1514,38 @@ function drawBuildingDecor(t) {
   decoPlant(0.9, 17.6, u); decoPlant(8.2, 17.4, u);
 }
 
+// kleiner WC-Anbau über Terminal 1 (fest zu T1 gehörend, kein wechselbarer Raum)
+function drawWcAnnex(t) {
+  const a = WC_ANNEX, u = dTileW();
+  const p0 = detailProj(a.x, a.y), p1 = detailProj(a.x + a.w, a.y + a.d);
+  const w = p1.x - p0.x, h = p1.y - p0.y;
+  ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.ellipse(p0.x + w / 2, p1.y, w * 0.55, 8, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = '#46586a'; ctx.beginPath(); ctx.roundRect(p0.x, p0.y, w, h, 6); ctx.fill();     // Boden
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)'; ctx.lineWidth = 1;                                    // Fliesen
+  for (let i = 1; i < a.w; i++) { const q = detailProj(a.x + i, a.y); ctx.beginPath(); ctx.moveTo(q.x, p0.y); ctx.lineTo(q.x, p1.y); ctx.stroke(); }
+  for (let j = 1; j < a.d; j++) { const q = detailProj(a.x, a.y + j); ctx.beginPath(); ctx.moveTo(p0.x, q.y); ctx.lineTo(p1.x, q.y); ctx.stroke(); }
+  const wallH = u * 0.9;                                                                            // Rückwand + Neon-Trim
+  ctx.fillStyle = '#282034'; ctx.fillRect(p0.x, p0.y - wallH, w, wallH);
+  ctx.fillStyle = ACCENT.klo; ctx.globalAlpha = 0.7; ctx.fillRect(p0.x, p0.y - wallH + 1, w, 2); ctx.globalAlpha = 1;
+  ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(p0.x, p0.y, 3, h); ctx.fillRect(p1.x - 3, p0.y, 3, h);
+  for (let k = 0; k < 2; k++) { const bx = a.x + 0.35 + k * 1.15;                                   // 2 WC-Kabinen
+    dShadow(bx, a.y + 0.35, 0.8, 0.85); dBox(bx, a.y + 0.35, 0.8, 0.85, u * 0.38, '#7a8fa5', '#46545f', '#8fa4b8');
+    const q = detailProj(bx + 0.4, a.y + 0.78); ctx.font = `${u * 0.3}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('🚽', q.x, q.y - u * 0.38); }
+  dBox(a.x + 2.45, a.y + 0.4, 0.4, 1.2, u * 0.3, '#c3ccd6', '#8996a3', '#dde4ec');                  // Waschbecken
+  const wsp = detailProj(a.x + 2.65, a.y + 1.0); ctx.font = `${u * 0.22}px sans-serif`; ctx.fillText('🚰', wsp.x, wsp.y - u * 0.3);
+  const dxl = detailProj(a.x + 0.95, a.y + a.d), dxr = detailProj(a.x + 1.95, a.y + a.d);           // Türschwelle nach T1
+  ctx.fillStyle = '#3d3660'; ctx.fillRect(dxl.x, p1.y - 2, dxr.x - dxl.x, 7);
+  const lp = detailProj(a.x + a.w / 2, a.y - 0.12); ctx.fillStyle = '#dfeaf5';
+  ctx.font = `800 ${Math.max(9, u * 0.22)}px system-ui, sans-serif`; ctx.textAlign = 'center';
+  ctx.fillText('🚻 WC', lp.x, lp.y);
+}
+
 // Einzel-Raum-Ansicht: genau EIN Raum bildschirmfüllend (Boden, Wände, Möbel, Gäste, Geld-Pins).
 function drawFocusRoom(t, beat) {
   const id = framedRoom, r = RM[id];
   drawGrassBg();
   drawRoomDetail(id, t, beat);        // Boden + Wände + Möbel + Deko + Shabby des Raums
+  if (id === 't1') drawWcAnnex(t);    // WC-Anbau oben-links an Terminal 1
 
   // Performer auf 3D-Bühne, falls diesem Raum zugewiesen
   if (state.performer.unlocked && state.performer.room === id && roomUnlocked(id)) {
@@ -1584,7 +1637,6 @@ export function renderFrame(now) {
 
   // Räume (Boden/Wände/Deko) + Sammel-Liste für tiefen­sortierte Objekte
   const drawables = [];
-  drawKlo(t);
   drawT2(t, beat, drawables);
   drawT1(t, beat, drawables);
   drawRoof(t, beat, drawables);
