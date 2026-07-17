@@ -155,7 +155,7 @@ function onPointerUp(e) {
 
 function resize() {
   const r = canvas.parentElement.getBoundingClientRect();
-  DPR = Math.min(2, window.devicePixelRatio || 1);
+  DPR = Math.min(1.5, window.devicePixelRatio || 1);   // Deckel für flüssige Performance auf Retina
   W = r.width; H = r.height;
   canvas.width = W * DPR;
   canvas.height = H * DPR;
@@ -301,7 +301,7 @@ function targetGuestCount() {
   if (state.roofUnlocked) base += 6; else if (state.t2Unlocked) base += 3;
   base += (state.clubSize || 0) * 6;   // größerer Club → mehr Gäste
   base += marketingGuestBonus();       // Marketing → mehr Gäste bis der Raum voll ist
-  return Math.min(90, Math.floor(base * eventGuestMult()));
+  return Math.min(60, Math.floor(base * eventGuestMult()));   // Deckel für flüssige Performance
 }
 
 function spawnGuest(celeb = false) {
@@ -1126,22 +1126,21 @@ function dTiles(wx, wy, ww, wd, cols, rows, palette, t, beat) {
   ctx.fillStyle = '#0f0b22';
   ctx.beginPath(); ctx.roundRect(a.x - 3, b.y - 6, W0 + 6, lift, 8); ctx.fill();
   const bev = Math.max(2.5, ch * 0.18);
+  // Performance: solide Füllungen statt eines Gradients pro Kachel (spart hunderte Gradient-Objekte/Frame)
   for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) {
     const pulse = 0.5 + 0.5 * Math.sin(beat + i + j);
     let hue, light;
     if (palette === 'vip') { hue = 42 + ((i + j) % 3) * 8; light = 34 + pulse * 22; }
     else if (palette === 'roof') { hue = (t * 30 + (i + j) * 24) % 360; light = 30 + pulse * 18; }
     else { hue = themeFloorHue(i, j, t); light = dropActive() ? 52 + pulse * 16 : 37 + pulse * 13; }
+    hue = hue | 0;
     const tx = a.x + i * cw + 1.5, ty = a.y + j * ch + 1.5, tw = cw - 3, th = ch - 3;
-    ctx.fillStyle = `hsl(${hue},72%,${Math.max(10, light - 24)}%)`;               // dunkle Kante (Höhe)
+    ctx.fillStyle = `hsl(${hue},72%,${Math.max(10, light - 24) | 0}%)`;            // dunkle Kante (Höhe)
     ctx.beginPath(); ctx.roundRect(tx, ty + th - bev, tw, bev + 2.5, 3); ctx.fill();
-    const tg = ctx.createLinearGradient(0, ty, 0, ty + th);                       // Oberseite mit Verlauf
-    tg.addColorStop(0, `hsl(${hue},95%,${Math.min(78, light + 14)}%)`);
-    tg.addColorStop(1, `hsl(${hue},85%,${Math.max(14, light - 5)}%)`);
-    ctx.fillStyle = tg;
+    ctx.fillStyle = `hsl(${hue},90%,${Math.min(72, light + 6) | 0}%)`;            // Oberseite (solide)
     ctx.beginPath(); ctx.roundRect(tx, ty, tw, th - bev * 0.5, 3); ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.3)';                                      // Glanz
-    ctx.beginPath(); ctx.roundRect(tx + 2, ty + 1.5, tw - 4, th * 0.26, 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.28)';                                     // Glanz
+    ctx.fillRect(tx + 2, ty + 1.5, tw - 4, th * 0.24);
   }
   ctx.strokeStyle = 'rgba(255,255,255,0.28)'; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.roundRect(a.x - 3, a.y - 3, W0 + 6, H0 + 6, 8); ctx.stroke();
@@ -1284,7 +1283,7 @@ function drawRoomDetail(id, t, beat) {
     const cs = state.clubSize || 0;
     const grow = t1Grow();
     const fl = t1DanceFloor();          // wächst mit dem Gebäude
-    dTiles(fl.x, fl.y, fl.w, fl.d, 6 + Math.round(grow.dw), 6 + Math.round(grow.dd), 'main', t, beat);
+    dTiles(fl.x, fl.y, fl.w, fl.d, Math.min(9, 6 + Math.round(grow.dw)), Math.min(9, 6 + Math.round(grow.dd)), 'main', t, beat);
     dLabel(fl.x + fl.w / 2, fl.y - 0.35, 'DANCEFLOOR', 'rgba(255,255,255,0.5)', 10);
     const djx = grow.dw * 0.5;   // DJ-Bereich bleibt oben MITTIG, wenn das Gebäude wächst
     // DJ-Lichtkegel (additiv)
@@ -1342,10 +1341,16 @@ function drawRoomDetail(id, t, beat) {
         ctx.fillStyle = `hsla(${(t * 80 + i * 30) % 360},95%,65%,0.85)`;
         ctx.fillRect(sx.x + 3 + i * (sw - 6) / bars, topY + sHt - bh, (sw - 6) / bars - 2, bh); } }
       ctx.restore();
-      ctx.font = `${sHt * 0.4}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(dj.icon, sx.x + sw / 2, topY + sHt * 0.34);                              // Icon
-      ctx.fillStyle = '#fff'; ctx.font = `900 ${Math.max(8, u * 0.19)}px system-ui, sans-serif`;
-      ctx.fillText(dj.name.toUpperCase(), sx.x + sw / 2, topY + sHt * 0.82);                // Name
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = `${sHt * 0.34}px sans-serif`;                                              // Icon (etwas kleiner)
+      ctx.fillText(dj.icon, sx.x + sw / 2, topY + sHt * 0.3);
+      // Name: dunkler Kontrast-Balken + an Screenbreite angepasste Schrift (gut lesbar)
+      const nm = dj.name.toUpperCase();
+      let fs = Math.max(9, sHt * 0.24); ctx.font = `900 ${fs}px system-ui, sans-serif`;
+      while (ctx.measureText(nm).width > sw - 8 && fs > 7) { fs -= 0.5; ctx.font = `900 ${fs}px system-ui, sans-serif`; }
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(sx.x, topY + sHt * 0.6, sw, sHt * 0.34);
+      ctx.fillStyle = '#fff'; ctx.shadowColor = 'rgba(0,0,0,0.9)'; ctx.shadowBlur = 3;
+      ctx.fillText(nm, sx.x + sw / 2, topY + sHt * 0.77); ctx.shadowBlur = 0;
       ctx.textBaseline = 'alphabetic';
       ctx.strokeStyle = 'rgba(190,150,255,0.6)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.roundRect(sx.x, topY, sw, sHt, 4); ctx.stroke();
     }
@@ -1495,28 +1500,87 @@ function drawRoomDetail(id, t, beat) {
     for (let k = 0; k < 3; k++) { const p = detailProj(r.x + 1.0 + k * 1.0, r.y + r.d - 0.85); ctx.font = `${u * 0.26}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('🚰', p.x, p.y - u * 0.35); }
     dLabel(r.x+r.w/2, r.y+0.3, '🚻 WC', '#dfeaf5', 13);
   } else if (id === 't2') {
-    const fl = { x: 12.2, y: 2.4, w: 4.4, d: 3.4 };
+    // gold-glänzende VIP-Tanzfläche
+    const fl = { x: 12.4, y: 2.6, w: 4.6, d: 3.6 };
     dTiles(fl.x, fl.y, fl.w, fl.d, 5, 4, 'vip', t, beat);
-    dLabel(fl.x + fl.w / 2, fl.y - 0.35, 'VIP DANCEFLOOR', 'rgba(255,215,120,0.6)', 10);
-    dShadow(9.9, 0.9, 2.6, 1.0); dBox(9.9, 0.9, 2.6, 1.0, u * 0.55, '#8a6a3a', '#453218', '#b28a4a');
-    dLabel(11.2, 0.5, '🍾 CHAMPAGNE', '#ffe9a8', 10);
-    if (roomUnlocked('t2')) dPerson(11.2, 1.6, { s: 1.1, color: '#1c1c28', skin: '#f0b98c', hair: '#c98b2d', bob: Math.sin(t*2.2)*2, groundZ: u * 0.25 });
-    for (const [ax, ay] of [[16.2,6.4],[17.3,2.4]]) { dShadow(ax-1.2, ay-0.5, 2.4, 1.0);
-      dBox(ax-1.2, ay-0.5, 2.4, 1.0, u * 0.3, '#c24e72', '#7a2846', '#d4638a');            // Sitzfläche
-      dBox(ax-1.2, ay-0.85, 2.4, 0.4, u * 0.75, '#a63a5c', '#611d33', '#c24e72'); }         // Lehne
-    for (const [tx, ty] of [[13.2,5.5],[15.5,3.2]]) { dShadow(tx-0.35, ty-0.35, 0.7, 0.7);
-      dBox(tx-0.35, ty-0.35, 0.7, 0.7, u * 0.6, '#3a2044', '#1f1026', '#4a2a55');
-      const p=detailProj(tx,ty); ctx.font=`${u*0.5}px sans-serif`; ctx.textAlign='center'; ctx.fillText('🍾',p.x,p.y-u*0.6); }
+    // goldener Kronleuchter über dem Floor (additiv, animiert)
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    const chC = detailProj(fl.x + fl.w / 2, fl.y + 0.6);
+    for (let i = 0; i < 8; i++) { const a2 = i / 8 * Math.PI * 2 + t * 0.4;
+      ctx.fillStyle = `rgba(255,210,110,${0.10 + 0.06 * Math.sin(t * 3 + i)})`;
+      ctx.beginPath(); ctx.arc(chC.x + Math.cos(a2) * u * 0.9, chC.y + Math.sin(a2) * u * 0.5, u * 0.12, 0, 7); ctx.fill(); }
+    ctx.restore();
+    // Champagner-Bar (oben-links) mit Regal, Theke, Flaschen & Barkeeper
+    dShadow(9.85, 0.8, 2.9, 1.2); dBox(9.85, 0.8, 2.9, 1.0, u * 1.15, '#5a4526', '#2e2211', '#8a6a3a');
+    ctx.font = `${u * 0.33}px sans-serif`; ctx.textAlign = 'center';
+    for (let i = 0; i < 6; i++) { const p = detailProj(10.1 + i * 0.44, 1.15); ctx.fillText(['🍾','🥂','🍾','🍸','🥂','🍾'][i], p.x, p.y - u * 1.02); }
+    dBox(10.1, 1.65, 2.5, 0.72, u * 0.55, '#b28a4a', '#6a4f26', '#caa25e');
+    if (roomUnlocked('t2')) dPerson(11.3, 2.05, { s: 1.05, color: '#efe6f5', pants: '#241233', skin: '#f0b98c', hair: '#c98b2d', bob: Math.sin(t * 2.5) * 1.6, groundZ: u * 0.55 });
+    // Lounge-Sofas (mehrere Ecken)
+    const sofa = (ax, ay, top, side) => { dShadow(ax - 1.2, ay - 0.5, 2.4, 1.0);
+      dBox(ax - 1.2, ay - 0.5, 2.4, 1.0, u * 0.3, top, '#7a2846', side);
+      dBox(ax - 1.2, ay - 0.85, 2.4, 0.4, u * 0.78, side, '#611d33', top); };
+    sofa(16.6, 6.6, '#c24e72', '#a63a5c'); sofa(17.4, 2.6, '#8a4fd0', '#6a37b0'); sofa(12.9, 7.7, '#c24e72', '#a63a5c');
+    // Bottle-Service-Tische mit Wunderkerzen (animiert)
+    for (const [tx, ty] of [[13.3, 5.6], [15.6, 3.3], [16.9, 7.4]]) { dShadow(tx - 0.35, ty - 0.35, 0.7, 0.7);
+      dBox(tx - 0.35, ty - 0.35, 0.7, 0.7, u * 0.6, '#3a2044', '#1f1026', '#4a2a55');
+      const p = detailProj(tx, ty); ctx.font = `${u * 0.5}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('🍾', p.x, p.y - u * 0.6);
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      for (let s = 0; s < 6; s++) { const ang = t * 7 + s;
+        ctx.fillStyle = `hsla(${(t * 220 + s * 60) % 360},100%,72%,${0.4 + 0.4 * Math.sin(t * 22 + s)})`;
+        ctx.beginPath(); ctx.arc(p.x + Math.cos(ang) * u * 0.22, p.y - u * 0.95 + Math.sin(ang) * u * 0.22, 1.4, 0, 7); ctx.fill(); }
+      ctx.restore(); }
+    // VIP-Kordel + Host am Eingang (links, wo T1 andockt)
+    { const goldStanch = (wx, wy) => { const p = detailProj(wx, wy);
+        ctx.strokeStyle = '#e8c56a'; ctx.lineWidth = 2.4; ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x, p.y - u * 0.5); ctx.stroke();
+        ctx.fillStyle = '#ffe08a'; ctx.beginPath(); ctx.arc(p.x, p.y - u * 0.52, 3.2, 0, 7); ctx.fill(); return p; };
+      const l1 = goldStanch(10.6, 7.4), l2 = goldStanch(10.6, 8.4);
+      ctx.strokeStyle = '#b3123a'; ctx.lineWidth = 2.4; ctx.beginPath(); ctx.moveTo(l1.x, l1.y - u * 0.5); ctx.quadraticCurveTo(l1.x - 6, (l1.y + l2.y) / 2 - u * 0.5 + 6, l2.x, l2.y - u * 0.5); ctx.stroke();
+      if (roomUnlocked('t2')) dPerson(11.1, 7.9, { s: 1.15, color: '#1a1a26', pants: '#0e0e16', skin: '#8c5a33', hair: '#1a1a22', shades: true, earpiece: true }); }
+    // Palmen/Deko in Gold-Töpfen
+    { const palm = (wx, wy) => { dShadow(wx - 0.3, wy - 0.12, 0.6, 0.3); const p = detailProj(wx, wy);
+        ctx.fillStyle = '#8a6a2e'; ctx.beginPath(); ctx.roundRect(p.x - 6, p.y - 8, 12, 10, 3); ctx.fill();
+        ctx.fillStyle = '#2f8f4a'; for (const [ox, oy] of [[-8, -16], [8, -16], [0, -22], [-5, -12], [5, -12]]) { ctx.beginPath(); ctx.ellipse(p.x + ox, p.y + oy, 3.5, 8, ox * 0.05, 0, 7); ctx.fill(); } };
+      palm(18.2, 1.4); palm(18.4, 8.2); }
   } else if (id === 'roof') {
-    const fl = { x: 11.8, y: 10.8, w: 4.2, d: 3.2 };
+    // Skyline-Silhouette an der Rückwand (Sky-Lounge-Aussicht)
+    { const base = detailProj(r.x, r.y).y;
+      ctx.fillStyle = 'rgba(20,40,70,0.55)';
+      for (let i = 0; i < 9; i++) { const bx = detailProj(r.x + 0.4 + i * (r.w - 0.8) / 9, r.y).x, bw2 = (r.w - 0.8) / 9 * detailScale * 0.82;
+        const bh2 = u * (0.5 + ((i * 37) % 5) * 0.18); ctx.fillRect(bx, base - bh2, bw2, bh2);
+        ctx.fillStyle = 'rgba(150,200,255,0.25)'; for (let wy2 = base - bh2 + 4; wy2 < base - 4; wy2 += 7) ctx.fillRect(bx + 3, wy2, 3, 3);
+        ctx.fillStyle = 'rgba(20,40,70,0.55)'; } }
+    const fl = { x: 12.0, y: 11.0, w: 4.2, d: 3.2 };
     dTiles(fl.x, fl.y, fl.w, fl.d, 5, 4, 'roof', t, beat);
-    dLabel(fl.x + fl.w / 2, fl.y - 0.35, 'SKY FLOOR', 'rgba(160,220,255,0.6)', 10);
-    dShadow(9.9, 10.8, 2.6, 1.0); dBox(9.9, 10.8, 2.6, 1.0, u * 0.55, '#2f6f8a', '#183846', '#3f93b0');
-    dLabel(11.2, 10.4, '🍸 SKYBAR', '#a8ecff', 10);
-    // Pool (in den Boden eingelassen)
-    dRect(A.pool.x-1.55, A.pool.y-1.15, 3.1, 2.3, '#1f4a6e', '#14324c', 12);
-    dRect(A.pool.x-1.4, A.pool.y-1.0, 2.8, 2.0, '#2f7fd6', 'rgba(255,255,255,0.35)', 10);
-    dLabel(A.pool.x, A.pool.y-1.35, '🏊 POOL', '#bfe6ff', 10);
+    // Lichterketten über dem Floor
+    ctx.strokeStyle = 'rgba(255,220,140,0.5)'; ctx.lineWidth = 1.2;
+    { const s1 = detailProj(fl.x, fl.y - 0.2), s2 = detailProj(fl.x + fl.w, fl.y - 0.2);
+      ctx.beginPath(); ctx.moveTo(s1.x, s1.y); ctx.quadraticCurveTo((s1.x + s2.x) / 2, s1.y + 10, s2.x, s2.y); ctx.stroke();
+      for (let i = 0; i <= 8; i++) { const x = s1.x + (s2.x - s1.x) * i / 8, y = s1.y + 10 * (1 - Math.pow(2 * i / 8 - 1, 2)) * 0.85;
+        ctx.fillStyle = `hsl(${(i * 40 + t * 40) % 360},90%,68%)`; ctx.beginPath(); ctx.arc(x, y, 2, 0, 7); ctx.fill(); } }
+    // Skybar + Barkeeper
+    dShadow(9.85, 10.7, 2.9, 1.2); dBox(9.85, 10.7, 2.9, 1.0, u * 1.05, '#245566', '#12303a', '#3f93b0');
+    ctx.font = `${u * 0.3}px sans-serif`; ctx.textAlign = 'center';
+    for (let i = 0; i < 5; i++) { const p = detailProj(10.2 + i * 0.5, 11.0); ctx.fillText(['🍹','🍸','🥃','🍹','🍸'][i], p.x, p.y - u * 0.95); }
+    if (roomUnlocked('roof')) dPerson(11.2, 11.9, { s: 1.05, color: '#e6f2f5', pants: '#12303a', skin: '#c68a53', hair: '#1a1a22', bob: Math.sin(t * 2.8) * 1.6, groundZ: u * 0.5 });
+    // Pool + Sonnenliegen
+    dRect(A.pool.x - 1.55, A.pool.y - 1.15, 3.1, 2.3, '#1f4a6e', '#14324c', 12);
+    dRect(A.pool.x - 1.4, A.pool.y - 1.0, 2.8, 2.0, '#2f7fd6', 'rgba(255,255,255,0.35)', 10);
+    { ctx.save(); const pa = detailProj(A.pool.x - 1.4, A.pool.y - 1.0), pb = detailProj(A.pool.x + 1.4, A.pool.y + 1.0);
+      ctx.beginPath(); ctx.rect(pa.x, pa.y, pb.x - pa.x, pb.y - pa.y); ctx.clip();
+      ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 1.5;
+      for (let i = 0; i < 4; i++) { ctx.beginPath(); const yy = pa.y + (pb.y - pa.y) * (((t * 0.15 + i * 0.25) % 1)); ctx.moveTo(pa.x, yy); ctx.lineTo(pb.x, yy + 4); ctx.stroke(); }
+      ctx.restore(); }
+    const lounger = (lx, ly) => { dShadow(lx - 0.45, ly - 0.15, 0.9, 0.5); dBox(lx - 0.45, ly - 0.2, 0.9, 0.5, u * 0.26, '#eae3d2', '#b6ae98', '#f6f1e2');
+      const p = detailProj(lx + 0.05, ly); ctx.font = `${u * 0.3}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('⛱️', p.x, p.y - u * 0.28); };
+    lounger(13.2, 16.4); lounger(14.6, 16.6); lounger(16.6, 15.4);
+    // Feuerstelle / Lounge-Ecke
+    { const fp = detailProj(17.4, 12.4); dShadow(17.05, 12.05, 0.7, 0.7);
+      dBox(17.05, 12.05, 0.7, 0.7, u * 0.3, '#3a3038', '#1c161c', '#4a3e48');
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      for (let s = 0; s < 5; s++) { ctx.fillStyle = `hsla(${20 + s * 8},100%,60%,${0.4 + 0.4 * Math.sin(t * 12 + s)})`;
+        ctx.beginPath(); ctx.ellipse(fp.x, fp.y - u * 0.5 - Math.abs(Math.sin(t * 8 + s)) * u * 0.2, u * 0.1, u * 0.2, 0, 0, 7); ctx.fill(); }
+      ctx.restore(); }
   }
   // Alt-&-dunkel-Schleier ganz oben drauf: entsättigt Neon/Möbel am Anfang (schwindet mit Ausbau)
   if (roomUnlocked(id)) {
@@ -1816,34 +1880,33 @@ export function renderFrame(now) {
   updateParticles(dt);
   incomeTimer += dt; if (incomeTimer > 0.25) { incomeTimer = 0; incomeCache = incomePerSec(); }
 
-  drawGround();
-  drawPlaza(t);
-
-  // Räume (Boden/Wände/Deko) + Sammel-Liste für tiefen­sortierte Objekte
-  const drawables = [];
-  drawT2(t, beat, drawables);
-  drawT1(t, beat, drawables);
-  drawRoof(t, beat, drawables);
-  drawPerformer(t, beat, drawables);
-
-  // Gäste als Drawables (Tiefe = x+y)
-  for (const g of guests) {
-    const dancing = g.mode === 'act' && (g.act === 'dance' || g.act === 'vipdance' || g.act === 'roofbar');
-    const bob = dancing ? Math.sin(beat + g.bobPhase) * (dropActive() ? 3.2 : 2) * cam.s : 0;
-    const gg = g;
-    drawables.push({ d: g.x + g.y, fn: () => drawPerson(gg.x, gg.y, {
-      s: gg.celeb ? 1.35 : gg.vip ? 1.08 : 1, color: gg.color, skin: gg.skin, hair: gg.hair, female: gg.female,
-      bob, arms: dancing ? beat + gg.bobPhase : null, dancing,
-      drink: gg.mode === 'act' ? gg.drink : null, alpha: gg.alpha, glow: gg.celeb, star: gg.celeb, bobPhase: gg.bobPhase }) });
+  // Iso-Übersicht NUR zeichnen, wenn sie sichtbar ist (in der Raumansicht deckt drawFocusRoom
+  // sie komplett ab → sonst würden alle Gäste doppelt gezeichnet = Ruckeln).
+  if (focusAmt < 0.985) {
+    drawGround();
+    drawPlaza(t);
+    // Räume (Boden/Wände/Deko) + Sammel-Liste für tiefen­sortierte Objekte
+    const drawables = [];
+    drawT2(t, beat, drawables);
+    drawT1(t, beat, drawables);
+    drawRoof(t, beat, drawables);
+    drawPerformer(t, beat, drawables);
+    // Gäste als Drawables (Tiefe = x+y)
+    for (const g of guests) {
+      const dancing = g.mode === 'act' && (g.act === 'dance' || g.act === 'vipdance' || g.act === 'roofbar');
+      const bob = dancing ? Math.sin(beat + g.bobPhase) * (dropActive() ? 3.2 : 2) * cam.s : 0;
+      const gg = g;
+      drawables.push({ d: g.x + g.y, fn: () => drawPerson(gg.x, gg.y, {
+        s: gg.celeb ? 1.35 : gg.vip ? 1.08 : 1, color: gg.color, skin: gg.skin, hair: gg.hair, female: gg.female,
+        bob, arms: dancing ? beat + gg.bobPhase : null, dancing,
+        drink: gg.mode === 'act' ? gg.drink : null, alpha: gg.alpha, glow: gg.celeb, star: gg.celeb, bobPhase: gg.bobPhase }) });
+    }
+    drawables.sort((a, b) => a.d - b.d);
+    for (const it of drawables) it.fn();
+    if (!state.t2Unlocked) drawLockOverlay(RM.t2, 'Terminal 2 · VIP', 'Antippen zum Freischalten');
+    if (!state.roofUnlocked) drawLockOverlay(RM.roof, 'Rooftop', state.t2Unlocked ? 'Antippen zum Freischalten' : 'Erst Terminal 2');
+    drawCashPins(t);
   }
-  drawables.sort((a, b) => a.d - b.d);
-  for (const it of drawables) it.fn();
-
-  // Lock-Overlays über gesperrten Räumen
-  if (!state.t2Unlocked) drawLockOverlay(RM.t2, 'Terminal 2 · VIP', 'Antippen zum Freischalten');
-  if (!state.roofUnlocked) drawLockOverlay(RM.roof, 'Rooftop', state.t2Unlocked ? 'Antippen zum Freischalten' : 'Erst Terminal 2');
-
-  drawCashPins(t);
 
   // Raum-Detailansicht (genau EIN Raum, bildschirmfüllend) über die Iso-Übersicht blenden
   if (focusAmt > 0.01) {
