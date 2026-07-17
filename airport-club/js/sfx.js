@@ -67,19 +67,24 @@ export function playSfx(name) {
 //  Im DROP: 16tel-Hats, offener Filter, Extra-Energie.
 // ============================================================
 // Verschiedene Musikrichtungen (prozedural) — umschaltbar
+const _ = null;
 const MUSIC_STYLES = {
   house:  { name: 'House',       bpm: 124, kickF: [150, 44], kickDec: 0.24, bCut: [320, 900], bWave: 'sawtooth',
             hats: '8',      clap: true,  stab: true,  stabCut: [1100, 2400], roots: [55, 55, 43.65, 43.65, 65.41, 65.41, 49, 49],
-            bassPat: [1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1] },
+            bassPat: [1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1],
+            leadWave: 'triangle', lead: [12, _, 7, _, 3, _, 7, _, 12, _, 15, _, 10, _, 7, _] },
   techno: { name: 'Techno',      bpm: 132, kickF: [160, 40], kickDec: 0.20, bCut: [240, 620], bWave: 'square',
             hats: 'off',    clap: false, stab: false, stabCut: [900, 2000],  roots: [41.2, 41.2, 41.2, 41.2, 55, 55, 49, 49],
-            bassPat: [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0] },
+            bassPat: [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
+            leadWave: 'sawtooth', lead: [0, _, _, 12, _, _, 7, _, 0, _, _, 12, _, 7, _, 10] },
   rave:   { name: 'Rave/EDM',    bpm: 150, kickF: [180, 46], kickDec: 0.30, bCut: [420, 1200], bWave: 'sawtooth',
             hats: '16',     clap: true,  stab: true,  stabCut: [1600, 3000], roots: [55, 55, 65.41, 65.41, 49, 49, 58.27, 58.27],
-            bassPat: [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0] },
+            bassPat: [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0],
+            leadWave: 'sawtooth', lead: [12, 12, 15, 19, 12, 12, 15, 19, 17, 15, 12, 15, 10, 7, 10, 12] },
   afro:   { name: 'Afro House',  bpm: 114, kickF: [140, 42], kickDec: 0.26, bCut: [300, 760], bWave: 'sawtooth',
             hats: 'shaker', clap: true,  stab: true,  stabCut: [1300, 2200], roots: [49, 49, 55, 55, 43.65, 43.65, 58.27, 58.27],
-            bassPat: [1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0] },
+            bassPat: [1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0],
+            leadWave: 'triangle', lead: [7, _, 12, _, 10, _, 7, _, 3, _, 7, _, 10, _, 12, _] },
 };
 export const MUSIC_ORDER = ['house', 'techno', 'rave', 'afro'];
 let M = MUSIC_STYLES.house;
@@ -160,6 +165,30 @@ function stab(t, root, open) {
   }
 }
 
+function semi(n) { return Math.pow(2, n / 12); }
+
+// Melodischer Pluck-Lead (macht aus dem Beat einen „Song") — mit Delay-Send für Club-Raum
+function pluck(t, freq, wave) {
+  const a = actx;
+  const o = a.createOscillator(), o2 = a.createOscillator();
+  const f = a.createBiquadFilter(), g = a.createGain();
+  o.type = wave || 'triangle'; o2.type = o.type;
+  o.frequency.value = freq; o2.frequency.value = freq; o2.detune.value = 8;
+  f.type = 'lowpass'; f.frequency.setValueAtTime(4600, t); f.frequency.exponentialRampToValueAtTime(1500, t + 0.2); f.Q.value = 5;
+  g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.12, t + 0.006); g.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+  o.connect(f); o2.connect(f); f.connect(g); g.connect(music.bus);
+  if (music.delay) g.connect(music.delay);
+  o.start(t); o2.start(t); o.stop(t + 0.32); o2.stop(t + 0.32);
+}
+
+// Sub-Bass unter der Bassline (Wumms)
+function sub(t, freq) {
+  const a = actx, o = a.createOscillator(), g = a.createGain();
+  o.type = 'sine'; o.frequency.value = freq / 2;
+  g.gain.setValueAtTime(0.34, t); g.gain.exponentialRampToValueAtTime(0.01, t + STEP * 0.95);
+  o.connect(g).connect(music.bus); o.start(t); o.stop(t + STEP);
+}
+
 function tom(t) {   // Afro-Log-Drum
   const a = actx, o = a.createOscillator(), g = a.createGain();
   o.type = 'sine';
@@ -182,10 +211,12 @@ function playMusicStep(s, t) {
   else if (M.hats === 'off') { playHat = st % 4 === 2; hg = 0.075; hd = 0.06; }
   else if (M.hats === 'shaker') { playHat = true; hg = st % 4 === 2 ? 0.06 : 0.028; hd = 0.03; hp = 9500; }
   if (playHat) noiseHit(t, { hp, gain: hg, dur: hd });
-  // Bass
-  if (M.bassPat[st]) bass(t, st % 8 === 6 ? M.roots[bar] * 2 : M.roots[bar], drop);
+  // Bass (+ Sub-Bass für Wumms)
+  if (M.bassPat[st]) { const bf = st % 8 === 6 ? M.roots[bar] * 2 : M.roots[bar]; bass(t, bf, drop); if (st % 4 === 0) sub(t, M.roots[bar]); }
   // Stabs
   if (M.stab && (st === 0 || (st === 10 && bar % 2 === 1))) stab(t, M.roots[bar], drop);
+  // Melodischer Lead (der „Hook" — im DROP jede Stufe, sonst ab Bar 2 für Aufbau/Abwechslung)
+  if (M.lead && M.lead[st] != null && (drop || bar >= 2)) pluck(t, M.roots[bar] * semi(M.lead[st]) * 4, M.leadWave);
   // Afro-Log-Drum
   if (M.name === 'Afro House' && (st === 6 || st === 14)) tom(t);
 }
@@ -201,10 +232,17 @@ export function startMusic() {
   const comp = a.createDynamicsCompressor();
   master.connect(comp);
   comp.connect(a.destination);
-  const bus = a.createGain();  // Sidechain-Bus für Bass & Stabs
+  const bus = a.createGain();  // Sidechain-Bus für Bass, Stabs & Lead
   bus.gain.value = 0.3;
   bus.connect(master);
-  music = { master, bus, noise: null, timer: null, nextT: a.currentTime + 0.1, step: 0 };
+  // Feedback-Delay für Lead/Stabs → Club-Raum/Tiefe
+  const delay = a.createDelay(1.0);
+  delay.delayTime.value = STEP * 3;            // punktierter Achtel-Vibe
+  const fb = a.createGain(); fb.gain.value = 0.34;
+  const delWet = a.createGain(); delWet.gain.value = 0.42;
+  const delFilt = a.createBiquadFilter(); delFilt.type = 'highpass'; delFilt.frequency.value = 500;
+  delay.connect(fb); fb.connect(delay); delay.connect(delFilt); delFilt.connect(delWet); delWet.connect(master);
+  music = { master, bus, delay, noise: null, timer: null, nextT: a.currentTime + 0.1, step: 0 };
   music.noise = makeNoiseBuffer(a);
   music.timer = setInterval(() => {
     if (!music) return;
