@@ -1169,3 +1169,55 @@ button { font-family: inherit; border: none; background: none; cursor: pointer; 
     box-shadow: 0 20px 60px rgba(0,0,0,0.6);
   }
 }
+
+/* ============================================================
+   Ziele & Freischaltungen (Roadmap + Club-Themes)
+   ============================================================ */
+.goals-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px; margin-bottom: 6px; border-radius: 14px;
+  background: linear-gradient(180deg, #2a2140, #1c1730);
+  border: 2px solid rgba(255,255,255,0.12); color: #cdbdf0; font-weight: 700; font-size: 13px;
+}
+.goals-head b { color: #7fe6a0; font-size: 16px; }
+.goal-list { display: flex; flex-direction: column; gap: 8px; }
+.goal-card {
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 14px;
+  background: linear-gradient(180deg, #fff8ec, #f3e7cf);
+  border: 2px solid rgba(0,0,0,0.06); box-shadow: 0 3px 8px rgba(0,0,0,0.18);
+}
+.goal-card.done { opacity: 0.6; }
+.goal-ic {
+  width: 44px; height: 44px; flex: 0 0 44px; border-radius: 12px; font-size: 24px;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(180deg, #efe1c4, #e2d0ab); box-shadow: inset 0 2px 4px rgba(255,255,255,0.6);
+}
+.goal-info { flex: 1; min-width: 0; }
+.goal-title { font-weight: 800; color: #2e2440; font-size: 13.5px; }
+.goal-check { color: #2ea84a; }
+.goal-sub { font-size: 11px; color: #6a5c48; margin: 1px 0 5px; }
+.goal-bar { height: 8px; border-radius: 6px; background: rgba(0,0,0,0.12); overflow: hidden; }
+.goal-bar i { display: block; height: 100%; border-radius: 6px; background: linear-gradient(90deg, #8b5cf6, #b98bff); }
+.goal-req { font-size: 10px; color: #8a7a62; margin-top: 3px; font-weight: 600; }
+
+.theme-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.theme-card {
+  padding: 10px; border-radius: 14px; cursor: pointer; text-align: center;
+  background: linear-gradient(180deg, #241d38, #17122a);
+  border: 2px solid rgba(255,255,255,0.10); transition: transform .1s, border-color .2s;
+}
+.theme-card:active { transform: scale(0.97); }
+.theme-card.active { border-color: #7fe6a0; box-shadow: 0 0 0 2px rgba(127,230,160,0.4); }
+.theme-card.ready { border-color: rgba(255,207,106,0.6); }
+.theme-card.locked { opacity: 0.55; }
+.theme-sw { display: flex; gap: 4px; justify-content: center; margin-bottom: 6px; }
+.theme-sw i { width: 20px; height: 20px; border-radius: 6px; box-shadow: inset 0 0 4px rgba(0,0,0,0.4); }
+.theme-name { font-weight: 800; color: #fff; font-size: 12.5px; }
+.theme-desc { font-size: 10px; color: #b6a9d6; margin: 2px 0 7px; min-height: 24px; }
+.theme-btn {
+  padding: 5px 8px; border-radius: 10px; font-weight: 800; font-size: 11px; color: #fff;
+  background: linear-gradient(180deg, #6a4bd0, #4f36a8); border: 1px solid rgba(255,255,255,0.2);
+}
+.theme-btn.on { background: linear-gradient(180deg, #2ea84a, #1d7a33); }
+.theme-btn.buy { background: linear-gradient(180deg, #f0a52a, #cf7d16); }
+.theme-btn.lock { background: rgba(0,0,0,0.35); color: #cdb7e6; }

@@ -4,7 +4,7 @@
 import {
   STATIONS, STATION_MAP, STAFF, STAFF_MAP, SHOP, CASH_STATIONS,
   T2_REQ, ROOF_REQ, PERFORMER, AUTOCOLLECT, CLUB_EXPAND, autoCollectInterval,
-  MARKETING, marketingCost, DJS, DJ_MAP,
+  MARKETING, marketingCost, DJS, DJ_MAP, DRINKS, drinkTier, CLUB_THEMES, THEME_MAP,
   BOOST, DROP, OFFLINE, CELEB, PRESTIGE,
   EVENTS, EVENT_GAP, WHEEL, DAILY_MIN_GAP_H, DAILY_STREAK_MAX, ACHIEVEMENTS,
   getPhase, chestReward, costOf, bulkCost, maxAffordable, milestoneMult,
@@ -40,6 +40,8 @@ export const state = {
   marketing: 0,            // Marketing-Stufe (mehr & schnellere Gäste)
   djsOwned: ['resident'],  // angeheuerte DJs
   activeDj: 'resident',    // aktiver DJ
+  clubTheme: 'classic',    // aktives Club-Theme (Dancefloor-Look)
+  themesOwned: ['classic'],// freigeschaltete Themes
   clubSize: 0,             // Club-Ausbaustufe (Gebäude größer)
   performer: { unlocked: false, room: 't1' },
   event: null,             // { id, expires }
@@ -100,7 +102,9 @@ export function stationIncome(id) {
   if (lvl <= 0) return 0;
   const st = STATION_MAP[id];
   if (!roomUnlocked(st.room)) return 0;
-  return st.baseIncome * lvl * milestoneMult(lvl) * staffStationMult(id) * performerRoomMult(st.room);
+  let inc = st.baseIncome * lvl * milestoneMult(lvl) * staffStationMult(id) * performerRoomMult(st.room);
+  if (id === 'bar') inc *= drinkMult();   // besserer Signature-Drink → mehr Umsatz
+  return inc;
 }
 
 export function roomIncome(roomId) {
@@ -323,6 +327,21 @@ export function setActiveDj(id) {
   save();
   return true;
 }
+
+// ---- Bar-Getränke (Signature-Drink hebt Bar-Einkommen) ----------------
+export function currentDrink() { return DRINKS[drinkTier(state.stations.bar || 0)]; }
+export function nextDrink() { const t = drinkTier(state.stations.bar || 0); return DRINKS[t + 1] || null; }
+export function drinkMult() { return 1 + drinkTier(state.stations.bar || 0) * 0.18; }
+
+// ---- Club-Themes (freischaltbare Dancefloor-Looks) --------------------
+export function themeUnlocked(id) { const th = THEME_MAP[id]; return th ? state.lifetime >= th.req : false; }
+export function themeOwned(id) { return (state.themesOwned || ['classic']).includes(id); }
+export function unlockTheme(id) {
+  if (themeOwned(id) || !themeUnlocked(id)) return false;
+  (state.themesOwned ||= ['classic']).push(id); setTheme(id); emit('theme', { id }); save(); return true;
+}
+export function setTheme(id) { if (!themeOwned(id)) return false; state.clubTheme = id; emit('theme', { id, active: true }); save(); return true; }
+export function activeTheme() { return THEME_MAP[state.clubTheme] || THEME_MAP.classic; }
 
 // ---- Boost -------------------------------------------------------------
 export function boostState() {

@@ -8,6 +8,7 @@ import {
   depositAtStation, collectStation, roomUnlocked,
   eventDef, eventGuestMult, incomePerSec,
   marketingGuestBonus, marketingSpawnBonus, activeDjDef,
+  currentDrink, activeTheme,
 } from './game.js';
 import { fmt, CASH_STATIONS } from './data.js';
 import { musicBpm } from './sfx.js';
@@ -505,7 +506,7 @@ function updateGuests(dt) {
           if (g.act === 'leave') { g.leaving = true; }   // am Eingang ausblenden statt teleportieren
           else {
             g.mode = 'act'; g.actT = actDuration(g.act);
-            if (g.act === 'bar') g.drink = pick(DRINKS_T1);
+            if (g.act === 'bar') g.drink = currentDrink().e;   // aktueller Signature-Drink
             else if (g.act === 'shots') g.drink = '🥃';
             else if (g.act === 'champ' || g.act === 'sofa' || g.act === 'roofbar') g.drink = pick(DRINKS_T2);
           }
@@ -1103,6 +1104,17 @@ function dRect(wx, wy, ww, wd, fill, stroke, rad = 8) {
 // Stationen-Beschriftungen bewusst entfernt (Aufgeräumt) — Namen kommen aus der Karten-Ebene.
 function dLabel(wx, wy, txt, color, px = 11) { /* no-op: keine Möbel-Labels mehr im Grundriss */ }
 // erhöhte, beleuchtete 3D-Tanzfläche (Kacheln mit Kante + Sockel)
+// Dancefloor-Farbton je nach freigeschaltetem Club-Theme
+function themeFloorHue(i, j, t) {
+  const base = (i + j) * 55 + t * 90, wv = Math.sin(base * 0.017) * 0.5 + 0.5;
+  switch (state.clubTheme || 'classic') {
+    case 'sunset': return (320 + wv * 90) % 360;   // Pink → Orange
+    case 'toxic':  return 90 + wv * 70;            // Neon-Grün
+    case 'ice':    return 180 + wv * 70;           // Eisblau
+    case 'gold':   return 40 + wv * 18;            // Gold
+    default:       return base % 360;              // Classic-Regenbogen
+  }
+}
 function dTiles(wx, wy, ww, wd, cols, rows, palette, t, beat) {
   const a = detailProj(wx, wy), b = detailProj(wx + ww, wy + wd);
   const W0 = b.x - a.x, H0 = b.y - a.y;
@@ -1119,7 +1131,7 @@ function dTiles(wx, wy, ww, wd, cols, rows, palette, t, beat) {
     let hue, light;
     if (palette === 'vip') { hue = 42 + ((i + j) % 3) * 8; light = 34 + pulse * 22; }
     else if (palette === 'roof') { hue = (t * 30 + (i + j) * 24) % 360; light = 30 + pulse * 18; }
-    else { hue = ((i + j) * 55 + t * 90) % 360; light = dropActive() ? 52 + pulse * 16 : 37 + pulse * 13; }
+    else { hue = themeFloorHue(i, j, t); light = dropActive() ? 52 + pulse * 16 : 37 + pulse * 13; }
     const tx = a.x + i * cw + 1.5, ty = a.y + j * ch + 1.5, tw = cw - 3, th = ch - 3;
     ctx.fillStyle = `hsl(${hue},72%,${Math.max(10, light - 24)}%)`;               // dunkle Kante (Höhe)
     ctx.beginPath(); ctx.roundRect(tx, ty + th - bev, tw, bev + 2.5, 3); ctx.fill();
@@ -1380,8 +1392,17 @@ function drawRoomDetail(id, t, beat) {
     ctx.font = `${u * 0.32}px sans-serif`;
     const props = ['🍸','🍹','🧉','🍺','🍋'];
     for (let i = 0; i < 5; i++) { const p = detailProj(1.55, 9.4 + i * 0.66); ctx.fillText(props[i], p.x, p.y - u * 0.58); }
-    dLabel(1.45, 8.6, '🍸 BAR', '#7fe6ff', 11);
     dPerson(1.3, 9.4, { s: 1.12, color: '#eef2f7', pants: '#1c2230', skin: '#f0b98c', hair: '#3a2617', bob: Math.sin(t * 2.5) * 2, groundZ: u * 0.58 });
+    // Signature-Drink-Menütafel an der Bar-Wand
+    { const dr = currentDrink(), mp = detailProj(2.35, 9.1), mw = u * 2.0, mh = u * 1.02;
+      ctx.fillStyle = '#140f0a'; ctx.beginPath(); ctx.roundRect(mp.x - mw / 2, mp.y - u * 1.55, mw, mh, 5); ctx.fill();
+      ctx.strokeStyle = 'rgba(210,170,90,0.7)'; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.fillStyle = '#e8c56a'; ctx.font = `800 ${Math.max(7, u * 0.17)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('BAR-MENÜ', mp.x, mp.y - u * 1.36);
+      ctx.font = `${u * 0.42}px sans-serif`; ctx.fillText(dr.e, mp.x, mp.y - u * 1.0);
+      ctx.fillStyle = '#fff'; ctx.font = `700 ${Math.max(6.5, u * 0.15)}px system-ui, sans-serif`; ctx.fillText(dr.name, mp.x, mp.y - u * 0.72);
+      ctx.fillStyle = '#7fe6a0'; ctx.font = `800 ${Math.max(7, u * 0.16)}px system-ui, sans-serif`; ctx.fillText(dr.price + ' €', mp.x, mp.y - u * 0.55);
+      ctx.textBaseline = 'alphabetic'; }
     ctx.save(); ctx.translate(dTileW() * grow.dw, 0);   // Shot-Bar wandert mit der rechten Wand nach aussen
     // === Shot-Bar (rechts): Regal + Theke + Gläserreihen + Barkeeper ===
     dShadow(7.35, 8.55, 1.5, 2.65);
@@ -1445,8 +1466,8 @@ function drawRoomDetail(id, t, beat) {
       ctx.fillStyle = '#3fb060'; ctx.beginPath(); ctx.arc(p.x - 2, p.y - 19, 4, 0, 7); ctx.fill(); };
     plant(1.0, 13.9); plant(8.3, 14.7);
     ctx.restore();
-    // === Gang nach rechts Richtung Terminal 2 (führt aus dem Bild) + Türsteher ===
-    { const gx = r.x + r.w, gy0 = 7.7, gy1 = 9.2, gyc = (gy0 + gy1) / 2;
+    // === Gang nach rechts Richtung Terminal 2 (unter der Shot-Bar, führt aus dem Bild) + Türsteher ===
+    { const gx = r.x + r.w, gy0 = 11.7, gy1 = 13.2, gyc = (gy0 + gy1) / 2;
       const o0 = detailProj(gx, gy0), o1 = detailProj(gx, gy1), cEnd = detailProj(gx + 2.6, gyc);
       const cg = ctx.createLinearGradient(o0.x, 0, cEnd.x, 0);
       cg.addColorStop(0, '#2b2542'); cg.addColorStop(1, 'rgba(43,37,66,0)');   // Gang verläuft aus dem Bild

@@ -4,8 +4,8 @@
 import * as G from './game.js';
 import {
   STATIONS, STATION_MAP, STAFF, STAFF_MAP, SHOP, ROOMS,
-  T2_REQ, ROOF_REQ, PERFORMER, AUTOCOLLECT, CLUB_EXPAND, WHEEL, ACHIEVEMENTS,
-  MARKETING, DJS, DJ_MAP,
+  T2_REQ, ROOF_REQ, PERFORMER, AUTOCOLLECT, CLUB_EXPAND, WHEEL, ACHIEVEMENTS, PRESTIGE,
+  MARKETING, DJS, DJ_MAP, DRINKS, CLUB_THEMES,
   autoCollectInterval, MILESTONE_STEP, fmt, fmtTime, costOf, milestoneMult, nextMilestone,
 } from './data.js';
 import { playSfx, setMusic, cycleMusicStyle, currentMusicStyleName, setMusicStyle } from './sfx.js';
@@ -315,12 +315,13 @@ function openStationsModal() {
           const info = G.buyInfo(st.id, buyMode);
           const income = G.stationIncome(st.id) * G.globalMult();
           const row = el('div', 'station-row' + (info.affordable ? '' : ' dim'));
+          const barExtra = st.id === 'bar' ? ` · 🍸 ${G.currentDrink().e} ${G.currentDrink().name}` : '';
           row.innerHTML = `
             <div class="st-icon">${st.icon}</div>
             <div class="st-info">
               <div class="st-name">${st.name} <span class="st-lvl">Stufe ${lvl}</span></div>
               <div class="st-desc">${lvl > 0 ? '💶 ' + fmt(income) + ' €/s' : st.desc}
-                ${milestoneMult(lvl) > 1 ? ` · <b>x${milestoneMult(lvl)}</b>` : ''}</div>
+                ${milestoneMult(lvl) > 1 ? ` · <b>x${milestoneMult(lvl)}</b>` : ''}${barExtra}</div>
             </div>
             <button class="btn-buy${info.affordable ? '' : ' disabled'}">
               <span>+${info.count}</span><b>${fmt(info.cost)} €</b>
@@ -365,6 +366,72 @@ function openDjModal() {
       }
     }
     render();
+  });
+}
+
+// ---- Ziele & Freischaltungen (Roadmap + Club-Themes) ------------------
+function goalRoom(id, icon, title, sub, reqLvl) {
+  return { icon, title, sub, done: G.roomUnlocked(id), progress: G.state.level / reqLvl, reqLabel: `Level ${reqLvl} · du: ${G.state.level}` };
+}
+function buildGoals() {
+  const s = G.state, out = [];
+  out.push(goalRoom('t2', '🥂', 'Terminal 2 · VIP', 'VIP-Etage mit Champagner & Lounges', T2_REQ.level));
+  out.push({ icon: '💃', title: 'Show-Act', sub: 'Bewegliche Tänzerin, die einen Raum boostet', done: s.performer.unlocked, progress: s.level / PERFORMER.level, reqLabel: `Level ${PERFORMER.level} · du: ${s.level}` });
+  out.push(goalRoom('roof', '🌃', 'Rooftop', 'Sky Lounge mit Pool & Skybar', ROOF_REQ.level));
+  const nd = G.nextDrink();
+  if (nd) out.push({ icon: nd.e, title: `Drink: ${nd.name}`, sub: `${nd.price} € pro Drink · mehr Bar-Umsatz`, done: false, progress: (s.stations.bar || 0) / nd.lvl, reqLabel: `Bar Stufe ${nd.lvl} · du: ${s.stations.bar || 0}` });
+  const nt = CLUB_THEMES.find(x => !G.themeOwned(x.id));
+  if (nt) out.push({ icon: '🎨', title: `Theme: ${nt.name}`, sub: nt.desc, done: false, progress: s.lifetime / nt.req, reqLabel: `${fmt(nt.req)} € gesamt` });
+  const ndj = DJS.find(d => !G.djOwned(d.id));
+  if (ndj) out.push({ icon: ndj.icon, title: `DJ: ${ndj.name}`, sub: ndj.desc, done: false, progress: s.money / ndj.cost, reqLabel: `${fmt(ndj.cost)} €` });
+  out.push({ icon: '♻️', title: 'Neueröffnung (Prestige)', sub: 'Ruf-Sterne für dauerhaften Bonus', done: s.fame > 0, progress: s.level / PRESTIGE.minLevel, reqLabel: `Level ${PRESTIGE.minLevel} · du: ${s.level}` });
+  return out;
+}
+function openGoalsModal() {
+  openModal('🎯 Ziele & Freischaltungen', body => {
+    const wrap = el('div'); body.appendChild(wrap);
+    function render() {
+      wrap.innerHTML = '';
+      const head = el('div', 'goals-head');
+      head.innerHTML = `<span>Bisher verdient</span><b>${fmt(G.state.lifetime)} €</b>`;
+      wrap.appendChild(head);
+      wrap.appendChild(el('div', 'list-caption', '🚀 Nächste große Freischaltungen'));
+      const road = el('div', 'goal-list');
+      for (const g of buildGoals()) {
+        const card = el('div', 'goal-card' + (g.done ? ' done' : ''));
+        const pct = Math.round(Math.max(0, Math.min(1, g.progress)) * 100);
+        card.innerHTML = `<div class="goal-ic">${g.icon}</div>
+          <div class="goal-info">
+            <div class="goal-title">${g.title}${g.done ? ' <span class="goal-check">✓</span>' : ''}</div>
+            <div class="goal-sub">${g.sub}</div>
+            ${g.done ? '' : `<div class="goal-bar"><i style="width:${pct}%"></i></div><div class="goal-req">${g.reqLabel}</div>`}</div>`;
+        road.appendChild(card);
+      }
+      wrap.appendChild(road);
+      wrap.appendChild(el('div', 'list-caption', '🎨 Club-Themes — schalte neue Looks frei'));
+      const grid = el('div', 'theme-grid');
+      for (const th of CLUB_THEMES) {
+        const owned = G.themeOwned(th.id), can = G.themeUnlocked(th.id), active = G.state.clubTheme === th.id;
+        const card = el('div', 'theme-card' + (active ? ' active' : owned ? ' owned' : can ? ' ready' : ' locked'));
+        const sw = th.sw.map(c => `<i style="background:${c}"></i>`).join('');
+        let btn;
+        if (active) btn = '<div class="theme-btn on">Aktiv ✓</div>';
+        else if (owned) btn = '<div class="theme-btn">Anwenden</div>';
+        else if (can) btn = '<div class="theme-btn buy">Freischalten</div>';
+        else btn = `<div class="theme-btn lock">🔒 ${fmt(th.req)} €</div>`;
+        card.innerHTML = `<div class="theme-sw">${sw}</div><div class="theme-name">${th.name}</div><div class="theme-desc">${th.desc}</div>${btn}`;
+        if (!active) card.addEventListener('click', () => {
+          if (owned) { G.setTheme(th.id); playSfx('click'); }
+          else if (can) { if (!G.unlockTheme(th.id)) return; confetti(30); playSfx('chest'); toast(`🎨 Theme „${th.name}" freigeschaltet!`); }
+          else return;
+          render();
+        });
+        grid.appendChild(card);
+      }
+      wrap.appendChild(grid);
+    }
+    render();
+    setRefresher(render);
   });
 }
 
@@ -796,6 +863,7 @@ export function initUI() {
     }
   });
   // Schwebende Seiten-Buttons
+  $('#btn-goals').addEventListener('click', openGoalsModal);
   $('#btn-daily').addEventListener('click', openDailyModal);
   $('#btn-ach').addEventListener('click', openAchievementsModal);
   $('#btn-showact').addEventListener('click', openPerformerModal);

@@ -35,6 +35,32 @@ export const DJS = [
 ];
 export const DJ_MAP = Object.fromEntries(DJS.map(d => [d.id, d]));
 
+// ---- Bar-Getränke: vom Bier hoch zu teuren Longdrinks (schaltet mit der Bar-Stufe frei) ----
+// Realistische Preise pro Getränk; die Bar-Stufe hebt zusätzlich Menge & Multiplikator.
+export const DRINKS = [
+  { name: 'Bier',                 price: 5,   lvl: 1,   e: '🍺' },
+  { name: 'Aperol Spritz',        price: 8,   lvl: 8,   e: '🥂' },
+  { name: 'Cuba Libre',           price: 9,   lvl: 20,  e: '🍹' },
+  { name: 'Gin Tonic',            price: 11,  lvl: 35,  e: '🍸' },
+  { name: 'Mojito',               price: 12,  lvl: 50,  e: '🍃' },
+  { name: 'Long Island Iced Tea', price: 14,  lvl: 70,  e: '🧉' },
+  { name: 'Touchdown',            price: 16,  lvl: 90,  e: '🍹' },
+  { name: 'Dom Pérignon',         price: 290, lvl: 120, e: '🍾' },
+];
+export function drinkTier(barLvl) {   // Index des höchsten freigeschalteten Getränks
+  let i = 0; for (let k = 0; k < DRINKS.length; k++) if (barLvl >= DRINKS[k].lvl) i = k; return i;
+}
+
+// ---- Club-Themes: freischaltbare Dancefloor-/Neon-Looks (nach Gesamt-Einnahmen) ----
+export const CLUB_THEMES = [
+  { id: 'classic', name: 'Classic Neon', req: 0,     accent: '#8b5cf6', sw: ['#ff4fd8', '#4f9cf7', '#39ff88'], desc: 'Der Original-Regenbogen-Look.' },
+  { id: 'sunset',  name: 'Sunset Miami', req: 2e6,   accent: '#ff6a3d', sw: ['#ff2e63', '#ff9f1c', '#ff6a3d'], desc: 'Warme Pink-Orange-Vibes.' },
+  { id: 'toxic',   name: 'Toxic',        req: 5e8,   accent: '#39ff14', sw: ['#39ff14', '#b6ff00', '#00e5a0'], desc: 'Grelles Neon-Grün.' },
+  { id: 'ice',     name: 'Ice',          req: 5e10,  accent: '#5ad0ff', sw: ['#5ad0ff', '#7a9cff', '#a0f0ff'], desc: 'Kühles Eisblau.' },
+  { id: 'gold',    name: 'Gold VIP',     req: 5e12,  accent: '#ffcf6a', sw: ['#ffd93c', '#ffb347', '#fff1a8'], desc: 'Purer Luxus in Gold.' },
+];
+export const THEME_MAP = Object.fromEntries(CLUB_THEMES.map(x => [x.id, x]));
+
 export const BOOST = { dur: 300, cd: 300, mult: 2 };      // x2-Einkommen: 5 min an, dann 5 min CD → alle 10 min nutzbar
 export const DROP  = { dur: 12, mult: 3 };                // Hype-DROP: 12 s x3
 export const OFFLINE = { cap: 8 * 3600, eff: 0.3 };       // Offline: max 8 h, 30 % Effizienz
