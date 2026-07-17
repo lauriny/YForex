@@ -21,6 +21,20 @@ export function autoCollectInterval(lvl) {   // Sekunden zwischen Einsammel-Rund
   return lvl <= 0 ? Infinity : Math.max(2, 20 - lvl * 3);
 }
 
+// ---- Marketing (mehr & schneller Gäste, bis der Raum voll ist) --
+export const MARKETING = { baseCost: 4000, growth: 1.85, max: 25, guestsPerLevel: 3, spawnPerLevel: 0.16 };
+export function marketingCost(lvl) { return Math.floor(MARKETING.baseCost * Math.pow(MARKETING.growth, lvl)); }
+
+// ---- DJs zum Anheuern (Namen, Kosten, Einkommens-Bonus, Musikstil) ----
+export const DJS = [
+  { id: 'resident',  name: 'Resident DJ',       icon: '🎧', cost: 0,             mult: 1.0,  style: null,     desc: 'Der Haus-DJ – immer am Start.' },
+  { id: 'bakerman',  name: 'DJ Bakerman',       icon: '🥖', cost: 200_000,       mult: 1.12, style: 'techno', desc: '+12 % Einkommen · knallharter Techno.' },
+  { id: 'chandler',  name: 'DJ Chandler Bing',  icon: '📎', cost: 4_000_000,     mult: 1.25, style: 'rave',   desc: '+25 % Einkommen · Rave-Anthems.' },
+  { id: 'afroqueen', name: 'DJ Afro Queen',     icon: '👑', cost: 90_000_000,    mult: 1.42, style: 'afro',   desc: '+42 % Einkommen · Afro House.' },
+  { id: 'housemvp',  name: 'DJ Housemaster',    icon: '🏠', cost: 2_000_000_000, mult: 1.65, style: 'house',  desc: '+65 % Einkommen · Deep House.' },
+];
+export const DJ_MAP = Object.fromEntries(DJS.map(d => [d.id, d]));
+
 export const BOOST = { dur: 300, cd: 300, mult: 2 };      // x2-Einkommen: 5 min an, dann 5 min CD → alle 10 min nutzbar
 export const DROP  = { dur: 12, mult: 3 };                // Hype-DROP: 12 s x3
 export const OFFLINE = { cap: 8 * 3600, eff: 0.3 };       // Offline: max 8 h, 30 % Effizienz

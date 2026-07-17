@@ -4,6 +4,7 @@
 import {
   STATIONS, STATION_MAP, STAFF, STAFF_MAP, SHOP, CASH_STATIONS,
   T2_REQ, ROOF_REQ, PERFORMER, AUTOCOLLECT, CLUB_EXPAND, autoCollectInterval,
+  MARKETING, marketingCost, DJS, DJ_MAP,
   BOOST, DROP, OFFLINE, CELEB, PRESTIGE,
   EVENTS, EVENT_GAP, WHEEL, DAILY_MIN_GAP_H, DAILY_STREAK_MAX, ACHIEVEMENTS,
   getPhase, chestReward, costOf, bulkCost, maxAffordable, milestoneMult,
@@ -36,6 +37,9 @@ export const state = {
   roofUnlocked: false,
   stationCash: {},         // id -> aufgelaufener, einsammelbarer Umsatz
   autoCollect: 0,          // Stufe des Auto-Kassierers (0 = aus)
+  marketing: 0,            // Marketing-Stufe (mehr & schnellere Gäste)
+  djsOwned: ['resident'],  // angeheuerte DJs
+  activeDj: 'resident',    // aktiver DJ
   clubSize: 0,             // Club-Ausbaustufe (Gebäude größer)
   performer: { unlocked: false, room: 't1' },
   event: null,             // { id, expires }
@@ -112,7 +116,7 @@ export function eventMult() { const d = eventDef(); return d ? d.mult : 1; }
 export function eventGuestMult() { const d = eventDef(); return d ? d.guests : 1; }
 
 export function globalMult() {
-  let m = staffGlobalMult() * fameMult();
+  let m = staffGlobalMult() * fameMult() * djMult();
   if (boostActive()) m *= BOOST.mult;
   if (dropActive()) m *= DROP.mult;
   if (eventActive()) m *= eventMult();
@@ -274,6 +278,48 @@ export function buyAutoCollect() {
   state.money -= cost;
   state.autoCollect++;
   emit('autocollect', { level: state.autoCollect });
+  save();
+  return true;
+}
+
+// ---- Marketing (mehr & schnellere Gäste) ------------------------------
+export function marketingLevel() { return state.marketing || 0; }
+export function marketingCostNext() { return marketingCost(state.marketing || 0); }
+export function marketingGuestBonus() { return (state.marketing || 0) * MARKETING.guestsPerLevel; }
+export function marketingSpawnBonus() { return (state.marketing || 0) * MARKETING.spawnPerLevel; }
+export function buyMarketing() {
+  if ((state.marketing || 0) >= MARKETING.max) return false;
+  const cost = marketingCostNext();
+  if (state.money < cost) return false;
+  state.money -= cost;
+  state.marketing = (state.marketing || 0) + 1;
+  emit('marketing', { level: state.marketing });
+  save();
+  return true;
+}
+
+// ---- DJs anheuern & auswählen -----------------------------------------
+export function djsOwned() { return state.djsOwned || ['resident']; }
+export function activeDjId() { return state.activeDj || 'resident'; }
+export function activeDjDef() { return DJ_MAP[activeDjId()] || DJ_MAP.resident; }
+export function djMult() { return activeDjDef().mult || 1; }
+export function djOwned(id) { return djsOwned().includes(id); }
+export function hireDj(id) {
+  const dj = DJ_MAP[id]; if (!dj || djOwned(id)) return false;
+  if (state.money < dj.cost) return false;
+  state.money -= dj.cost;
+  (state.djsOwned ||= ['resident']).push(id);
+  setActiveDj(id);
+  emit('dj', { id, hired: true });
+  save();
+  return true;
+}
+export function setActiveDj(id) {
+  if (!djOwned(id)) return false;
+  state.activeDj = id;
+  const dj = DJ_MAP[id];
+  if (dj && dj.style) { state.settings.musicStyle = dj.style; emit('musicstyle', { style: dj.style }); }
+  emit('dj', { id, active: true });
   save();
   return true;
 }
@@ -536,6 +582,7 @@ export function doPrestige() {
   state.roofUnlocked = false;
   state.stationCash = {};
   state.autoCollect = 0;
+  state.marketing = 0;          // Marketing zurück (DJs bleiben angeheuert)
   state.clubSize = 0;
   state.performer.room = 't1';   // Tänzerin bleibt engagiert, zurück auf Mainfloor
   state.hype = 0;

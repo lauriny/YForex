@@ -5,9 +5,10 @@ import * as G from './game.js';
 import {
   STATIONS, STATION_MAP, STAFF, STAFF_MAP, SHOP, ROOMS,
   T2_REQ, ROOF_REQ, PERFORMER, AUTOCOLLECT, CLUB_EXPAND, WHEEL, ACHIEVEMENTS,
+  MARKETING, DJS, DJ_MAP,
   autoCollectInterval, MILESTONE_STEP, fmt, fmtTime, costOf, milestoneMult, nextMilestone,
 } from './data.js';
-import { playSfx, setMusic, cycleMusicStyle, currentMusicStyleName } from './sfx.js';
+import { playSfx, setMusic, cycleMusicStyle, currentMusicStyleName, setMusicStyle } from './sfx.js';
 import { enterRoom, exitRoom, detailBack, nextRoom, prevRoom, currentRoom } from './render.js';
 
 const ROOM_META = {
@@ -236,14 +237,48 @@ function openStationsModal() {
           <div class="st-icon">🏗️</div>
           <div class="st-info">
             <div class="st-name">Club vergrößern <span class="st-lvl">Stufe ${G.state.clubSize}/${CLUB_EXPAND.max}</span></div>
-            <div class="st-desc">${maxed ? 'Maximale Größe erreicht' : 'Größeres Gebäude & mehr Gäste · (wischen zum Navigieren)'}</div>
+            <div class="st-desc">${maxed ? 'Maximale Größe erreicht' : 'Größeres Gebäude & mehr Gäste'}</div>
           </div>
           <button class="btn-buy${afford ? '' : ' disabled'}">
             ${maxed ? '<b>MAX</b>' : `<span>Ausbauen</span><b>${fmt(cost)} €</b>`}
           </button>`;
         if (!maxed) row.querySelector('.btn-buy').addEventListener('click', () => {
-          if (G.buyClubExpand()) { playSfx('chest'); confetti(30); renderRows(); updateHUD(); toast('🏗️ Der Club ist gewachsen! Wisch zum Navigieren.'); }
+          if (G.buyClubExpand()) { playSfx('chest'); confetti(30); renderRows(); updateHUD(); toast('🏗️ Der Club ist gewachsen!'); }
         });
+        list.appendChild(row);
+      }
+      // Marketing — mehr & schnellere Gäste, bis der Raum voll ist
+      {
+        const lvl = G.state.marketing || 0, maxed = lvl >= MARKETING.max;
+        const cost = G.marketingCostNext();
+        const afford = !maxed && G.state.money >= cost;
+        const row = el('div', 'station-row hilite' + (afford ? '' : ' dim'));
+        row.innerHTML = `
+          <div class="st-icon">📣</div>
+          <div class="st-info">
+            <div class="st-name">Marketing <span class="st-lvl">Stufe ${lvl}/${MARKETING.max}</span></div>
+            <div class="st-desc">${maxed ? 'Maximal beworben' : `Mehr & schnellere Gäste (+${MARKETING.guestsPerLevel} Gäste/Stufe)`}</div>
+          </div>
+          <button class="btn-buy${afford ? '' : ' disabled'}">
+            ${maxed ? '<b>MAX</b>' : `<span>Bewerben</span><b>${fmt(cost)} €</b>`}
+          </button>`;
+        if (!maxed) row.querySelector('.btn-buy').addEventListener('click', () => {
+          if (G.buyMarketing()) { playSfx('buy'); renderRows(); updateHUD(); toast('📣 Mehr Andrang! Der Laden füllt sich.'); }
+        });
+        list.appendChild(row);
+      }
+      // DJ anheuern — öffnet die DJ-Auswahl
+      {
+        const dj = G.activeDjDef();
+        const row = el('div', 'station-row hilite');
+        row.innerHTML = `
+          <div class="st-icon">🎧</div>
+          <div class="st-info">
+            <div class="st-name">DJ anheuern <span class="st-lvl">${dj.icon} ${dj.name}</span></div>
+            <div class="st-desc">Andere DJs mit mehr Einkommen & eigenem Sound</div>
+          </div>
+          <button class="btn-buy"><span>Auswählen</span><b>🎧</b></button>`;
+        row.querySelector('.btn-buy').addEventListener('click', () => { playSfx('click'); openDjModal(); });
         list.appendChild(row);
       }
       for (const roomDef of ROOMS) {
@@ -299,6 +334,37 @@ function openStationsModal() {
     }
     renderRows();
     setRefresher(renderRows);
+  });
+}
+
+// ---- DJ-Modal (andere DJs anheuern & auflegen lassen) -----------------
+function openDjModal() {
+  openModal('🎧 DJ anheuern', body => {
+    const list = el('div', 'room-list');
+    body.appendChild(list);
+    function render() {
+      list.innerHTML = '';
+      for (const dj of DJS) {
+        const owned = G.djOwned(dj.id);
+        const active = G.activeDjId() === dj.id;
+        const afford = G.state.money >= dj.cost;
+        const card = el('div', 'room-card' + (owned ? ' unlocked' : ' locked'));
+        let btn;
+        if (active) btn = `<button class="btn-buy disabled"><b>Legt auf ✓</b></button>`;
+        else if (owned) btn = `<button class="btn-buy"><span>Auflegen</span><b>▶</b></button>`;
+        else btn = `<button class="btn-buy${afford ? '' : ' disabled'}"><span>Anheuern</span><b>${dj.cost > 0 ? fmt(dj.cost) + ' €' : 'gratis'}</b></button>`;
+        card.innerHTML = `<div class="room-emoji">${dj.icon}</div>
+          <div class="room-info"><b>${active ? '🔊 ' : ''}${dj.name}</b><span>${dj.desc}</span></div>${btn}`;
+        if (!active) card.querySelector('button').addEventListener('click', () => {
+          if (owned) { G.setActiveDj(dj.id); playSfx('click'); }
+          else { if (!G.hireDj(dj.id)) return; playSfx('chest'); confetti(30); toast(`🎧 ${dj.name} legt jetzt auf!`); }
+          if (dj.style) setMusicStyle(dj.style);
+          render(); updateHUD();
+        });
+        list.appendChild(card);
+      }
+    }
+    render();
   });
 }
 

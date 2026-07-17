@@ -7,6 +7,7 @@ import {
   state, totalLevels, dropActive, tapCeleb, tapHype,
   depositAtStation, collectStation, roomUnlocked,
   eventDef, eventGuestMult, incomePerSec,
+  marketingGuestBonus, marketingSpawnBonus, activeDjDef,
 } from './game.js';
 import { fmt, CASH_STATIONS } from './data.js';
 import { musicBpm } from './sfx.js';
@@ -274,7 +275,8 @@ function targetGuestCount() {
   let base = 6 + Math.floor(totalLevels() / 7);
   if (state.roofUnlocked) base += 6; else if (state.t2Unlocked) base += 3;
   base += (state.clubSize || 0) * 6;   // größerer Club → mehr Gäste
-  return Math.min(64, Math.floor(base * eventGuestMult()));
+  base += marketingGuestBonus();       // Marketing → mehr Gäste bis der Raum voll ist
+  return Math.min(90, Math.floor(base * eventGuestMult()));
 }
 
 function spawnGuest(celeb = false) {
@@ -350,8 +352,8 @@ function actTarget(act, g) {
     case 'vipdance': return inRoom({ x: 12.5, y: 2.5, w: 4, d: 3.5 });
     case 'roofbar':  return Math.random() < 0.5 ? { x: A.skybar.x + rnd(-0.8, 1.2), y: A.skybar.y + 0.9 }
                                                  : { x: A.pool.x + rnd(-1, 1), y: A.pool.y - 1 };
-    case 'bar':      return { x: A.bar.x + 1.3, y: A.bar.y + rnd(-1.5, 1.5) };
-    case 'shots':    return { x: A.shots.x - 1.1, y: A.shots.y + rnd(-1, 1) };
+    case 'bar':      return { x: A.bar.x + 1.6, y: A.bar.y + rnd(-1.4, 1.4) };   // klar rechts neben der Theke
+    case 'shots':    return { x: A.shots.x - 1.3, y: A.shots.y + rnd(-1, 1) };   // klar links neben der Shot-Bar
     case 'champ':    return { x: A.vipbar.x + rnd(-0.8, 1), y: A.vipbar.y + 1.3 };
     case 'sofa':     return Math.random() < 0.5 ? { x: A.tables.x + rnd(-0.8, 0.8), y: A.tables.y + 0.9 }
                                                 : { x: A.chill.x + rnd(-0.8, 0.8), y: A.chill.y + 0.9 };
@@ -411,7 +413,7 @@ function avoidObstacles(g) {
 function updateGuests(dt) {
   const want = targetGuestCount();
   const alive = guests.filter(g => !g.celeb).length;
-  if (alive < want && Math.random() < dt * (dropActive() ? 3 : 1.7)) spawnGuest();
+  if (alive < want && Math.random() < dt * ((dropActive() ? 3 : 1.7) + marketingSpawnBonus())) spawnGuest();
   if (alive > want + 3) { const g = guests.find(g => !g.celeb && g.act !== 'leave'); if (g) pushActivity(g, 'leave'); }
 
   const hasCeleb = guests.some(g => g.celeb);
@@ -437,7 +439,12 @@ function updateGuests(dt) {
           else if (g.act === 'shots') g.drink = '🥃';
           else if (g.act === 'champ' || g.act === 'sofa' || g.act === 'roofbar') g.drink = pick(DRINKS_T2);
         }
-      } else { g.x += dx / d * step; g.y += dy / d * step; avoidObstacles(g); }
+      } else {
+        g.x += dx / d * step; g.y += dy / d * step;
+        // Hindernissen nur auf dem Weg ausweichen, NICHT auf den letzten ~1.2 Einheiten zum Ziel
+        // (sonst würden Gäste an Bar/Shots-Ständen ewig kreisen und nie einzahlen)
+        if (d > 1.2) avoidObstacles(g);
+      }
     } else {
       g.actT -= dt;
       g.alpha = (g.act === 'wc' && g.actT < actDuration('wc') - 0.5) ? 0.2 : 1;
@@ -1112,43 +1119,35 @@ const OBSTACLES = [
   { x: 13.7, y: 13.8, w: 3.2,  d: 2.4,  room: 'roof' }, // Pool
 ];
 
-// Industriegebiet drumherum: Asphalt + Fassaden benachbarter Gebäude (keine Wiese)
+// Straßenrand mit Bürgersteig: der Club steht an einer Straße (Zebrastreifen, Laterne, Auto)
 function drawGrassBg() {
-  // Asphalt-Boden
-  const g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, '#3b3f45'); g.addColorStop(1, '#2c2f34');
-  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-  // Asphalt-Platten-Raster + ein paar Ölflecken
-  ctx.strokeStyle = 'rgba(0,0,0,0.18)'; ctx.lineWidth = 1;
-  const cell = W / 6;
-  for (let x = cell; x < W; x += cell) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
-  for (let y = cell; y < H; y += cell) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
-  ctx.fillStyle = 'rgba(0,0,0,0.12)';
-  for (const [fx, fy, r] of [[0.2, 0.28, 22], [0.8, 0.66, 26], [0.5, 0.9, 20]]) { ctx.beginPath(); ctx.ellipse(W * fx, H * fy, r, r * 0.5, 0, 0, 7); ctx.fill(); }
-  // Fassade eines Nachbargebäudes als Streifen (Wellblech/Fenster) an einer Kante
-  const facade = (x, y, w, h, vertical) => {
-    const fg = ctx.createLinearGradient(x, y, vertical ? x + w : x, vertical ? y : y + h);
-    fg.addColorStop(0, '#5a5f68'); fg.addColorStop(1, '#40444c');
-    ctx.fillStyle = fg; ctx.fillRect(x, y, w, h);
-    ctx.fillStyle = 'rgba(0,0,0,0.28)';                    // Kanten-Schatten zum Hof hin
-    if (vertical) ctx.fillRect(x + (w > 0 && x < W / 2 ? w - 5 : 0), y, 5, h);
-    else ctx.fillRect(x, y + (y < H / 2 ? h - 5 : 0), w, 5);
-    ctx.fillStyle = 'rgba(20,22,26,0.75)';                 // Fensterreihen
-    const step = 26;
-    if (vertical) { for (let yy = y + 12; yy < y + h - 12; yy += step) for (let xx = x + 6; xx < x + w - 6; xx += 16) ctx.fillRect(xx, yy, 10, 14); }
-    else { for (let xx = x + 12; xx < x + w - 12; xx += step) for (let yy = y + 6; yy < y + h - 6; yy += 16) ctx.fillRect(xx, yy, 14, 10); }
+  // Bürgersteig (heller Beton) als Grundfläche
+  ctx.fillStyle = '#9aa0a8'; ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = 'rgba(0,0,0,0.10)'; ctx.lineWidth = 1;             // Plattenfugen
+  for (let x = 0; x < W; x += 36) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+  for (let y = 0; y < H; y += 36) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+  const roadT = Math.round(H * 0.085), roadB = Math.round(H * 0.05);
+  const road = (y0, h) => {                                            // Asphalt-Fahrbahn oben & unten
+    ctx.fillStyle = '#2f3237'; ctx.fillRect(0, y0, W, h);
+    ctx.strokeStyle = 'rgba(240,210,90,0.85)'; ctx.lineWidth = 3; ctx.setLineDash([16, 12]);
+    ctx.beginPath(); ctx.moveTo(0, y0 + h / 2); ctx.lineTo(W, y0 + h / 2); ctx.stroke(); ctx.setLineDash([]);
   };
-  const bw = Math.max(30, W * 0.11), bh = Math.max(30, H * 0.07);
-  facade(0, 0, bw, H, true);            // linkes Gebäude
-  facade(W - bw, 0, bw, H, true);       // rechtes Gebäude
-  facade(0, 0, W, bh, false);           // Gebäude oben
-  // Container / Deko im Hof
-  const crate = (cx, cy, w, h, col) => { ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(cx + 3, cy + 4, w, h);
-    ctx.fillStyle = col; ctx.fillRect(cx, cy, w, h);
-    ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.lineWidth = 1; ctx.strokeRect(cx + 1.5, cy + 1.5, w - 3, h - 3);
-    ctx.strokeStyle = 'rgba(0,0,0,0.35)'; for (let rx = cx + 6; rx < cx + w - 3; rx += 6) { ctx.beginPath(); ctx.moveTo(rx, cy + 2); ctx.lineTo(rx, cy + h - 2); ctx.stroke(); } };
-  crate(W * 0.03, H * 0.42, 26, 34, '#b6653a'); crate(W * 0.03, H * 0.55, 26, 30, '#3a6ea5');
-  crate(W - W * 0.03 - 26, H * 0.5, 26, 32, '#4f8a4a');
+  road(0, roadT); road(H - roadB, roadB);
+  ctx.fillStyle = '#c7ccd2'; ctx.fillRect(0, roadT, W, 3); ctx.fillRect(0, H - roadB - 3, W, 3);   // Bordsteinkanten
+  ctx.fillStyle = 'rgba(235,235,235,0.9)';                            // Zebrastreifen unten (zum Eingang)
+  for (let i = 0; i < 6; i++) ctx.fillRect(W * 0.32 + i * 15, H - roadB + 4, 9, roadB - 8);
+  // Straßenlaterne oben-links
+  ctx.strokeStyle = '#4a4e55'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(22, roadT - 6); ctx.lineTo(22, 10); ctx.lineTo(44, 10); ctx.stroke();
+  ctx.fillStyle = '#ffe9a0'; ctx.beginPath(); ctx.ellipse(46, 13, 6, 3.5, 0, 0, 7); ctx.fill();
+  // geparktes Auto oben-rechts (Silhouette)
+  { const cx = W - 96, cy = roadT * 0.42;
+    ctx.fillStyle = '#3a5f8a'; ctx.beginPath(); ctx.roundRect(cx, cy, 74, roadT * 0.42, 6); ctx.fill();
+    ctx.fillStyle = '#2a4568'; ctx.beginPath(); ctx.roundRect(cx + 14, cy - roadT * 0.2, 44, roadT * 0.28, 5); ctx.fill();
+    ctx.fillStyle = '#0e0e14'; ctx.beginPath(); ctx.arc(cx + 16, cy + roadT * 0.42, 7, 0, 7); ctx.arc(cx + 58, cy + roadT * 0.42, 7, 0, 7); ctx.fill(); }
+  // Gullideckel als Bürgersteig-Deko
+  ctx.fillStyle = '#7c828b'; ctx.beginPath(); ctx.arc(W * 0.18, H - roadB - 26, 10, 0, 7); ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(W * 0.18, H - roadB - 26, 7, 0, 7); ctx.stroke();
 }
 
 // Ein einzelner Raum (Boden + Wände + Möbel) an seiner Weltposition im Grundriss
@@ -1226,7 +1225,14 @@ function drawRoomDetail(id, t, beat) {
     for (const dx of [3.95, 5.0]) { const p = detailProj(dx, 7.78); ctx.strokeStyle = '#8b5cf6'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(p.x, p.y - u * 0.72, u * 0.18, t * 4, t * 4 + Math.PI * 1.4); ctx.stroke(); }
     dPerson(4.45, 8.1, { s: 1.15, color: '#3b2f7a', skin: '#f0b98c', hair: '#1a1a22', headphones: true, arms: beat, bob: Math.sin(beat) * 2, groundZ: u * 0.5 });
-    dLabel(4.45, 6.95, '🎧 DJ', '#c9b6ff', 10);
+    // Namensschild des aktiven DJs am Pult
+    { const dj = activeDjDef(); const np = detailProj(4.45, 6.95);
+      const label = `${dj.icon} ${dj.name}`;
+      ctx.font = `800 ${Math.max(9, u * 0.24)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      const tw = ctx.measureText(label).width;
+      ctx.fillStyle = 'rgba(12,8,24,0.85)'; ctx.beginPath(); ctx.roundRect(np.x - tw / 2 - 8, np.y - u * 0.2, tw + 16, u * 0.42, u * 0.21); ctx.fill();
+      ctx.strokeStyle = 'rgba(170,130,255,0.6)'; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.fillStyle = '#e6dcff'; ctx.fillText(label, np.x, np.y + u * 0.01); ctx.textBaseline = 'alphabetic'; }
     // DJ-Optik-Upgrades: je höher die DJ-Stufe, desto mehr Gear
     const djT = lvlTier(state.stations.dj || 0);
     if (djT >= 1) {   // LED-Wand mit Equalizer über dem Pult
