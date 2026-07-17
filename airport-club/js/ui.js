@@ -12,6 +12,7 @@ import { enterRoom, exitRoom, detailBack } from './render.js';
 
 const ROOM_META = {
   t1:   { icon: '🪩', name: 'Terminal 1',        sub: 'Mainfloor' },
+  klo:  { icon: '🚻', name: 'WC',                sub: 'Waschräume' },
   t2:   { icon: '🥂', name: 'Terminal 2 · VIP',  sub: 'VIP-Etage' },
   roof: { icon: '🌃', name: 'Rooftop',           sub: 'Sky Lounge' },
 };
@@ -771,7 +772,7 @@ export function initUI() {
 //  Raum-Detailansicht (Zoom in einen Raum)
 // ------------------------------------------------------------------
 function showRoomHud(id) {
-  const m = ROOM_META[id];
+  const m = ROOM_META[id] || { icon: '📍', name: id };
   $('#room-title').textContent = `${m.icon} ${m.name}`;
   $('#room-hud').classList.remove('hidden');
   $('#side-rail').classList.add('dim-hide');

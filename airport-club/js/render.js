@@ -1023,7 +1023,7 @@ function dPersonScale() { return dTileW() / 34; }
 // Optik-Stufe einer Station (0..3) für „krasser werdende" Möbel
 function lvlTier(lvl) { return lvl >= 75 ? 3 : lvl >= 40 ? 2 : lvl >= 15 ? 1 : 0; }
 // Verwahrlosungs-Grad: 1 = am Anfang alt & runtergekommen, 0 = renoviert (steigt mit Ausbau)
-function clubShabby() { return Math.max(0, Math.min(1, 1 - totalLevels() / 45)); }
+function clubShabby() { return Math.max(0, Math.min(0.85, 1 - totalLevels() / 45)); }
 
 function dRect(wx, wy, ww, wd, fill, stroke, rad = 8) {
   const a = detailProj(wx, wy), b = detailProj(wx + ww, wy + wd);
@@ -1319,9 +1319,14 @@ function drawRoomDetail(id, t, beat) {
     ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1.5;
     for (let i = 1; i < r.w; i++) { const p1 = detailProj(r.x+i, r.y+1.6), p2 = detailProj(r.x+i, r.y+r.d); ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y); ctx.stroke(); }
     for (let j = 2; j < r.d; j++) { const p1 = detailProj(r.x, r.y+j), p2 = detailProj(r.x+r.w, r.y+j); ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y); ctx.stroke(); }
-    for (let k = 0; k < 3; k++) { dShadow(r.x+0.4+k*1.2, r.y+0.7, 0.9, 1.3);
-      dBox(r.x+0.4+k*1.2, r.y+0.7, 0.9, 1.3, u * 0.6, '#7a8fa5', '#46545f', '#8fa4b8');
-      const p = detailProj(r.x+0.85+k*1.2, r.y+1.35); ctx.font = `${u*0.5}px sans-serif`; ctx.textAlign='center'; ctx.fillText('🚽', p.x, p.y - u*0.6); }
+    for (let k = 0; k < 3; k++) { const bx = r.x + 0.55 + k * 1.1;   // kleinere Kabinen
+      dShadow(bx, r.y + 0.85, 0.7, 0.95);
+      dBox(bx, r.y + 0.85, 0.7, 0.95, u * 0.42, '#7a8fa5', '#46545f', '#8fa4b8');
+      const p = detailProj(bx + 0.35, r.y + 1.3); ctx.font = `${u * 0.32}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('🚽', p.x, p.y - u * 0.42); }
+    // Waschbecken-Reihe an der unteren Wand (mehr Detail)
+    dShadow(r.x + 0.5, r.y + r.d - 1.1, r.w - 1.0, 0.5);
+    dBox(r.x + 0.5, r.y + r.d - 1.1, r.w - 1.0, 0.5, u * 0.35, '#c3ccd6', '#8996a3', '#dde4ec');
+    for (let k = 0; k < 3; k++) { const p = detailProj(r.x + 1.0 + k * 1.0, r.y + r.d - 0.85); ctx.font = `${u * 0.26}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('🚰', p.x, p.y - u * 0.35); }
     dLabel(r.x+r.w/2, r.y+0.3, '🚻 WC', '#dfeaf5', 13);
   } else if (id === 't2') {
     const fl = { x: 12.2, y: 2.4, w: 4.4, d: 3.4 };
@@ -1353,10 +1358,10 @@ function drawRoomDetail(id, t, beat) {
     if (sh > 0.05) {
       ctx.save();
       ctx.beginPath(); ctx.roundRect(a0.x, a0.y, rw, rh, 6); ctx.clip();
-      ctx.globalCompositeOperation = 'multiply'; ctx.globalAlpha = sh * 0.6;
-      ctx.fillStyle = '#7a6a48'; ctx.fillRect(a0.x, a0.y, rw, rh);      // sepia-grau → entsättigt
-      ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = sh * 0.3;
-      ctx.fillStyle = '#0c0906'; ctx.fillRect(a0.x, a0.y, rw, rh);      // abdunkeln
+      ctx.globalCompositeOperation = 'multiply'; ctx.globalAlpha = sh * 0.32;
+      ctx.fillStyle = '#b3a888'; ctx.fillRect(a0.x, a0.y, rw, rh);      // leichter Sepia-Schleier (entsättigt, nicht dunkel)
+      ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = sh * 0.1;
+      ctx.fillStyle = '#0c0906'; ctx.fillRect(a0.x, a0.y, rw, rh);      // dezent abdunkeln
       ctx.restore();
       ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
     }
@@ -1371,14 +1376,14 @@ function drawShabby(id, a0, rw, rh, u) {
   if (sh < 0.05) return;
   ctx.save();
   ctx.beginPath(); ctx.roundRect(a0.x, a0.y, rw, rh, 6); ctx.clip();
-  ctx.globalAlpha = sh * 0.5;                        // Schmutzflecken
+  ctx.globalAlpha = sh * 0.33;                        // Schmutzflecken (dezent)
   for (const [fx, fy] of GRIME) {
     const rx = a0.x + fx * rw, ry = a0.y + fy * rh, rr = Math.max(14, u * 0.6);
     const gg = ctx.createRadialGradient(rx, ry, 0, rx, ry, rr);
-    gg.addColorStop(0, 'rgba(38,28,14,0.7)'); gg.addColorStop(1, 'rgba(38,28,14,0)');
+    gg.addColorStop(0, 'rgba(48,36,18,0.6)'); gg.addColorStop(1, 'rgba(48,36,18,0)');
     ctx.fillStyle = gg; ctx.beginPath(); ctx.arc(rx, ry, rr, 0, 7); ctx.fill();
   }
-  ctx.globalAlpha = sh * 0.65; ctx.fillStyle = '#0c0a14';   // kaputte dunkle Stellen
+  ctx.globalAlpha = sh * 0.4; ctx.fillStyle = '#15111c';   // kaputte Stellen
   for (let i = 0; i < 4; i++) { const [fx, fy] = GRIME[i];
     ctx.beginPath(); ctx.ellipse(a0.x + (1 - fx) * rw, a0.y + fy * rh, 7, 4, 0, 0, 7); ctx.fill(); }
   ctx.restore();
@@ -1390,14 +1395,53 @@ function drawShabby(id, a0, rw, rh, u) {
   ctx.globalAlpha = 1;
 }
 
+// verrammelter Durchgang zu noch gesperrten Räumen: alter Gang mit Holzbrettern vernagelt
+function drawBoardedDoor(dw, a, b, w, h) {
+  const g = ctx.createLinearGradient(a.x, a.y, dw.dir === 'v' ? a.x : b.x, dw.dir === 'v' ? b.y : a.y);
+  g.addColorStop(0, '#242038'); g.addColorStop(0.5, '#2c2745'); g.addColorStop(1, '#242038');   // dunkler, alter Gangboden
+  ctx.fillStyle = g; ctx.beginPath(); ctx.roundRect(a.x, a.y, w, h, 4); ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.beginPath(); ctx.roundRect(a.x, a.y, w, h, 4); ctx.fill();   // düster
+  // gekreuzte Holzbretter, die den Gang versperren
+  const plank = (x0, y0, x1, y1, tw) => {
+    const ang = Math.atan2(y1 - y0, x1 - x0), len = Math.hypot(x1 - x0, y1 - y0);
+    ctx.save(); ctx.translate(x0, y0); ctx.rotate(ang);
+    const pg = ctx.createLinearGradient(0, -tw / 2, 0, tw / 2);
+    pg.addColorStop(0, '#8a5a2e'); pg.addColorStop(0.5, '#6b4423'); pg.addColorStop(1, '#4a2f18');
+    ctx.fillStyle = pg; ctx.beginPath(); ctx.roundRect(0, -tw / 2, len, tw, 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(4, 0); ctx.lineTo(len - 4, 0); ctx.stroke();   // Maserung
+    ctx.fillStyle = '#2b2b30'; ctx.beginPath(); ctx.arc(6, 0, 1.8, 0, 7); ctx.arc(len - 6, 0, 1.8, 0, 7); ctx.fill();   // Nägel
+    ctx.restore();
+  };
+  const tw = Math.max(6, (dw.dir === 'v' ? h : w) * 0.16), pad = 3;
+  if (dw.dir === 'v') {   // horizontale Bretter quer über den vertikalen Gang
+    plank(a.x - pad, a.y + h * 0.28, b.x + pad, a.y + h * 0.42, tw);
+    plank(a.x - pad, a.y + h * 0.72, b.x + pad, a.y + h * 0.58, tw);
+  } else {                // vertikale Bretter quer über den horizontalen Gang
+    plank(a.x + w * 0.28, a.y - pad, a.x + w * 0.42, b.y + pad, tw);
+    plank(a.x + w * 0.72, a.y - pad, a.x + w * 0.58, b.y + pad, tw);
+  }
+  // Absperrband-Feeling + Warnschild
+  const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
+  ctx.font = `${Math.max(11, tw * 1.6)}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('🚧', cx, cy); ctx.textBaseline = 'alphabetic';
+}
+
 // Durchgänge zwischen anliegenden Räumen: Schwellen-Boden + Türrahmen-Pfosten
 function drawDoorways(t) {
   const u = dTileW();
   for (const dw of DOORWAYS) {
-    if (!roomUnlocked(dw.a) || !roomUnlocked(dw.b)) continue;
+    const ua = roomUnlocked(dw.a), ub = roomUnlocked(dw.b);
+    if (!ua && !ub) continue;                         // beide dicht → kein sichtbarer Gang
     const r = dw.rect;
     const a = detailProj(r.x, r.y), b = detailProj(r.x + r.w, r.y + r.d);
     const w = b.x - a.x, h = b.y - a.y;
+    if (!ua || !ub) {                                 // ein Raum noch gesperrt → verrammelter alter Gang
+      drawBoardedDoor(dw, a, b, w, h);
+      ctx.fillStyle = '#3a3550';
+      if (dw.dir === 'v') { ctx.fillRect(a.x - 4, a.y, 4, h); ctx.fillRect(b.x, a.y, 4, h); }
+      else { ctx.fillRect(a.x, a.y - 4, w, 4); ctx.fillRect(a.x, b.y, w, 4); }
+      continue;
+    }
     // Schwelle (heller Durchgangs-Boden)
     const g = ctx.createLinearGradient(a.x, a.y, dw.dir === 'v' ? a.x : b.x, dw.dir === 'v' ? b.y : a.y);
     g.addColorStop(0, '#2b2542'); g.addColorStop(0.5, '#3d3660'); g.addColorStop(1, '#2b2542');
@@ -1414,6 +1458,51 @@ function drawDoorways(t) {
     if (dw.dir === 'v') { ctx.fillRect(a.x - 4, a.y, 4, h); ctx.fillRect(b.x, a.y, 4, h); }
     else { ctx.fillRect(a.x, a.y - 4, w, 4); ctx.fillRect(a.x, b.y, w, 4); }
   }
+}
+
+// Airport-Deko für die großen freien Flächen im Gebäude (füllt die Leere im Grundriss)
+const BAGS = ['🧳','🎒','💼','🧳','🎒','💼'];
+function decoPlant(wx, wy, u) { dShadow(wx - 0.28, wy - 0.1, 0.56, 0.26); const p = detailProj(wx, wy);
+  ctx.fillStyle = '#4a3320'; ctx.beginPath(); ctx.roundRect(p.x - 7, p.y - 8, 14, 10, 3); ctx.fill();
+  ctx.fillStyle = '#2f8f4a'; for (const [ox, oy, rr] of [[-6, -14, 6], [6, -14, 6], [0, -19, 7], [-2, -12, 5], [3, -12, 5]]) { ctx.beginPath(); ctx.arc(p.x + ox, p.y + oy, rr, 0, 7); ctx.fill(); }
+  ctx.fillStyle = '#3fb060'; ctx.beginPath(); ctx.arc(p.x - 2, p.y - 18, 4, 0, 7); ctx.fill(); }
+function drawBuildingDecor(t) {
+  const u = dTileW();
+  // === Concourse in der grossen Freifläche oben-mitte (zwischen WC und Terminal 2) ===
+  dRect(4.4, -0.5, 5.2, 6.2, '#211c31', 'rgba(255,255,255,0.05)', 8);
+  // Abflugtafel an der oberen Wand
+  { const bp = detailProj(7.0, 0.15), bw2 = u * 3.4, bh2 = u * 0.8;
+    ctx.fillStyle = '#0a0a12'; ctx.beginPath(); ctx.roundRect(bp.x - bw2 / 2, bp.y - bh2 / 2, bw2, bh2, 4); ctx.fill();
+    ctx.strokeStyle = 'rgba(120,200,255,0.4)'; ctx.lineWidth = 1.5; ctx.strokeRect(bp.x - bw2 / 2, bp.y - bh2 / 2, bw2, bh2);
+    ctx.fillStyle = '#ffcf5a'; ctx.font = `700 ${Math.max(7, u * 0.2)}px system-ui, monospace`; ctx.textAlign = 'left';
+    const rows = ['✈ BERLIN   BOARDING', '✈ IBIZA    ON TIME', '✈ MIAMI    DELAY'];
+    for (let i = 0; i < 3; i++) ctx.fillText(rows[i], bp.x - bw2 / 2 + 6, bp.y - bh2 / 2 + u * 0.24 + i * u * 0.24); }
+  // Gepäckband (rotierende Koffer)
+  const cxw = 6.9, cyw = 2.7, c = detailProj(cxw, cyw), cr = detailProj(cxw + 1.9, cyw + 1.1);
+  const rx = cr.x - c.x, ry = cr.y - c.y;
+  dShadow(cxw - 1.9, cyw - 1.1, 3.8, 2.2);
+  ctx.fillStyle = '#413a58'; ctx.beginPath(); ctx.ellipse(c.x, c.y, rx + 9, ry + 9, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = '#2a2438'; ctx.beginPath(); ctx.ellipse(c.x, c.y, rx, ry, 0, 0, 7); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(c.x, c.y, (rx + rx + 9) / 2, (ry + ry + 9) / 2, 0, 0, 7); ctx.stroke();
+  ctx.font = `${u * 0.4}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (let i = 0; i < 6; i++) { const ang = t * 0.5 + i * Math.PI / 3;
+    ctx.fillText(BAGS[i], c.x + Math.cos(ang) * (rx + 4.5), c.y + Math.sin(ang) * (ry + 4.5)); }
+  ctx.textBaseline = 'alphabetic';
+  // Sitzreihe darunter
+  for (let s = 0; s < 4; s++) { const sx = 4.9 + s * 1.05;
+    dBox(sx, 4.7, 0.85, 0.4, u * 0.28, '#3a4a6a', '#22304a', '#4a5c80');
+    dBox(sx, 4.5, 0.85, 0.18, u * 0.5, '#324060', '#1e2a42'); }
+  decoPlant(4.7, 5.4, u); decoPlant(9.2, 5.4, u); decoPlant(4.7, 0.7, u);
+  // Wegweiser-Pfeil Richtung Terminals
+  { const sp = detailProj(8.7, 3.2); ctx.fillStyle = '#1f6f3a'; ctx.beginPath(); ctx.roundRect(sp.x - u * 0.5, sp.y - u * 0.22, u, u * 0.44, 3); ctx.fill();
+    ctx.fillStyle = '#eafff0'; ctx.font = `700 ${Math.max(7, u * 0.2)}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('T2 →', sp.x, sp.y); ctx.textBaseline = 'alphabetic'; }
+
+  // === Ankunftsbereich unter Terminal 1 (Taxistand + Wartebank) füllt die untere Freifläche ===
+  dRect(0.2, 15.6, 8.6, 2.6, '#20182a', 'rgba(255,255,255,0.04)', 8);
+  { const sp = detailProj(1.6, 16.1); ctx.fillStyle = '#c9a11e'; ctx.beginPath(); ctx.roundRect(sp.x - u * 0.55, sp.y - u * 0.2, u * 1.1, u * 0.4, 3); ctx.fill();
+    ctx.fillStyle = '#1a1206'; ctx.font = `800 ${Math.max(7, u * 0.2)}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('🚕 TAXI', sp.x, sp.y); ctx.textBaseline = 'alphabetic'; }
+  for (let s = 0; s < 3; s++) { const sx = 5.0 + s * 1.05; dBox(sx, 16.7, 0.85, 0.4, u * 0.28, '#3a4a6a', '#22304a', '#4a5c80'); }
+  decoPlant(0.9, 17.6, u); decoPlant(8.2, 17.4, u);
 }
 
 // Zusammenhängender Grundriss: Gebäude + alle Räume + Gäste + Pins in Weltkoordinaten.
@@ -1440,6 +1529,9 @@ function drawClub(t, beat) {
   for (let gx = Math.ceil(CLUB_BB.x0); gx <= CLUB_BB.x1; gx++) { const p = detailProj(gx, 0); ctx.beginPath(); ctx.moveTo(p.x, bb0.y); ctx.lineTo(p.x, bb1.y); ctx.stroke(); }
   for (let gy = Math.ceil(CLUB_BB.y0); gy <= CLUB_BB.y1; gy++) { const p = detailProj(0, gy); ctx.beginPath(); ctx.moveTo(bb0.x, p.y); ctx.lineTo(bb1.x, p.y); ctx.stroke(); }
   ctx.restore();
+
+  // Airport-Deko füllt die freien Gebäudeflächen (Concourse, Gepäckband, Sitze, Pflanzen)
+  drawBuildingDecor(t);
 
   // Räume (Boden + Wände + Möbel) in Tiefen-Reihenfolge — hinten zuerst
   for (const id of ['klo', 't2', 'roof', 't1']) drawRoomDetail(id, t, beat);
