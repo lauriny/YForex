@@ -8,7 +8,7 @@ import {
   autoCollectInterval, MILESTONE_STEP, fmt, fmtTime, costOf, milestoneMult, nextMilestone,
 } from './data.js';
 import { playSfx, setMusic, cycleMusicStyle, currentMusicStyleName } from './sfx.js';
-import { enterRoom, exitRoom, detailBack } from './render.js';
+import { enterRoom, exitRoom, detailBack, nextRoom, prevRoom, currentRoom } from './render.js';
 
 const ROOM_META = {
   t1:   { icon: '🪩', name: 'Terminal 1',        sub: 'Mainfloor' },
@@ -735,6 +735,10 @@ export function initUI() {
   $('#btn-showact').addEventListener('click', openPerformerModal);
   // Zurück aus der Raum-Detailansicht
   $('#room-back').addEventListener('click', closeRoomView);
+  // Raumwechsel per Pfeilen; Titel antippen öffnet die Raum-Auswahl
+  $('#room-prev').addEventListener('click', () => { const id = prevRoom(); showRoomHud(id); playSfx('click'); });
+  $('#room-next').addEventListener('click', () => { const id = nextRoom(); showRoomHud(id); playSfx('click'); });
+  $('#room-title').addEventListener('click', openRoomsModal);
 
   // Spiel-Events
   G.on('levelup', ({ level, gems }) => {
@@ -784,13 +788,8 @@ function hideRoomHud() {
   $('#tap-hint').classList.remove('dim-hide');
 }
 function openRoomView(id) { if (enterRoom(id)) { showRoomHud(id); playSfx('click'); } }
-// Zurück: Raum → Grundriss-Karte (nur Namen), Karte → Iso-Übersicht
-function closeRoomView() {
-  const r = detailBack();
-  if (r === 'map') { $('#room-title').textContent = '🗺 Grundriss'; }
-  else { hideRoomHud(); }
-  playSfx('click');
-}
+// Zurück: Raum verlassen → Iso-Übersicht
+function closeRoomView() { detailBack(); hideRoomHud(); playSfx('click'); }
 
 // Feedback vom Canvas (Taps)
 export function canvasFeedback(fb) {

@@ -118,10 +118,9 @@ function onPointerDown(e) {
 }
 function onPointerMove(e) {
   if (!ptr) return;
-  const dx = e.clientX - ptr.lx, dy = e.clientY - ptr.ly;
   ptr.lx = e.clientX; ptr.ly = e.clientY;
   if (Math.abs(e.clientX - ptr.x0) + Math.abs(e.clientY - ptr.y0) > 8) ptr.moved = true;
-  if (inRoomView() && !planIsMap()) { const z = detailZoom(); detailCam.x -= dx / z; detailCam.y -= dy / z; clampPan(); }
+  // kein Kamera-Pan mehr: Räume werden per ◀ ▶ gewechselt, nicht durch Wischen
 }
 function onPointerUp(e) {
   if (!ptr) return;
@@ -168,29 +167,29 @@ function setupCamera() {
   }
 
   if (!focusRoom) Object.assign(cam, camOver);
+  frameRoom(framedRoom, false);   // Einzel-Raum-Rahmen an neue Bildschirmgröße anpassen
 }
 
 // Raum betreten / verlassen (von Tap oder UI aufgerufen)
 export function enterRoom(id) {
   if (!roomUnlocked(id) || !RM[id]) return false;
-  focusRoom = id; planFocus = id; zoomTarget = 1;   // direkt in den Raum zoomen
-  detailCam.x = RM[id].x + RM[id].w / 2;   // Kamera auf den gewählten Raum
-  detailCam.y = RM[id].y + RM[id].d / 2;
-  clampPan();
+  focusRoom = id; frameRoom(id, false);   // genau diesen Raum bildschirmfüllend zeigen
   return true;
 }
-// In der Grundriss-Karte einen Raum antippen → in ihn hineinzoomen
-export function zoomToRoom(id) {
-  if (!roomUnlocked(id) || !RM[id]) return false;
-  planFocus = id; zoomTarget = 1;
-  return true;
+// freigeschaltete Räume der Reihe nach (für ◀ ▶ Raumwechsel)
+function unlockedRooms() { return ROOM_ORDER.filter(roomUnlocked); }
+export function switchRoom(dir) {
+  const list = unlockedRooms(); if (!list.length) return framedRoom;
+  let i = list.indexOf(framedRoom); if (i < 0) i = 0;
+  const id = list[(i + dir + list.length) % list.length];
+  focusRoom = id; frameRoom(id, true);
+  return id;
 }
-// Zurück-Taste: Raum → Karte, Karte → Iso-Übersicht
-export function detailBack() {
-  if (!planIsMap()) { zoomTarget = 0; return 'map'; }   // rauszoomen auf die Karte
-  focusRoom = null; return 'exit';                       // Karte verlassen → Übersicht
-}
-export function exitRoom() { focusRoom = null; zoomTarget = 1; }
+export function nextRoom() { return switchRoom(1); }
+export function prevRoom() { return switchRoom(-1); }
+// Zurück-Taste: Raum verlassen → Iso-Übersicht
+export function detailBack() { focusRoom = null; return 'exit'; }
+export function exitRoom() { focusRoom = null; }
 export function currentRoom() { return focusRoom; }
 export function inRoomView() { return focusAmt > 0.5; }
 
@@ -228,23 +227,11 @@ function handleTap(e) {
     }
   }
   const roomV = inRoomView();
-  // Grundriss-Karte (rausgezoomt): Tap auf einen Raum → hineinzoomen (kein Geld sichtbar)
-  if (roomV && planIsMap()) {
-    for (const id of ['roof', 't2', 't1', 'klo']) {
-      const a = detailProj(RM[id].x, RM[id].y), b = detailProj(RM[id].x + RM[id].w, RM[id].y + RM[id].d);
-      if (mx >= a.x && mx <= b.x && my >= a.y && my <= b.y) {
-        if (roomUnlocked(id)) { zoomToRoom(id); if (onTapFeedback) onTapFeedback({ type: 'enterRoom', room: id }); }
-        else if (onTapFeedback) onTapFeedback({ type: 'locked', room: id });
-        return;
-      }
-    }
-    return;
-  }
-  // Geld-Pins einsammeln (Iso-Übersicht ODER hineingezoomter Raum)
+  // Geld-Pins einsammeln (Iso-Übersicht ODER im gezeigten Raum)
   for (const [stId, anchorId] of Object.entries(PIN_AT)) {
     if ((state.stationCash[stId] || 0) < 1) continue;
     const a = A[anchorId];
-    if (roomV && !roomUnlocked(a.room)) continue;
+    if (roomV && a.room !== framedRoom) continue;   // nur der gerade gezeigte Raum
     const s = roomV ? (() => { const p = detailProj(a.x, a.y); return { x: p.x, y: p.y - dTileW() * 1.05 }; })() : iso(a.x, a.y, 1.15);
     if (Math.hypot(mx - s.x, my - s.y) < (roomV ? 40 : 30)) {
       const amount = collectStation(stId);
@@ -989,36 +976,32 @@ function updateParticles(dt) {
 //  Top-Down-Detailansicht eines Raums (v2-Look, überarbeitet)
 //  Bildschirmfüllende Draufsicht, gespeist aus derselben Sim.
 // ============================================================
-function dPad() { return { x: W * 0.05, top: H * 0.088, bot: H * 0.055 }; }
-// Detailansicht = zusammenhängender Grundriss; Kamera schwenkt per Wisch durchs Gebäude.
-let detailCam = { x: 4.5, y: 11 };   // Weltpunkt in Bildschirmmitte
-// Zwei Zoomstufen im Grundriss: Karte (nur Namen) ↔ Raum (Möbel + Geld)
-let zoomAmt = 1;        // 0 = Karte, 1 = Raum (animiert)
-let zoomTarget = 1;
-let planFocus = 't1';   // Raum, in den gezoomt wird
-function roomScale() { return ((W - 2 * dPad().x) / 9) * (1 + (state.clubSize || 0) * 0.1); }
-function mapScale() {
-  const p = dPad(), aw = W - 2 * p.x, ah = H - p.top - p.bot;
-  return Math.min(aw / (CLUB_BB.x1 - CLUB_BB.x0), ah / (CLUB_BB.y1 - CLUB_BB.y0)) * 0.94;
+function dPad() { return { x: W * 0.06, top: H * 0.10, bot: H * 0.05 }; }
+// Einzel-Raum-Ansicht: genau EIN Raum wird bildschirmfüllend gezeigt (kein Pan, kein Grundriss).
+let detailCam = { x: 4.5, y: 11 };   // Weltmittelpunkt des gezeigten Raums
+let detailScale = 40;                // px pro Welt-Einheit (pro Raum eingepasst)
+let framedRoom = 't1';               // aktuell gezeigter Raum
+let roomFade = 0;                    // kurzer Überblend-Effekt beim Raumwechsel
+const ROOM_ORDER = ['t1', 'klo', 't2', 'roof'];
+const CLUB_BB = { x0: -1.2, y0: -1.2, x1: 20.2, y1: 19.6 };   // (nur noch für Iso-Kamerarechnung)
+// passt einen Raum (inkl. Rückwand oben) formatfüllend in die Detailfläche ein
+function roomFrame(id) {
+  const r = RM[id], p = dPad();
+  const aw = W - 2 * p.x, ah = H - p.top - p.bot;
+  const wallPad = 1.15;                       // Platz für die Rückwand-Höhe (Welt-Einheiten)
+  const s = Math.min(aw / (r.w + 0.6), ah / (r.d + wallPad + 0.4));
+  return { x: r.x + r.w / 2, y: r.y + r.d / 2 - wallPad / 2, s };
 }
-function detailZoom() { return mapScale() + (roomScale() - mapScale()) * zoomAmt; }  // px pro Welt-Einheit
-function bldCenter() { return { x: (CLUB_BB.x0 + CLUB_BB.x1) / 2, y: (CLUB_BB.y0 + CLUB_BB.y1) / 2 }; }
-function planIsMap() { return zoomAmt < 0.5; }
+function frameRoom(id, fade = true) {
+  const f = roomFrame(id); detailCam.x = f.x; detailCam.y = f.y; detailScale = f.s; framedRoom = id;
+  if (fade) roomFade = 1;
+}
+function detailZoom() { return detailScale; }
 function detailViewCy() { const p = dPad(); return p.top + (H - p.top - p.bot) / 2; }
 function detailProj(wx, wy) {
-  const z = detailZoom();
-  return { x: W / 2 + (wx - detailCam.x) * z, y: detailViewCy() + (wy - detailCam.y) * z };
+  return { x: W / 2 + (wx - detailCam.x) * detailScale, y: detailViewCy() + (wy - detailCam.y) * detailScale };
 }
-function dTileW() { return detailZoom(); }
-const CLUB_BB = { x0: -1.2, y0: -1.2, x1: 20.2, y1: 19.6 };   // Gebäude-Grenzen für Wisch-Clamping
-function clampPan() {
-  const z = detailZoom(), p = dPad();
-  const hw = W / (2 * z), hh = (H - p.top - p.bot) / (2 * z);
-  const cxMin = CLUB_BB.x0 + hw, cxMax = CLUB_BB.x1 - hw;
-  const cyMin = CLUB_BB.y0 + hh, cyMax = CLUB_BB.y1 - hh;
-  detailCam.x = cxMin <= cxMax ? Math.max(cxMin, Math.min(cxMax, detailCam.x)) : (CLUB_BB.x0 + CLUB_BB.x1) / 2;
-  detailCam.y = cyMin <= cyMax ? Math.max(cyMin, Math.min(cyMax, detailCam.y)) : (CLUB_BB.y0 + CLUB_BB.y1) / 2;
-}
+function dTileW() { return detailScale; }
 function dPersonScale() { return dTileW() / 34; }
 // Optik-Stufe einer Station (0..3) für „krasser werdende" Möbel
 function lvlTier(lvl) { return lvl >= 75 ? 3 : lvl >= 40 ? 2 : lvl >= 15 ? 1 : 0; }
@@ -1505,98 +1488,50 @@ function drawBuildingDecor(t) {
   decoPlant(0.9, 17.6, u); decoPlant(8.2, 17.4, u);
 }
 
-// Zusammenhängender Grundriss: Gebäude + alle Räume + Gäste + Pins in Weltkoordinaten.
-// Per Wisch schwenkt die Kamera (detailCam) durchs Gebäude — Wände sind Teil des Baus.
-function drawClub(t, beat) {
+// Einzel-Raum-Ansicht: genau EIN Raum bildschirmfüllend (Boden, Wände, Möbel, Gäste, Geld-Pins).
+function drawFocusRoom(t, beat) {
+  const id = framedRoom, r = RM[id];
   drawGrassBg();
-  // Gebäude: Aussenwand-Ring + dunkler Innenboden (Flure zwischen den Räumen) — pannt mit
-  const bb0 = detailProj(CLUB_BB.x0, CLUB_BB.y0), bb1 = detailProj(CLUB_BB.x1, CLUB_BB.y1);
-  const bw = bb1.x - bb0.x, bh = bb1.y - bb0.y;
-  ctx.fillStyle = 'rgba(0,0,0,0.34)';                         // Gebäude-Schlagschatten
-  ctx.beginPath(); ctx.roundRect(bb0.x + 8, bb0.y + 14, bw, bh, 20); ctx.fill();
-  const wallGrad = ctx.createLinearGradient(0, bb0.y, 0, bb1.y);   // Aussenwand
-  wallGrad.addColorStop(0, '#3c3552'); wallGrad.addColorStop(1, '#241f38');
-  ctx.fillStyle = wallGrad;
-  ctx.beginPath(); ctx.roundRect(bb0.x, bb0.y, bw, bh, 20); ctx.fill();
-  ctx.strokeStyle = 'rgba(255,255,255,0.16)'; ctx.lineWidth = 2; // heller Oberkanten-Bevel
-  ctx.beginPath(); ctx.roundRect(bb0.x + 1.5, bb0.y + 1.5, bw - 3, bh - 3, 19); ctx.stroke();
-  const wt = Math.max(9, dTileW() * 0.5);                     // Wanddicke
-  ctx.fillStyle = '#181425';                                  // Innenboden (Beton/Flur)
-  ctx.beginPath(); ctx.roundRect(bb0.x + wt, bb0.y + wt, bw - 2 * wt, bh - 2 * wt, 12); ctx.fill();
-  ctx.save();                                                 // dezentes Fliesenraster
-  ctx.beginPath(); ctx.roundRect(bb0.x + wt, bb0.y + wt, bw - 2 * wt, bh - 2 * wt, 12); ctx.clip();
-  ctx.strokeStyle = 'rgba(255,255,255,0.035)'; ctx.lineWidth = 1;
-  for (let gx = Math.ceil(CLUB_BB.x0); gx <= CLUB_BB.x1; gx++) { const p = detailProj(gx, 0); ctx.beginPath(); ctx.moveTo(p.x, bb0.y); ctx.lineTo(p.x, bb1.y); ctx.stroke(); }
-  for (let gy = Math.ceil(CLUB_BB.y0); gy <= CLUB_BB.y1; gy++) { const p = detailProj(0, gy); ctx.beginPath(); ctx.moveTo(bb0.x, p.y); ctx.lineTo(bb1.x, p.y); ctx.stroke(); }
-  ctx.restore();
+  drawRoomDetail(id, t, beat);        // Boden + Wände + Möbel + Deko + Shabby des Raums
 
-  // Airport-Deko füllt die freien Gebäudeflächen (Concourse, Gepäckband, Sitze, Pflanzen)
-  drawBuildingDecor(t);
-
-  // Räume (Boden + Wände + Möbel) in Tiefen-Reihenfolge — hinten zuerst
-  for (const id of ['klo', 't2', 'roof', 't1']) drawRoomDetail(id, t, beat);
-  // Durchgänge über die Wände legen → öffnet sie zwischen anliegenden Räumen
-  drawDoorways(t);
-
-  // Performer auf 3D-Bühne im zugewiesenen Raum
-  if (state.performer.unlocked && roomUnlocked(state.performer.room)) {
-    const pid = state.performer.room, u = dTileW();
-    const c = { t1:[6.2,9.0], t2:[15.0,5.2], roof:[13.5,14.5] }[pid] || [6,9];
+  // Performer auf 3D-Bühne, falls diesem Raum zugewiesen
+  if (state.performer.unlocked && state.performer.room === id && roomUnlocked(id)) {
+    const u = dTileW();
+    const c = { t1:[6.2,9.0], t2:[15.0,5.2], roof:[13.5,14.5] }[id] || [6,9];
     dShadow(c[0]-0.7, c[1]-0.7, 1.4, 1.4);
     dBox(c[0]-0.7, c[1]-0.7, 1.4, 1.4, u * 0.35, '#ff5e8a', '#a32e52', '#ff85b3');
     dPerson(c[0], c[1], { s: 1.15, color: '#ff4fa3', skin: '#f0b98c', hair: '#1a1a22', female: true, arms: beat*1.5, dancing: true, bob: Math.sin(beat*1.5)*3, groundZ: u * 0.35 });
   }
 
-  // Gäste (alle sichtbaren im Gebäude), tiefensortiert nach Welt-y
-  const gs = guests.filter(g => g.x >= CLUB_BB.x0 && g.x <= CLUB_BB.x1 && g.y >= CLUB_BB.y0 && g.y <= CLUB_BB.y1)
-    .sort((a, b) => a.y - b.y);
-  for (const g of gs) {
-    const dancing = g.mode === 'act' && (g.act === 'dance' || g.act === 'vipdance' || g.act === 'roofbar');
-    const bob = dancing ? Math.sin(beat + g.bobPhase) * (dropActive() ? 4 : 2.5) : 0;
-    let emote = null;
-    if (g.mode === 'act') {
-      if (g.act === 'chat' && Math.sin(t * 2.5 + g.bobPhase) > 0.55) emote = '💬';
-      else if (g.act === 'selfie') emote = '📸';
+  // Gäste NUR in diesem Raum, tiefensortiert
+  if (roomUnlocked(id)) {
+    const gs = guests.filter(g => g.x >= r.x - 0.3 && g.x <= r.x + r.w + 0.3 && g.y >= r.y - 0.3 && g.y <= r.y + r.d + 0.3)
+      .sort((a, b) => a.y - b.y);
+    for (const g of gs) {
+      const dancing = g.mode === 'act' && (g.act === 'dance' || g.act === 'vipdance' || g.act === 'roofbar');
+      const bob = dancing ? Math.sin(beat + g.bobPhase) * (dropActive() ? 4 : 2.5) : 0;
+      let emote = null;
+      if (g.mode === 'act') {
+        if (g.act === 'chat' && Math.sin(t * 2.5 + g.bobPhase) > 0.55) emote = '💬';
+        else if (g.act === 'selfie') emote = '📸';
+      }
+      dPerson(g.x, g.y, { s: g.celeb ? 1.3 : g.vip ? 1.08 : 1, color: g.color, skin: g.skin, hair: g.hair, female: g.female,
+        bob, arms: dancing ? beat + g.bobPhase : null, dancing, drink: g.mode === 'act' ? g.drink : null,
+        emote, alpha: g.alpha, glow: g.celeb, star: g.celeb, bobPhase: g.bobPhase });
     }
-    dPerson(g.x, g.y, { s: g.celeb ? 1.3 : g.vip ? 1.08 : 1, color: g.color, skin: g.skin, hair: g.hair, female: g.female,
-      bob, arms: dancing ? beat + g.bobPhase : null, dancing, drink: g.mode === 'act' ? g.drink : null,
-      emote, alpha: g.alpha, glow: g.celeb, star: g.celeb, bobPhase: g.bobPhase });
-  }
-
-  // Geld-Pins nur im hineingezoomten Raum (in der Karte kein Geld, nur Namen)
-  if (zoomAmt > 0.5) {
-    ctx.globalAlpha = Math.min(1, (zoomAmt - 0.5) * 2.2);
+    // Geld-Pins dieses Raums
     for (const [stId, anchorId] of Object.entries(PIN_AT)) {
       const a = A[anchorId];
-      if (!roomUnlocked(a.room)) continue;
+      if (a.room !== id) continue;
       const amount = state.stationCash[stId] || 0;
       if (amount < 1) continue;
       const p = detailProj(a.x, a.y);
       drawPinAt(p.x, p.y - dTileW() * 1.05, amount, t, stId.length);
     }
-    ctx.globalAlpha = 1;
   }
-  // Raumnamen: in der Karte gross sichtbar, beim Reinzoomen ausblenden
-  if (zoomAmt < 0.9) {
-    ctx.globalAlpha = 1 - zoomAmt / 0.9;
-    const fs = Math.max(13, mapScale() * 0.4);
-    ctx.font = `800 ${fs}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    for (const id of ['t1', 'klo', 't2', 'roof']) {
-      if (!roomUnlocked(id)) continue;   // gesperrte Räume beschriftet bereits ihr Schloss-Overlay
-      const r = RM[id];
-      const p = detailProj(r.x + r.w / 2, r.y + r.d / 2);
-      const nm = r.name;
-      const col = ACCENT[id] || '#fff';
-      // Chip-Hintergrund für Lesbarkeit
-      const tw = ctx.measureText(nm).width;
-      ctx.fillStyle = 'rgba(10,7,20,0.55)';
-      ctx.beginPath(); ctx.roundRect(p.x - tw / 2 - 10, p.y - fs * 0.7, tw + 20, fs * 1.4, fs * 0.7); ctx.fill();
-      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillText(nm, p.x + 1, p.y + 1);
-      ctx.fillStyle = col; ctx.fillText(nm, p.x, p.y);
-    }
-    ctx.textBaseline = 'alphabetic';
-    ctx.globalAlpha = 1;
-  }
+
+  // kurzer weicher Überblend beim Raumwechsel
+  if (roomFade > 0) { const p = dPad(); ctx.fillStyle = `rgba(10,7,20,${roomFade * 0.5})`; ctx.fillRect(0, p.top, W, H - p.top - p.bot); }
 }
 
 // ein Geld-Pin an Bildschirmkoordinaten
@@ -1636,17 +1571,7 @@ export function renderFrame(now) {
   cam.oy += (target.oy - cam.oy) * k;
   focusAmt += ((focusRoom ? 1 : 0) - focusAmt) * k;
   if (focusRoom) lastFocusRoom = focusRoom;
-
-  // Grundriss-Zoom animieren: Karte (nur Namen) ↔ Raum (Möbel + Geld)
-  zoomAmt += (zoomTarget - zoomAmt) * k;
-  if (zoomTarget === 0) {                    // zur Karte → auf Gebäudemitte zentrieren
-    const c = bldCenter();
-    detailCam.x += (c.x - detailCam.x) * k; detailCam.y += (c.y - detailCam.y) * k;
-  } else if (zoomAmt < 0.985) {              // beim Reinzoomen → auf den Fokusraum ziehen
-    const r = RM[planFocus];
-    detailCam.x += (r.x + r.w / 2 - detailCam.x) * k; detailCam.y += (r.y + r.d / 2 - detailCam.y) * k;
-  }
-  clampPan();
+  if (roomFade > 0) roomFade = Math.max(0, roomFade - dt * 4.5);   // kurzer Überblend beim Raumwechsel
 
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
 
@@ -1684,11 +1609,11 @@ export function renderFrame(now) {
 
   drawCashPins(t);
 
-  // Raum-Detailansicht (Top-Down) über die Iso-Übersicht blenden
+  // Raum-Detailansicht (genau EIN Raum, bildschirmfüllend) über die Iso-Übersicht blenden
   if (focusAmt > 0.01) {
     ctx.save();
     ctx.globalAlpha = Math.min(1, focusAmt * 1.2);
-    drawClub(t, beat);
+    drawFocusRoom(t, beat);
     ctx.restore();
   }
 

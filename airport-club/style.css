@@ -828,8 +828,8 @@ button { font-family: inherit; border: none; background: none; cursor: pointer; 
 /* ---------------- Raum-Detailansicht ---------------- */
 #room-hud {
   position: absolute;
-  top: 10px; left: 10px;
-  display: flex; align-items: center; gap: 10px;
+  top: 10px; left: 10px; right: 10px;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
   z-index: 5;
   transition: opacity .3s, transform .3s;
 }
@@ -846,10 +846,22 @@ button { font-family: inherit; border: none; background: none; cursor: pointer; 
 #room-title {
   background: rgba(23,27,51,0.8);
   border: 2px solid rgba(255,255,255,0.16);
-  color: #fff; font-size: 13px; font-weight: 800;
-  padding: 6px 14px; border-radius: 999px;
+  color: #fff; font-size: 12.5px; font-weight: 800;
+  padding: 6px 12px; border-radius: 999px;
   text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+  cursor: pointer; text-align: center; white-space: nowrap;
 }
+#room-back { white-space: nowrap; }
+#room-switch { display: flex; align-items: center; gap: 5px; }
+.room-arrow {
+  width: 34px; height: 34px; border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; font-weight: 900; color: #fff;
+  background: linear-gradient(180deg, var(--purple-2) 0%, var(--purple) 55%, var(--purple-d) 100%);
+  border: 2px solid rgba(255,255,255,0.28);
+  box-shadow: 0 4px 0 var(--purple-b), 0 6px 10px rgba(0,0,0,0.35);
+}
+.room-arrow:active { transform: translateY(3px); box-shadow: 0 1px 0 var(--purple-b); }
 .dim-hide { opacity: 0 !important; pointer-events: none !important; transition: opacity .3s; }
 
 .room-card.clickable { cursor: pointer; transition: transform .1s, border-color .2s; }
