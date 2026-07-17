@@ -8,7 +8,7 @@ import {
   autoCollectInterval, MILESTONE_STEP, fmt, fmtTime, costOf, milestoneMult, nextMilestone,
 } from './data.js';
 import { playSfx, setMusic, cycleMusicStyle, currentMusicStyleName } from './sfx.js';
-import { enterRoom, exitRoom } from './render.js';
+import { enterRoom, exitRoom, detailBack } from './render.js';
 
 const ROOM_META = {
   t1:   { icon: '🪩', name: 'Terminal 1',        sub: 'Mainfloor' },
@@ -783,7 +783,13 @@ function hideRoomHud() {
   $('#tap-hint').classList.remove('dim-hide');
 }
 function openRoomView(id) { if (enterRoom(id)) { showRoomHud(id); playSfx('click'); } }
-function closeRoomView() { exitRoom(); hideRoomHud(); playSfx('click'); }
+// Zurück: Raum → Grundriss-Karte (nur Namen), Karte → Iso-Übersicht
+function closeRoomView() {
+  const r = detailBack();
+  if (r === 'map') { $('#room-title').textContent = '🗺 Grundriss'; }
+  else { hideRoomHud(); }
+  playSfx('click');
+}
 
 // Feedback vom Canvas (Taps)
 export function canvasFeedback(fb) {

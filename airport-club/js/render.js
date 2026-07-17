@@ -121,7 +121,7 @@ function onPointerMove(e) {
   const dx = e.clientX - ptr.lx, dy = e.clientY - ptr.ly;
   ptr.lx = e.clientX; ptr.ly = e.clientY;
   if (Math.abs(e.clientX - ptr.x0) + Math.abs(e.clientY - ptr.y0) > 8) ptr.moved = true;
-  if (inRoomView()) { const z = detailZoom(); detailCam.x -= dx / z; detailCam.y -= dy / z; clampPan(); }
+  if (inRoomView() && !planIsMap()) { const z = detailZoom(); detailCam.x -= dx / z; detailCam.y -= dy / z; clampPan(); }
 }
 function onPointerUp(e) {
   if (!ptr) return;
@@ -173,13 +173,24 @@ function setupCamera() {
 // Raum betreten / verlassen (von Tap oder UI aufgerufen)
 export function enterRoom(id) {
   if (!roomUnlocked(id) || !RM[id]) return false;
-  focusRoom = id;
+  focusRoom = id; planFocus = id; zoomTarget = 1;   // direkt in den Raum zoomen
   detailCam.x = RM[id].x + RM[id].w / 2;   // Kamera auf den gewählten Raum
   detailCam.y = RM[id].y + RM[id].d / 2;
   clampPan();
   return true;
 }
-export function exitRoom() { focusRoom = null; }
+// In der Grundriss-Karte einen Raum antippen → in ihn hineinzoomen
+export function zoomToRoom(id) {
+  if (!roomUnlocked(id) || !RM[id]) return false;
+  planFocus = id; zoomTarget = 1;
+  return true;
+}
+// Zurück-Taste: Raum → Karte, Karte → Iso-Übersicht
+export function detailBack() {
+  if (!planIsMap()) { zoomTarget = 0; return 'map'; }   // rauszoomen auf die Karte
+  focusRoom = null; return 'exit';                       // Karte verlassen → Übersicht
+}
+export function exitRoom() { focusRoom = null; zoomTarget = 1; }
 export function currentRoom() { return focusRoom; }
 export function inRoomView() { return focusAmt > 0.5; }
 
@@ -216,8 +227,20 @@ function handleTap(e) {
       }
     }
   }
-  // Geld-Pins einsammeln (Iso-Übersicht ODER Top-Down-Detail)
   const roomV = inRoomView();
+  // Grundriss-Karte (rausgezoomt): Tap auf einen Raum → hineinzoomen (kein Geld sichtbar)
+  if (roomV && planIsMap()) {
+    for (const id of ['roof', 't2', 't1', 'klo']) {
+      const a = detailProj(RM[id].x, RM[id].y), b = detailProj(RM[id].x + RM[id].w, RM[id].y + RM[id].d);
+      if (mx >= a.x && mx <= b.x && my >= a.y && my <= b.y) {
+        if (roomUnlocked(id)) { zoomToRoom(id); if (onTapFeedback) onTapFeedback({ type: 'enterRoom', room: id }); }
+        else if (onTapFeedback) onTapFeedback({ type: 'locked', room: id });
+        return;
+      }
+    }
+    return;
+  }
+  // Geld-Pins einsammeln (Iso-Übersicht ODER hineingezoomter Raum)
   for (const [stId, anchorId] of Object.entries(PIN_AT)) {
     if ((state.stationCash[stId] || 0) < 1) continue;
     const a = A[anchorId];
@@ -229,7 +252,7 @@ function handleTap(e) {
       return;
     }
   }
-  // In der Übersicht: Tap auf einen Raum wählt ihn aus
+  // In der Iso-Übersicht: Tap auf einen Raum wählt ihn aus
   if (!inRoomView()) {
     for (const id of ['roof', 't2', 't1', 'klo']) {
       if (pointInQuad(mx, my, roomFloorQuad(RM[id]))) {
@@ -969,7 +992,18 @@ function updateParticles(dt) {
 function dPad() { return { x: W * 0.05, top: H * 0.088, bot: H * 0.055 }; }
 // Detailansicht = zusammenhängender Grundriss; Kamera schwenkt per Wisch durchs Gebäude.
 let detailCam = { x: 4.5, y: 11 };   // Weltpunkt in Bildschirmmitte
-function detailZoom() { return ((W - 2 * dPad().x) / 9) * (1 + (state.clubSize || 0) * 0.1); }  // px pro Welt-Einheit
+// Zwei Zoomstufen im Grundriss: Karte (nur Namen) ↔ Raum (Möbel + Geld)
+let zoomAmt = 1;        // 0 = Karte, 1 = Raum (animiert)
+let zoomTarget = 1;
+let planFocus = 't1';   // Raum, in den gezoomt wird
+function roomScale() { return ((W - 2 * dPad().x) / 9) * (1 + (state.clubSize || 0) * 0.1); }
+function mapScale() {
+  const p = dPad(), aw = W - 2 * p.x, ah = H - p.top - p.bot;
+  return Math.min(aw / (CLUB_BB.x1 - CLUB_BB.x0), ah / (CLUB_BB.y1 - CLUB_BB.y0)) * 0.94;
+}
+function detailZoom() { return mapScale() + (roomScale() - mapScale()) * zoomAmt; }  // px pro Welt-Einheit
+function bldCenter() { return { x: (CLUB_BB.x0 + CLUB_BB.x1) / 2, y: (CLUB_BB.y0 + CLUB_BB.y1) / 2 }; }
+function planIsMap() { return zoomAmt < 0.5; }
 function detailViewCy() { const p = dPad(); return p.top + (H - p.top - p.bot) / 2; }
 function detailProj(wx, wy) {
   const z = detailZoom();
@@ -988,6 +1022,8 @@ function clampPan() {
 function dPersonScale() { return dTileW() / 34; }
 // Optik-Stufe einer Station (0..3) für „krasser werdende" Möbel
 function lvlTier(lvl) { return lvl >= 75 ? 3 : lvl >= 40 ? 2 : lvl >= 15 ? 1 : 0; }
+// Verwahrlosungs-Grad: 1 = am Anfang alt & runtergekommen, 0 = renoviert (steigt mit Ausbau)
+function clubShabby() { return Math.max(0, Math.min(1, 1 - totalLevels() / 45)); }
 
 function dRect(wx, wy, ww, wd, fill, stroke, rad = 8) {
   const a = detailProj(wx, wy), b = detailProj(wx + ww, wy + wd);
@@ -995,12 +1031,8 @@ function dRect(wx, wy, ww, wd, fill, stroke, rad = 8) {
   if (fill) { ctx.fillStyle = fill; ctx.fill(); }
   if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 2; ctx.stroke(); }
 }
-function dLabel(wx, wy, txt, color, px = 11) {
-  const p = detailProj(wx, wy);
-  ctx.font = `800 ${px}px system-ui, sans-serif`; ctx.textAlign = 'center';
-  ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillText(txt, p.x + 1, p.y + 1);
-  ctx.fillStyle = color; ctx.fillText(txt, p.x, p.y);
-}
+// Stationen-Beschriftungen bewusst entfernt (Aufgeräumt) — Namen kommen aus der Karten-Ebene.
+function dLabel(wx, wy, txt, color, px = 11) { /* no-op: keine Möbel-Labels mehr im Grundriss */ }
 // erhöhte, beleuchtete 3D-Tanzfläche (Kacheln mit Kante + Sockel)
 function dTiles(wx, wy, ww, wd, cols, rows, palette, t, beat) {
   const a = detailProj(wx, wy), b = detailProj(wx + ww, wy + wd);
@@ -1142,6 +1174,8 @@ function drawRoomDetail(id, t, beat) {
     ctx.fillText(id === 'roof' && !state.t2Unlocked ? 'Erst Terminal 2' : 'Antippen zum Freischalten', cc.x, cc.y + u * 1.05);
     return;
   }
+  // Runtergekommener Boden/Wände am Anfang (schwindet mit Ausbau) — unter die Möbel gelegt
+  drawShabby(id, a0, rw, rh, u);
 
   if (id === 't1') {
     const cs = state.clubSize || 0;
@@ -1262,6 +1296,25 @@ function drawRoomDetail(id, t, beat) {
     const bounce = (bx, suit) => dPerson(bx, 14.25, { s: bs, color: suit, pants: '#14141c', skin: '#8c5a33', hair: '#1a1a22', shades: true, earpiece: true });
     bounce(einT >= 1 ? 3.75 : 4.5, einT >= 3 ? '#1a1a26' : '#22222e');
     if (einT >= 1) bounce(5.25, einT >= 3 ? '#1a1a26' : '#2a2a38');   // zweiter Türsteher
+    // === Eingangs-Deko: füllt den Vorplatz (Leuchtschild, Kordeln, Pflanzen) ===
+    { const sp = detailProj(2.0, 14.55), bw2 = u * 2.0, bh2 = u * 0.6;   // Neon-Leuchtschild
+      ctx.fillStyle = '#100b1e'; ctx.beginPath(); ctx.roundRect(sp.x - bw2 / 2, sp.y - bh2 / 2, bw2, bh2, 6); ctx.fill();
+      const sc = `hsl(${(t * 40) % 360},90%,62%)`;
+      ctx.strokeStyle = sc; ctx.lineWidth = 2; ctx.beginPath(); ctx.roundRect(sp.x - bw2 / 2, sp.y - bh2 / 2, bw2, bh2, 6); ctx.stroke();
+      ctx.fillStyle = '#ffe9a8'; ctx.font = `800 ${Math.max(9, u * 0.25)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('✈ AIRPORT', sp.x, sp.y); ctx.textBaseline = 'alphabetic'; }
+    const stanch = (wx, wy) => { const p = detailProj(wx, wy);
+      ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.ellipse(p.x, p.y, 4, 2.2, 0, 0, 7); ctx.fill();
+      ctx.strokeStyle = '#c9a24a'; ctx.lineWidth = 2.4; ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x, p.y - u * 0.5); ctx.stroke();
+      ctx.fillStyle = '#e8c56a'; ctx.beginPath(); ctx.arc(p.x, p.y - u * 0.52, 3.2, 0, 7); ctx.fill(); return p; };
+    const rope = (p1, p2) => { ctx.strokeStyle = '#8a1f33'; ctx.lineWidth = 2.2;
+      ctx.beginPath(); ctx.moveTo(p1.x, p1.y - u * 0.5); ctx.quadraticCurveTo((p1.x + p2.x) / 2, (p1.y + p2.y) / 2 - u * 0.5 + 6, p2.x, p2.y - u * 0.5); ctx.stroke(); };
+    { const l1 = stanch(3.15, 14.0), l2 = stanch(3.15, 14.95), r1 = stanch(5.85, 14.0), r2 = stanch(5.85, 14.95); rope(l1, l2); rope(r1, r2); }
+    const plant = (wx, wy) => { dShadow(wx - 0.28, wy - 0.12, 0.56, 0.28); const p = detailProj(wx, wy);
+      ctx.fillStyle = '#5a3d24'; ctx.beginPath(); ctx.roundRect(p.x - 7, p.y - 9, 14, 11, 3); ctx.fill();
+      ctx.fillStyle = '#2f8f4a'; for (const [ox, oy, rr] of [[-6, -15, 6], [6, -15, 6], [0, -20, 7], [-2, -13, 5], [3, -13, 5]]) { ctx.beginPath(); ctx.arc(p.x + ox, p.y + oy, rr, 0, 7); ctx.fill(); }
+      ctx.fillStyle = '#3fb060'; ctx.beginPath(); ctx.arc(p.x - 2, p.y - 19, 4, 0, 7); ctx.fill(); };
+    plant(1.0, 13.9); plant(8.3, 14.7);
   } else if (id === 'klo') {
     ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1.5;
     for (let i = 1; i < r.w; i++) { const p1 = detailProj(r.x+i, r.y+1.6), p2 = detailProj(r.x+i, r.y+r.d); ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y); ctx.stroke(); }
@@ -1294,6 +1347,47 @@ function drawRoomDetail(id, t, beat) {
     dRect(A.pool.x-1.4, A.pool.y-1.0, 2.8, 2.0, '#2f7fd6', 'rgba(255,255,255,0.35)', 10);
     dLabel(A.pool.x, A.pool.y-1.35, '🏊 POOL', '#bfe6ff', 10);
   }
+  // Alt-&-dunkel-Schleier ganz oben drauf: entsättigt Neon/Möbel am Anfang (schwindet mit Ausbau)
+  if (roomUnlocked(id)) {
+    const sh = clubShabby();
+    if (sh > 0.05) {
+      ctx.save();
+      ctx.beginPath(); ctx.roundRect(a0.x, a0.y, rw, rh, 6); ctx.clip();
+      ctx.globalCompositeOperation = 'multiply'; ctx.globalAlpha = sh * 0.6;
+      ctx.fillStyle = '#7a6a48'; ctx.fillRect(a0.x, a0.y, rw, rh);      // sepia-grau → entsättigt
+      ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = sh * 0.3;
+      ctx.fillStyle = '#0c0906'; ctx.fillRect(a0.x, a0.y, rw, rh);      // abdunkeln
+      ctx.restore();
+      ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+    }
+  }
+}
+
+// Runtergekommener Look am Anfang: Schmutzflecken, kaputte Stellen, Wandrisse — schwindet mit Ausbau
+const GRIME = [[0.2,0.3],[0.7,0.22],[0.5,0.62],[0.16,0.82],[0.84,0.72],[0.4,0.44],[0.66,0.86]];
+const CRACKS = [0.22,0.55,0.8];
+function drawShabby(id, a0, rw, rh, u) {
+  const sh = clubShabby();
+  if (sh < 0.05) return;
+  ctx.save();
+  ctx.beginPath(); ctx.roundRect(a0.x, a0.y, rw, rh, 6); ctx.clip();
+  ctx.globalAlpha = sh * 0.5;                        // Schmutzflecken
+  for (const [fx, fy] of GRIME) {
+    const rx = a0.x + fx * rw, ry = a0.y + fy * rh, rr = Math.max(14, u * 0.6);
+    const gg = ctx.createRadialGradient(rx, ry, 0, rx, ry, rr);
+    gg.addColorStop(0, 'rgba(38,28,14,0.7)'); gg.addColorStop(1, 'rgba(38,28,14,0)');
+    ctx.fillStyle = gg; ctx.beginPath(); ctx.arc(rx, ry, rr, 0, 7); ctx.fill();
+  }
+  ctx.globalAlpha = sh * 0.65; ctx.fillStyle = '#0c0a14';   // kaputte dunkle Stellen
+  for (let i = 0; i < 4; i++) { const [fx, fy] = GRIME[i];
+    ctx.beginPath(); ctx.ellipse(a0.x + (1 - fx) * rw, a0.y + fy * rh, 7, 4, 0, 0, 7); ctx.fill(); }
+  ctx.restore();
+  if (sh > 0.3) {                                    // Risse in der Rückwand
+    ctx.globalAlpha = Math.min(1, (sh - 0.3) * 2); ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = 1.3;
+    for (const c of CRACKS) { let x = a0.x + c * rw, y = a0.y - u; ctx.beginPath(); ctx.moveTo(x, y);
+      for (let s = 0; s < 5; s++) { x += Math.sin(c * 30 + s) * 6; y += u * 0.19; ctx.lineTo(x, y); } ctx.stroke(); }
+  }
+  ctx.globalAlpha = 1;
 }
 
 // Durchgänge zwischen anliegenden Räumen: Schwellen-Boden + Türrahmen-Pfosten
@@ -1377,14 +1471,39 @@ function drawClub(t, beat) {
       emote, alpha: g.alpha, glow: g.celeb, star: g.celeb, bobPhase: g.bobPhase });
   }
 
-  // Geld-Pins aller freigeschalteten Räume
-  for (const [stId, anchorId] of Object.entries(PIN_AT)) {
-    const a = A[anchorId];
-    if (!roomUnlocked(a.room)) continue;
-    const amount = state.stationCash[stId] || 0;
-    if (amount < 1) continue;
-    const p = detailProj(a.x, a.y);
-    drawPinAt(p.x, p.y - dTileW() * 1.05, amount, t, stId.length);
+  // Geld-Pins nur im hineingezoomten Raum (in der Karte kein Geld, nur Namen)
+  if (zoomAmt > 0.5) {
+    ctx.globalAlpha = Math.min(1, (zoomAmt - 0.5) * 2.2);
+    for (const [stId, anchorId] of Object.entries(PIN_AT)) {
+      const a = A[anchorId];
+      if (!roomUnlocked(a.room)) continue;
+      const amount = state.stationCash[stId] || 0;
+      if (amount < 1) continue;
+      const p = detailProj(a.x, a.y);
+      drawPinAt(p.x, p.y - dTileW() * 1.05, amount, t, stId.length);
+    }
+    ctx.globalAlpha = 1;
+  }
+  // Raumnamen: in der Karte gross sichtbar, beim Reinzoomen ausblenden
+  if (zoomAmt < 0.9) {
+    ctx.globalAlpha = 1 - zoomAmt / 0.9;
+    const fs = Math.max(13, mapScale() * 0.4);
+    ctx.font = `800 ${fs}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (const id of ['t1', 'klo', 't2', 'roof']) {
+      if (!roomUnlocked(id)) continue;   // gesperrte Räume beschriftet bereits ihr Schloss-Overlay
+      const r = RM[id];
+      const p = detailProj(r.x + r.w / 2, r.y + r.d / 2);
+      const nm = r.name;
+      const col = ACCENT[id] || '#fff';
+      // Chip-Hintergrund für Lesbarkeit
+      const tw = ctx.measureText(nm).width;
+      ctx.fillStyle = 'rgba(10,7,20,0.55)';
+      ctx.beginPath(); ctx.roundRect(p.x - tw / 2 - 10, p.y - fs * 0.7, tw + 20, fs * 1.4, fs * 0.7); ctx.fill();
+      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillText(nm, p.x + 1, p.y + 1);
+      ctx.fillStyle = col; ctx.fillText(nm, p.x, p.y);
+    }
+    ctx.textBaseline = 'alphabetic';
+    ctx.globalAlpha = 1;
   }
 }
 
@@ -1425,6 +1544,17 @@ export function renderFrame(now) {
   cam.oy += (target.oy - cam.oy) * k;
   focusAmt += ((focusRoom ? 1 : 0) - focusAmt) * k;
   if (focusRoom) lastFocusRoom = focusRoom;
+
+  // Grundriss-Zoom animieren: Karte (nur Namen) ↔ Raum (Möbel + Geld)
+  zoomAmt += (zoomTarget - zoomAmt) * k;
+  if (zoomTarget === 0) {                    // zur Karte → auf Gebäudemitte zentrieren
+    const c = bldCenter();
+    detailCam.x += (c.x - detailCam.x) * k; detailCam.y += (c.y - detailCam.y) * k;
+  } else if (zoomAmt < 0.985) {              // beim Reinzoomen → auf den Fokusraum ziehen
+    const r = RM[planFocus];
+    detailCam.x += (r.x + r.w / 2 - detailCam.x) * k; detailCam.y += (r.y + r.d / 2 - detailCam.y) * k;
+  }
+  clampPan();
 
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
 
