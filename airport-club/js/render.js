@@ -10,7 +10,7 @@ import {
   marketingGuestBonus, marketingSpawnBonus, activeDjDef,
   currentDrink, activeTheme,
 } from './game.js';
-import { fmt, CASH_STATIONS } from './data.js';
+import { fmt, CASH_STATIONS, DRINKS, drinkTier } from './data.js';
 import { musicBpm } from './sfx.js';
 
 let canvas, ctx, W = 0, H = 0, DPR = 1;
@@ -56,12 +56,12 @@ function fitTransform(pts, padX, padY, zoom = 1, biasY = 0) {
 const RM = {
   t1:   { x: 0,  y: 7,  w: 9, d: 8, name: 'TERMINAL 1' },
   klo:  { x: 0,  y: 0,  w: 4, d: 6, name: 'WC' },
-  t2:   { x: 10, y: 0,  w: 9, d: 9, name: 'TERMINAL 2 · VIP' },
-  roof: { x: 10, y: 10, w: 9, d: 8, name: 'ROOFTOP' },
+  t2:   { x: 10, y: 0,  w: 9, d: 9, name: 'TERMINAL 2' },
+  roof: { x: 10, y: 10, w: 9, d: 8, name: 'ROOFTOP · VIP' },
 };
 // Club-Ausbau vergrößert das GEBÄUDE (Terminal 1): Wände wandern nach rechts/unten,
 // Möbel bleiben an den Wänden (nach aussen), die Tanzfläche in der Mitte wird größer.
-function t1Grow() { const cs = state.clubSize || 0; return { dw: cs * 1.1, dd: cs * 0.9 }; }
+function t1Grow() { const cs = state.clubSize || 0; return { dw: cs * 1.7, dd: cs * 1.3 }; }   // Ausbau deutlich spürbar
 function applyClubSize() { const g = t1Grow(); RM.t1.w = 9 + g.dw; RM.t1.d = 8 + g.dd; }
 // Tanzfläche wächst mit dem Gebäude (gemeinsam genutzt von Zeichnung & Gäste-Ziel)
 function t1DanceFloor() { const g = t1Grow(); return { x: 2.5, y: 9.3, w: 4.6 + g.dw, d: 4.2 + g.dd }; }
@@ -286,12 +286,41 @@ function handleTap(e) {
 // ============================================================
 // Lokaler Toiletten-Ausgang je Raum (Gäste bleiben im Raum sichtbar)
 // WC-Ausgang zeigt in die Richtung, in der das Klo in der Übersicht liegt (oben-links)
-const WC_DOOR = { t1: { x: 1.8, y: 7.35 }, t2: { x: 17.6, y: 7.9 }, roof: { x: 17.4, y: 16.6 } };   // t1: Tür zum WC-Anbau oben-links
+const WC_DOOR = { t1: { x: 1.3, y: 9.35 }, t2: { x: 17.6, y: 7.9 }, roof: { x: 17.4, y: 16.6 } };   // t1: Tür zum WC-Eck (unten, öffnet in T1 hinein)
 // WC-Anbau: kleiner Raum direkt über Terminal 1 (Teil von T1, kein eigener wechselbarer Raum)
-const WC_ANNEX = { x: 0.35, y: 4.7, w: 2.75, d: 2.3 };   // bündig auf Terminal 1, oben-links (Unterkante = T1-Oberkante y7)
+const WC_ANNEX = { x: 0.15, y: 7.12, w: 2.05, d: 1.5 };   // kompakte, abgetrennte Ecke IN Terminal 1 (oben-links), ragt NICHT über die Rückwand
 const BACKSTAGE = { x: 7.35, y: 7.7 };   // oben-rechts, neben dem DJ in Terminal 1
 let guests = [];
+let taxis = [];        // vorbeifahrende Taxen, die vor dem Eingang Gäste absetzen
+let taxiTimer = 5;
 let sec = null;   // aktiver Security/Türsteher-Einsatz bei Randalierern: { x, y, phase, tm }
+
+function aliveGuests() { let n = 0; for (const g of guests) if (!g.celeb) n++; return n; }
+
+// Taxen: gelegentlich fährt eins vorbei, hält vor dem Eingang und lässt Leute raus.
+// Mit Marketing kommen mehrere Taxen dichter hintereinander (Gäste „strömen von draußen rein").
+function updateTaxis(dt) {
+  const mkt = marketingSpawnBonus();          // >0, wenn Marketing aktiv
+  const busy = mkt > 0.05;
+  taxiTimer -= dt;
+  if (taxiTimer <= 0 && taxis.length < (busy ? 3 : 1) && roomUnlocked('t1')) {
+    taxiTimer = busy ? rnd(4, 9) : rnd(16, 30);
+    taxis.push({ fx: -0.12, state: 'drive', tm: 0, stopFx: rnd(0.4, 0.56),
+      n: busy ? Math.round(rnd(2, 4)) : Math.round(rnd(1, 2)), dropped: 0 });
+  }
+  for (let i = taxis.length - 1; i >= 0; i--) {
+    const tx = taxis[i];
+    if (tx.state === 'drive') { tx.fx += dt * 0.34; if (tx.fx >= tx.stopFx) { tx.fx = tx.stopFx; tx.state = 'stop'; tx.tm = 1.8; } }
+    else if (tx.state === 'stop') {
+      tx.tm -= dt;
+      if (tx.dropped < tx.n && tx.tm < 1.8 - tx.dropped * 0.45) {
+        if (aliveGuests() < targetGuestCount()) spawnGuest();   // Fahrgast „steigt aus" und ist innen am Eingang
+        tx.dropped++;
+      }
+      if (tx.tm <= 0) tx.state = 'go';
+    } else { tx.fx += dt * 0.42; if (tx.fx > 1.25) taxis.splice(i, 1); }
+  }
+}
 function rnd(a, b) { return a + Math.random() * (b - a); }
 function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 function inRoom(r, mx = 0.6) { return { x: rnd(r.x + mx, r.x + r.w - mx), y: rnd(r.y + mx, r.y + r.d - mx) }; }
@@ -483,6 +512,14 @@ function updateGuests(dt) {
   // Gäste auseinanderdrücken, damit sie sich nicht stapeln (z. B. Schlange an der Shot-Bar)
   separateGuests(dt);
   updateSecurity(dt);
+  updateTaxis(dt);
+  // selten kippt spät nachts ein betrunkener Gast um und liegt kurz am Boden (K.O.)
+  if (nightDrunk() > 0.45 && Math.random() < dt * 0.03) {
+    const cand = guests.filter(g => !g.celeb && !g.ko && !g.leaving && !g.trouble && g.mode === 'act');
+    if (cand.length && guests.filter(g => g.ko).length < 3) {
+      const g = pick(cand); g.ko = true; g.koT = rnd(6, 12); g.drink = null; g.mode = 'act';
+    }
+  }
 
   const hasCeleb = guests.some(g => g.celeb);
   if (state.celeb && !hasCeleb) spawnGuest(true);
@@ -492,6 +529,11 @@ function updateGuests(dt) {
   for (let i = guests.length - 1; i >= 0; i--) {
     const g = guests[i];
     if (g.fadeIn) { g.alpha = Math.min(1, (g.alpha || 0) + dt * 1.6); if (g.alpha >= 1) g.fadeIn = false; }
+    if (g.ko) {   // liegt betrunken am Boden, bis er sich erholt
+      g.koT -= dt;
+      if (g.koT <= 0) { g.ko = false; g.mode = 'act'; pushActivity(g, chooseAct(g)); }
+      continue;
+    }
     if (g.mode === 'walk') {
       g.walkT = (g.walkT || 0) + dt;
       const t = g.path[0];
@@ -599,21 +641,43 @@ function drawPersonAt(px, py, s, o = {}) {
     ctx.stroke();
   }
 
-  // Oberkörper (Kleid/Shirt)
-  ctx.fillStyle = o.color;
-  if (o.female) {
+  // Oberkörper (Kleid/Shirt) — Showgirl-Tänzerin, Frau oder Standard
+  if (o.showgirl) {
+    // kurvige Silhouette (Taille rein, Hüfte raus) in Haut, mit glänzendem Bühnen-Outfit
+    ctx.fillStyle = o.skin || '#f0b98c';
+    ctx.beginPath();
+    ctx.moveTo(px - 3.0 * s, cy - 3.2 * s);
+    ctx.quadraticCurveTo(px - 4.7 * s, cy + 1 * s, px - 3.2 * s, cy + 3.6 * s);
+    ctx.quadraticCurveTo(px - 4.8 * s, cy + 6 * s, px - 4.0 * s, cy + 8 * s);
+    ctx.lineTo(px + 4.0 * s, cy + 8 * s);
+    ctx.quadraticCurveTo(px + 4.8 * s, cy + 6 * s, px + 3.2 * s, cy + 3.6 * s);
+    ctx.quadraticCurveTo(px + 4.7 * s, cy + 1 * s, px + 3.0 * s, cy - 3.2 * s);
+    ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.arc(px - 1.7 * s, cy - 2.0 * s, 1.9 * s, 0, 7); ctx.arc(px + 1.7 * s, cy - 2.0 * s, 1.9 * s, 0, 7); ctx.fill();   // Büste
+    ctx.fillStyle = o.color || '#ff2e8a';                                    // Bikini-Oberteil
+    ctx.beginPath(); ctx.ellipse(px - 1.7 * s, cy - 1.9 * s, 2.0 * s, 1.5 * s, 0, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(px + 1.7 * s, cy - 1.9 * s, 2.0 * s, 1.5 * s, 0, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(px - 3.3 * s, cy + 5 * s); ctx.lineTo(px + 3.3 * s, cy + 5 * s); ctx.lineTo(px + 2.5 * s, cy + 8 * s); ctx.lineTo(px - 2.5 * s, cy + 8 * s); ctx.closePath(); ctx.fill();   // Höschen
+    ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.beginPath(); ctx.arc(px - 1.9 * s, cy - 2.3 * s, 0.7 * s, 0, 7); ctx.fill();   // Glanz
+  } else if (o.female) {
+    ctx.fillStyle = o.color;
     ctx.beginPath();
     ctx.moveTo(px - 3.4 * s, cy - 3 * s);
     ctx.lineTo(px + 3.4 * s, cy - 3 * s);
     ctx.lineTo(px + 4.2 * s, cy + 7 * s);
     ctx.lineTo(px - 4.2 * s, cy + 7 * s);
     ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.18)'; roundRectP(px - 3 * s, cy - 3 * s, 2 * s, 8 * s, 1 * s); ctx.fill();
   } else {
+    ctx.fillStyle = o.color;
     roundRectP(px - 3.6 * s, cy - 4 * s, 7.2 * s, 11 * s, 3 * s); ctx.fill();
+    if (o.apron) { ctx.fillStyle = o.apron; roundRectP(px - 2.9 * s, cy - 0.5 * s, 5.8 * s, 7.6 * s, 1.4 * s); ctx.fill();   // Barkeeper-Schürze
+      ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fillRect(px - 0.4 * s, cy - 0.5 * s, 0.8 * s, 7 * s); }
+    if (o.bowtie) { ctx.fillStyle = '#c0392b';                                 // Fliege
+      ctx.beginPath(); ctx.moveTo(px - 2 * s, cy - 3.6 * s); ctx.lineTo(px - 0.2 * s, cy - 2.8 * s); ctx.lineTo(px - 2 * s, cy - 2 * s); ctx.closePath();
+      ctx.moveTo(px + 2 * s, cy - 3.6 * s); ctx.lineTo(px + 0.2 * s, cy - 2.8 * s); ctx.lineTo(px + 2 * s, cy - 2 * s); ctx.closePath(); ctx.fill(); }
+    ctx.fillStyle = 'rgba(255,255,255,0.18)'; roundRectP(px - 3 * s, cy - 3 * s, 2 * s, 8 * s, 1 * s); ctx.fill();
   }
-  // Highlight
-  ctx.fillStyle = 'rgba(255,255,255,0.18)';
-  roundRectP(px - 3 * s, cy - 3 * s, 2 * s, 8 * s, 1 * s); ctx.fill();
 
   // Kopf
   ctx.fillStyle = o.skin || '#ffd9b3';
@@ -878,7 +942,7 @@ function drawT2(t, beat, drawables) {
     isoBox(tx - 0.35, ty - 0.35, 0.7, 0.7, 0.7, '#3a2044', '#2a1633', '#1f1026');
     if (Math.random() < 0.25) spawnWorldParticle(tx, ty, 1.1, '✨', 8, 0.6);
   }
-  drawRoomLabel(r, 'TERMINAL 2 · VIP', '#ffd970');
+  drawRoomLabel(r, 'TERMINAL 2', '#8fd0ff');
 }
 
 function drawRoof(t, beat, drawables) {
@@ -911,7 +975,7 @@ function drawRoof(t, beat, drawables) {
   ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 1;
   quad([iso(pl.x - 1.4, pl.y - 1.0), iso(pl.x + 1.4, pl.y - 1.0), iso(pl.x + 1.4, pl.y + 1.0), iso(pl.x - 1.4, pl.y + 1.0)], null, 'rgba(255,255,255,0.3)');
 
-  drawRoomLabel(r, 'ROOFTOP', '#8fe3ff');
+  drawRoomLabel(r, 'ROOFTOP · VIP', '#ffd970');
 }
 
 // Performer (Tänzerin) auf kleiner Bühne im zugewiesenen Raum
@@ -929,7 +993,7 @@ function drawPerformer(t, beat, drawables) {
   grd.addColorStop(0, 'rgba(255,180,220,0.35)'); grd.addColorStop(1, 'rgba(255,180,220,0)');
   ctx.fillStyle = grd; ctx.beginPath(); ctx.arc(sp.x, sp.y - 14 * cam.s, 34 * cam.s, 0, 7); ctx.fill();
   drawables.push({ d: c.x + c.y + 0.3, fn: () => drawPerson(c.x, c.y, {
-    s: 1.15, color: '#ff4fa3', skin: '#f0b98c', hair: '#1a1a22', female: true,
+    s: 1.15, color: '#ff4fa3', skin: '#f0b98c', hair: '#1a1a22', female: true, showgirl: true,
     bob: Math.sin(beat * 1.5) * 3 * cam.s, arms: beat * 1.5, dancing: true, lift: 5 * cam.s }) });
 }
 
@@ -1074,8 +1138,9 @@ function roomFrame(id) {
   const r = RM[id], p = dPad();
   const aw = W - 2 * p.x, ah = H - p.top - p.bot;
   const wallPad = 1.15;                       // Platz für die Rückwand-Höhe (Welt-Einheiten)
-  let x0 = r.x - 0.3, y0 = r.y - wallPad, x1 = r.x + r.w + 0.3, y1 = r.y + r.d + 0.2;
-  if (id === 't1') { y0 = WC_ANNEX.y - 1.0; x0 = Math.min(x0, WC_ANNEX.x - 0.3); }   // WC-Anbau oben mit einrahmen
+  const sideMargin = id === 't1' ? 1.1 : 0.3;   // T1: Bürgersteig/Aussenbereich links & rechts sichtbar lassen
+  let x0 = r.x - sideMargin, y0 = r.y - wallPad, x1 = r.x + r.w + sideMargin, y1 = r.y + r.d + 0.2;
+  // WC ist eine abgetrennte Ecke IN Terminal 1 → keine Extra-Rahmung nötig
   const s = Math.min(aw / (x1 - x0), ah / (y1 - y0));
   return { x: (x0 + x1) / 2, y: (y0 + y1) / 2, s };
 }
@@ -1224,18 +1289,64 @@ function drawGrassBg() {
   // Zebrastreifen mittig (genau vor dem Eingang / roten Teppich)
   ctx.fillStyle = 'rgba(238,238,238,0.92)';
   for (let i = 0; i < 7; i++) ctx.fillRect(W * 0.30 + i * 15, streetY + 3, 10, sh * 0.5);
-  // Straßenlaterne links
-  ctx.strokeStyle = '#4a4e55'; ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.moveTo(16, streetY + 6); ctx.lineTo(16, streetY - 40); ctx.lineTo(40, streetY - 40); ctx.stroke();
-  ctx.fillStyle = '#ffe27a'; ctx.beginPath(); ctx.ellipse(42, streetY - 36, 6, 3.5, 0, 0, 7); ctx.fill();
-  ctx.fillStyle = 'rgba(255,226,122,0.16)'; ctx.beginPath(); ctx.moveTo(42, streetY - 34); ctx.lineTo(20, streetY + sh); ctx.lineTo(70, streetY + sh); ctx.closePath(); ctx.fill();
-  // geparktes Auto rechts auf der Straße
-  { const cx = W - 88, cy = streetY + sh * 0.16;
-    ctx.fillStyle = 'rgba(0,0,0,0.28)'; ctx.beginPath(); ctx.ellipse(cx + 35, cy + sh * 0.55, 40, 6, 0, 0, 7); ctx.fill();
-    ctx.fillStyle = '#c0392b'; ctx.beginPath(); ctx.roundRect(cx, cy, 70, sh * 0.4, 6); ctx.fill();
-    ctx.fillStyle = '#8f2318'; ctx.beginPath(); ctx.roundRect(cx + 12, cy - sh * 0.18, 42, sh * 0.24, 5); ctx.fill();
-    ctx.fillStyle = '#bfe0ff'; ctx.beginPath(); ctx.roundRect(cx + 16, cy - sh * 0.14, 34, sh * 0.17, 3); ctx.fill();
-    ctx.fillStyle = '#0e0e14'; ctx.beginPath(); ctx.arc(cx + 16, cy + sh * 0.4, 6, 0, 7); ctx.arc(cx + 54, cy + sh * 0.4, 6, 0, 7); ctx.fill(); }
+}
+
+// Straßen-/Aussen-Deko im VORDERGRUND (nach dem Raum gezeichnet, im SICHTBAREN Band über dem HUD):
+// Straßenstreifen, Laterne, Mülleimer/Hydrant an den Rändern + vorbeifahrende Taxen mit Fahrgästen.
+function drawStreetFg(t) {
+  const pb = H - dPad().bot;                    // untere Kante des sichtbaren Detailbereichs
+  const roadH = Math.min(64, H * 0.085);
+  const roadY = pb - roadH;                     // Straße ganz unten im sichtbaren Bereich
+  ctx.save();
+  ctx.beginPath(); ctx.rect(0, 0, W, pb); ctx.clip();          // nie ins HUD malen
+  // Asphaltstreifen + Bordstein + Mittellinie
+  ctx.fillStyle = '#2f3237'; ctx.fillRect(0, roadY, W, roadH);
+  ctx.fillStyle = '#c7ccd2'; ctx.fillRect(0, roadY - 4, W, 4);
+  ctx.strokeStyle = 'rgba(240,210,90,0.85)'; ctx.lineWidth = 3; ctx.setLineDash([16, 12]);
+  ctx.beginPath(); ctx.moveTo(0, roadY + roadH * 0.58); ctx.lineTo(W, roadY + roadH * 0.58); ctx.stroke(); ctx.setLineDash([]);
+  // --- Straßenlaterne links (Sockel auf dem Bordstein, ragt hoch, jetzt klar sichtbar) ---
+  { const lx = 22; ctx.strokeStyle = '#3c4048'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(lx, roadY - 2); ctx.lineTo(lx, roadY - 72); ctx.lineTo(lx + 24, roadY - 76); ctx.stroke();
+    ctx.fillStyle = '#ffe27a'; ctx.beginPath(); ctx.ellipse(lx + 26, roadY - 72, 6, 3.8, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = 'rgba(255,226,122,0.13)'; ctx.beginPath(); ctx.moveTo(lx + 26, roadY - 68); ctx.lineTo(lx - 8, pb); ctx.lineTo(lx + 74, pb); ctx.closePath(); ctx.fill(); }
+  // --- Mülleimer, Hydrant an den Rändern (draußen-Feeling) ---
+  const trash = (x, y, s, col) => {
+    ctx.fillStyle = 'rgba(0,0,0,0.28)'; ctx.beginPath(); ctx.ellipse(x, y + 1, 9 * s, 3 * s, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = col; ctx.beginPath(); ctx.roundRect(x - 8 * s, y - 20 * s, 16 * s, 20 * s, 3 * s); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.fillRect(x - 8 * s, y - 15 * s, 16 * s, 2 * s); ctx.fillRect(x - 8 * s, y - 9 * s, 16 * s, 2 * s);
+    ctx.fillStyle = '#20232a'; ctx.beginPath(); ctx.roundRect(x - 9 * s, y - 23 * s, 18 * s, 4 * s, 2 * s); ctx.fill(); };
+  const hydrant = (x, y, s) => {
+    ctx.fillStyle = 'rgba(0,0,0,0.28)'; ctx.beginPath(); ctx.ellipse(x, y + 1, 8 * s, 2.6 * s, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#c23a2a'; ctx.beginPath(); ctx.roundRect(x - 5 * s, y - 16 * s, 10 * s, 16 * s, 3 * s); ctx.fill();
+    ctx.beginPath(); ctx.arc(x, y - 16 * s, 5 * s, Math.PI, 2 * Math.PI); ctx.fill();
+    ctx.fillStyle = '#e0554a'; ctx.beginPath(); ctx.arc(x - 6 * s, y - 9 * s, 2.5 * s, 0, 7); ctx.arc(x + 6 * s, y - 9 * s, 2.5 * s, 0, 7); ctx.fill(); };
+  const cy0 = roadY - 6;
+  trash(42, cy0, 1.0, '#3f6b4a'); trash(60, cy0 + 2, 0.85, '#4a5566');
+  hydrant(W - 26, cy0, 1.0); trash(W - 50, cy0 + 2, 0.9, '#5a4a3a');
+  // --- Taxen auf der Straße ---
+  for (const tx of taxis) drawTaxi(roadY + roadH * 0.52, roadH, tx);
+  ctx.restore();
+}
+
+function drawTaxi(cy, roadH, tx) {
+  const w = 74, bh = roadH * 0.5, x = tx.fx * (W + 170) - 85;
+  const top = cy - bh / 2;
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.ellipse(x + w / 2, top + bh + 5, w * 0.55, 5, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = '#f4bf1a'; ctx.beginPath(); ctx.roundRect(x, top, w, bh, 6); ctx.fill();
+  ctx.fillStyle = '#e6b016'; ctx.beginPath(); ctx.roundRect(x + 12, top - bh * 0.55, w - 30, bh * 0.6, 5); ctx.fill();
+  ctx.fillStyle = '#bfe6ff'; ctx.beginPath(); ctx.roundRect(x + 16, top - bh * 0.46, w - 38, bh * 0.46, 3); ctx.fill();
+  // Taxi-Dachschild
+  ctx.fillStyle = '#20232a'; ctx.beginPath(); ctx.roundRect(x + w / 2 - 10, top - bh * 0.82, 20, bh * 0.28, 2); ctx.fill();
+  ctx.fillStyle = '#ffd94a'; ctx.font = `700 ${Math.max(7, bh * 0.24)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('TAXI', x + w / 2, top - bh * 0.68); ctx.textBaseline = 'alphabetic';
+  // Karo-Streifen
+  ctx.fillStyle = '#20232a'; for (let i = 0; i < 8; i++) ctx.fillRect(x + 4 + i * 9, top + bh * 0.44 + (i % 2) * 3, 9, 4);
+  // Räder + Scheinwerfer
+  ctx.fillStyle = '#0e0e14'; ctx.beginPath(); ctx.arc(x + 18, top + bh, 7, 0, 7); ctx.arc(x + w - 18, top + bh, 7, 0, 7); ctx.fill();
+  ctx.fillStyle = '#3a3d45'; ctx.beginPath(); ctx.arc(x + 18, top + bh, 3, 0, 7); ctx.arc(x + w - 18, top + bh, 3, 0, 7); ctx.fill();
+  ctx.fillStyle = '#fff4c0'; ctx.beginPath(); ctx.arc(x + w - 1, top + bh * 0.4, 3, 0, 7); ctx.fill();
+  ctx.restore();
 }
 
 // Ein einzelner Raum (Boden + Wände + Möbel) an seiner Weltposition im Grundriss
@@ -1283,6 +1394,14 @@ function drawRoomDetail(id, t, beat) {
     const cs = state.clubSize || 0;
     const grow = t1Grow();
     const fl = t1DanceFloor();          // wächst mit dem Gebäude
+    // === Club-Name als grosses Neon-Schild oben an der Rückwand (mittig über dem Floor, klar sichtbar) ===
+    { const wallTop = a0.y - u * 1.05, sgx = detailProj(fl.x + fl.w / 2, r.y).x, sy = wallTop + u * 0.3;
+      const hue = (t * 40) % 360, sc = `hsl(${hue},92%,66%)`;
+      ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = `900 ${Math.max(12, u * 0.42)}px system-ui, sans-serif`;
+      ctx.globalCompositeOperation = 'lighter'; ctx.shadowColor = sc; ctx.shadowBlur = 14;
+      ctx.fillStyle = sc; ctx.fillText('✈ AIRPORT', sgx, sy);
+      ctx.restore(); ctx.textBaseline = 'alphabetic'; }
     dTiles(fl.x, fl.y, fl.w, fl.d, Math.min(9, 6 + Math.round(grow.dw)), Math.min(9, 6 + Math.round(grow.dd)), 'main', t, beat);
     dLabel(fl.x + fl.w / 2, fl.y - 0.35, 'DANCEFLOOR', 'rgba(255,255,255,0.5)', 10);
     const djx = grow.dw * 0.5;   // DJ-Bereich bleibt oben MITTIG, wenn das Gebäude wächst
@@ -1379,35 +1498,38 @@ function drawRoomDetail(id, t, beat) {
       ctx.strokeStyle = 'rgba(120,200,255,0.4)'; ctx.lineWidth = 1.5; ctx.stroke();
       ctx.fillStyle = '#4fe0ff'; ctx.font = `900 ${Math.max(11, u * 0.32)}px "Courier New", monospace`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.shadowColor = '#4fe0ff'; ctx.shadowBlur = 6; ctx.fillText(clockLabel(), cp.x, cp.y); ctx.shadowBlur = 0; ctx.textBaseline = 'alphabetic'; }
-    // === Bar (Top-Tier): Regal mit Backlight, Theke, Zapfhähne, Deko, Barkeeper ===
-    dShadow(0.3, 8.85, 1.75, 4.35);
-    dBox(0.3, 8.9, 0.55, 4.15, u * 1.25, '#3a2817', '#20130a', '#503a22');
+    // === Bar: Rückregal, Barkeeper HINTER der Theke, Bar-Werkzeug, nur freigeschaltete Drinks ===
+    dShadow(0.3, 8.85, 1.9, 4.35);
+    dBox(0.3, 8.9, 0.62, 4.15, u * 1.28, '#3a2817', '#20130a', '#503a22');   // Rückregal an der Wand
     const barT = lvlTier(state.stations.bar || 0);
-    { const a = detailProj(0.36, 9.05), c = detailProj(0.82, 12.9);
-      const sg = ctx.createLinearGradient(a.x, a.y - u * 1.2, a.x, c.y);
-      const al = 0.24 + barT * 0.13;
+    { const a = detailProj(0.36, 9.05), c = detailProj(0.9, 12.9);           // Backlight
+      const sg = ctx.createLinearGradient(a.x, a.y - u * 1.2, a.x, c.y); const al = 0.24 + barT * 0.13;
       sg.addColorStop(0, `rgba(90,190,255,${al})`); sg.addColorStop(1, `rgba(255,120,200,${al * 0.7})`);
       ctx.fillStyle = sg; ctx.fillRect(a.x, a.y - u * 1.2, c.x - a.x, c.y - (a.y - u * 1.2));
       if (barT >= 2) { ctx.strokeStyle = 'rgba(130,220,255,0.6)'; ctx.lineWidth = 2; ctx.strokeRect(a.x, a.y - u * 1.2, c.x - a.x, c.y - (a.y - u * 1.2)); } }
-    ctx.font = `${u * 0.32}px sans-serif`; ctx.textAlign = 'center';
-    const shelf = ['🍾','🥃','🍷','🍸','🍶','🥂','🍾','🧉'];
-    for (let row = 0; row < 2; row++) for (let i = 0; i < 4; i++) { const p = detailProj(0.44 + row * 0.26, 9.35 + i * 0.95); ctx.fillText(shelf[row * 4 + i], p.x, p.y - u * (1.2 - row * 0.42)); }
-    dBox(0.9, 9.1, 1.05, 3.85, u * 0.58, '#7a5330', '#42300f', '#8f6338');
-    { ctx.fillStyle = '#d8dde6'; for (let i = 0; i < 3; i++) { const p = detailProj(1.05, 9.55 + i * 0.5); ctx.fillRect(p.x - 2, p.y - u * 0.58 - 7, 4, 9); } }
-    ctx.font = `${u * 0.32}px sans-serif`;
-    const props = ['🍸','🍹','🧉','🍺','🍋'];
-    for (let i = 0; i < 5; i++) { const p = detailProj(1.55, 9.4 + i * 0.66); ctx.fillText(props[i], p.x, p.y - u * 0.58); }
-    dPerson(1.3, 9.4, { s: 1.12, color: '#eef2f7', pants: '#1c2230', skin: '#f0b98c', hair: '#3a2617', bob: Math.sin(t * 2.5) * 2, groundZ: u * 0.58 });
-    // Signature-Drink-Menütafel an der Bar-Wand
-    { const dr = currentDrink(), mp = detailProj(2.35, 9.1), mw = u * 2.0, mh = u * 1.02;
-      ctx.fillStyle = '#140f0a'; ctx.beginPath(); ctx.roundRect(mp.x - mw / 2, mp.y - u * 1.55, mw, mh, 5); ctx.fill();
-      ctx.strokeStyle = 'rgba(210,170,90,0.7)'; ctx.lineWidth = 1.5; ctx.stroke();
-      ctx.fillStyle = '#e8c56a'; ctx.font = `800 ${Math.max(7, u * 0.17)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText('BAR-MENÜ', mp.x, mp.y - u * 1.36);
-      ctx.font = `${u * 0.42}px sans-serif`; ctx.fillText(dr.e, mp.x, mp.y - u * 1.0);
-      ctx.fillStyle = '#fff'; ctx.font = `700 ${Math.max(6.5, u * 0.15)}px system-ui, sans-serif`; ctx.fillText(dr.name, mp.x, mp.y - u * 0.72);
-      ctx.fillStyle = '#7fe6a0'; ctx.font = `800 ${Math.max(7, u * 0.16)}px system-ui, sans-serif`; ctx.fillText(dr.price + ' €', mp.x, mp.y - u * 0.55);
-      ctx.textBaseline = 'alphabetic'; }
+    // NUR die bereits freigeschalteten Getränke stehen im Regal (anfangs nur Bier)
+    { const nT = drinkTier(state.stations.bar || 0); ctx.font = `${u * 0.32}px sans-serif`; ctx.textAlign = 'center';
+      for (let k = 0; k <= nT; k++) { const col = k % 2, rowk = Math.floor(k / 2);
+        const p = detailProj(0.44 + col * 0.3, 9.5 + rowk * 0.85); ctx.fillText(DRINKS[k].e, p.x, p.y - u * (1.15 - col * 0.02)); } }
+    // Barkeeper HINTER der Theke (links neben der Theke, steht dahinter)
+    dPerson(0.66, 10.6, { s: 1.14, color: '#f4f6fa', pants: '#20242e', skin: '#f0b98c', hair: '#33241a', apron: '#1c2740', bowtie: true, bob: Math.sin(t * 2.4) * 1.6, groundZ: u * 0.3 });
+    // Theke davor
+    dBox(0.95, 9.1, 1.05, 3.85, u * 0.6, '#7a5330', '#42300f', '#8f6338');
+    ctx.strokeStyle = '#c9a24a'; ctx.lineWidth = 2; { const a = detailProj(0.95, 9.1), c = detailProj(2.0, 9.1); ctx.beginPath(); ctx.moveTo(a.x, a.y - u * 0.6); ctx.lineTo(c.x, c.y - u * 0.6); ctx.stroke(); }   // Messingkante
+    // Bar-Werkzeug auf der Theke: Zapfhähne, Shaker, Kasse, Servietten
+    { // Zapfhähne
+      ctx.strokeStyle = '#cfd4db'; ctx.lineWidth = 2.4; ctx.lineCap = 'round';
+      for (let i = 0; i < 3; i++) { const p = detailProj(1.15, 9.5 + i * 0.42); ctx.beginPath(); ctx.moveTo(p.x, p.y - u * 0.6); ctx.lineTo(p.x, p.y - u * 0.6 - 8); ctx.stroke();
+        ctx.fillStyle = ['#e0b64a','#8a8f98','#c0392b'][i]; ctx.beginPath(); ctx.arc(p.x, p.y - u * 0.6 - 9, 2.2, 0, 7); ctx.fill(); }
+      // Shaker (Edelstahl)
+      { const p = detailProj(1.65, 10.0); const g = ctx.createLinearGradient(p.x - 4, 0, p.x + 4, 0); g.addColorStop(0, '#8f96a0'); g.addColorStop(0.5, '#e6ebf0'); g.addColorStop(1, '#8f96a0');
+        ctx.fillStyle = g; ctx.beginPath(); ctx.roundRect(p.x - 3.5, p.y - u * 0.6 - 13, 7, 13, 2); ctx.fill(); ctx.fillStyle = '#b7bec8'; ctx.beginPath(); ctx.roundRect(p.x - 4, p.y - u * 0.6 - 15, 8, 3, 1); ctx.fill(); }
+      // Kasse (Registrierkasse)
+      { const p = detailProj(1.6, 11.4); ctx.fillStyle = '#2b2f38'; ctx.beginPath(); ctx.roundRect(p.x - 6, p.y - u * 0.6 - 10, 13, 10, 2); ctx.fill();
+        ctx.fillStyle = '#4fe0c0'; ctx.fillRect(p.x - 4, p.y - u * 0.6 - 8, 9, 4); ctx.fillStyle = '#1a1d22'; ctx.fillRect(p.x - 5, p.y - u * 0.6 - 2, 11, 3); }
+      // Servietten + Zitronen-Schale
+      { const p = detailProj(1.35, 12.3); ctx.fillStyle = '#e9edf2'; ctx.beginPath(); ctx.roundRect(p.x - 4, p.y - u * 0.6 - 5, 8, 5, 1); ctx.fill();
+        const q = detailProj(1.75, 12.3); ctx.fillStyle = '#caa24a'; ctx.beginPath(); ctx.arc(q.x, q.y - u * 0.6 - 2, 4, 0, 7); ctx.fill(); ctx.font = `${u * 0.24}px sans-serif`; ctx.fillText('🍋', q.x, q.y - u * 0.6 - 1); } }
     ctx.save(); ctx.translate(dTileW() * grow.dw, 0);   // Shot-Bar wandert mit der rechten Wand nach aussen
     // === Shot-Bar (rechts): Regal + Theke + Gläserreihen + Barkeeper ===
     dShadow(7.35, 8.55, 1.5, 2.65);
@@ -1445,7 +1567,6 @@ function drawRoomDetail(id, t, beat) {
     // Eingang: roter Teppich + AIRPORT + Türsteher (wächst mit Einlass-Stufe)
     const c1 = detailProj(3.6, 13.9), c2 = detailProj(5.4, 15.3), sp = (c2.x - c1.x) * 0.18;
     ctx.fillStyle = '#b3243a'; ctx.beginPath(); ctx.moveTo(c1.x, c1.y); ctx.lineTo(c2.x, c1.y); ctx.lineTo(c2.x + sp, c2.y); ctx.lineTo(c1.x - sp, c2.y); ctx.closePath(); ctx.fill();
-    dLabel(2.3, 14.3, '✈ AIRPORT', `hsl(${(t * 40) % 360},90%,65%)`, 11);
     const einLvl = state.stations.einlass || 0, einT = lvlTier(einLvl);
     const bs = 1.2 + Math.min(0.6, einLvl * 0.013);   // breiter/größer je Stufe
     const bounce = (bx, suit) => dPerson(bx, 14.25, { s: bs, color: suit, pants: '#14141c', skin: '#8c5a33', hair: '#1a1a22', shades: true, earpiece: true });
@@ -1457,7 +1578,7 @@ function drawRoomDetail(id, t, beat) {
       const sc = `hsl(${(t * 40) % 360},90%,62%)`;
       ctx.strokeStyle = sc; ctx.lineWidth = 2; ctx.beginPath(); ctx.roundRect(sp.x - bw2 / 2, sp.y - bh2 / 2, bw2, bh2, 6); ctx.stroke();
       ctx.fillStyle = '#ffe9a8'; ctx.font = `800 ${Math.max(9, u * 0.25)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText('✈ AIRPORT', sp.x, sp.y); ctx.textBaseline = 'alphabetic'; }
+      ctx.fillText('✦ EINGANG ✦', sp.x, sp.y); ctx.textBaseline = 'alphabetic'; }
     const stanch = (wx, wy) => { const p = detailProj(wx, wy);
       ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.ellipse(p.x, p.y, 4, 2.2, 0, 0, 7); ctx.fill();
       ctx.strokeStyle = '#c9a24a'; ctx.lineWidth = 2.4; ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x, p.y - u * 0.5); ctx.stroke();
@@ -1500,48 +1621,40 @@ function drawRoomDetail(id, t, beat) {
     for (let k = 0; k < 3; k++) { const p = detailProj(r.x + 1.0 + k * 1.0, r.y + r.d - 0.85); ctx.font = `${u * 0.26}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('🚰', p.x, p.y - u * 0.35); }
     dLabel(r.x+r.w/2, r.y+0.3, '🚻 WC', '#dfeaf5', 13);
   } else if (id === 't2') {
-    // gold-glänzende VIP-Tanzfläche
-    const fl = { x: 12.4, y: 2.6, w: 4.6, d: 3.6 };
-    dTiles(fl.x, fl.y, fl.w, fl.d, 5, 4, 'vip', t, beat);
-    // goldener Kronleuchter über dem Floor (additiv, animiert)
+    // Terminal 2 — zweiter, ganz normaler Club-Floor (kein Gold/VIP mehr)
+    const fl = { x: 12.4, y: 2.6, w: 4.8, d: 4.0 };
+    dTiles(fl.x, fl.y, fl.w, fl.d, 5, 4, 'main', t, beat);
+    dLabel(fl.x + fl.w / 2, fl.y - 0.35, 'FLOOR 2', 'rgba(255,255,255,0.5)', 10);
+    // bewegte Club-Lichtkegel über dem Floor (additiv)
     ctx.save(); ctx.globalCompositeOperation = 'lighter';
-    const chC = detailProj(fl.x + fl.w / 2, fl.y + 0.6);
-    for (let i = 0; i < 8; i++) { const a2 = i / 8 * Math.PI * 2 + t * 0.4;
-      ctx.fillStyle = `rgba(255,210,110,${0.10 + 0.06 * Math.sin(t * 3 + i)})`;
-      ctx.beginPath(); ctx.arc(chC.x + Math.cos(a2) * u * 0.9, chC.y + Math.sin(a2) * u * 0.5, u * 0.12, 0, 7); ctx.fill(); }
+    const rig = detailProj(fl.x + fl.w / 2, fl.y - 0.2), fb = detailProj(fl.x + fl.w / 2, fl.y + fl.d);
+    for (let i = 0; i < 3; i++) { const ang = Math.sin(t * (0.8 + i * 0.35) + i * 2) * 0.55;
+      ctx.fillStyle = `hsla(${(t * 70 + i * 130) % 360},90%,65%,${dropActive() ? 0.14 : 0.07})`;
+      ctx.beginPath(); ctx.moveTo(rig.x, rig.y - u * 0.3);
+      ctx.lineTo(rig.x + Math.sin(ang) * u * 3 - u * 1.4, fb.y); ctx.lineTo(rig.x + Math.sin(ang) * u * 3 + u * 1.4, fb.y); ctx.closePath(); ctx.fill(); }
     ctx.restore();
-    // Champagner-Bar (oben-links) mit Regal, Theke, Flaschen & Barkeeper
-    dShadow(9.85, 0.8, 2.9, 1.2); dBox(9.85, 0.8, 2.9, 1.0, u * 1.15, '#5a4526', '#2e2211', '#8a6a3a');
-    ctx.font = `${u * 0.33}px sans-serif`; ctx.textAlign = 'center';
-    for (let i = 0; i < 6; i++) { const p = detailProj(10.1 + i * 0.44, 1.15); ctx.fillText(['🍾','🥂','🍾','🍸','🥂','🍾'][i], p.x, p.y - u * 1.02); }
-    dBox(10.1, 1.65, 2.5, 0.72, u * 0.55, '#b28a4a', '#6a4f26', '#caa25e');
-    if (roomUnlocked('t2')) dPerson(11.3, 2.05, { s: 1.05, color: '#efe6f5', pants: '#241233', skin: '#f0b98c', hair: '#c98b2d', bob: Math.sin(t * 2.5) * 1.6, groundZ: u * 0.55 });
-    // Lounge-Sofas (mehrere Ecken)
+    // Bar an der oberen Wand (dunkel, Neon-Trim) mit Zapfhähnen, Gläsern & Barkeeper dahinter
+    if (roomUnlocked('t2')) dPerson(11.3, 1.35, { s: 1.08, color: '#f4f6fa', pants: '#20242e', skin: '#f0b98c', hair: '#33241a', apron: '#1c3a4a', bowtie: true, bob: Math.sin(t * 2.4) * 1.5, groundZ: u * 0.3 });
+    dShadow(9.85, 1.7, 2.9, 1.0); dBox(9.9, 1.75, 2.7, 0.8, u * 0.6, '#2a3340', '#161b22', '#3a4756');
+    ctx.font = `${u * 0.26}px sans-serif`; ctx.textAlign = 'center';
+    for (let i = 0; i < 5; i++) { const p = detailProj(10.2 + i * 0.5, 2.0); ctx.fillText(['🍺','🍸','🍹','🍺','🥃'][i], p.x, p.y - u * 0.55); }
+    ctx.fillStyle = '#39c0d6'; ctx.globalAlpha = 0.6; { const bp = detailProj(9.9, 1.75); ctx.fillRect(bp.x, bp.y - u * 0.02, u * 2.7, 2); } ctx.globalAlpha = 1;
+    // Lounge-Sofas in Club-Tönen
     const sofa = (ax, ay, top, side) => { dShadow(ax - 1.2, ay - 0.5, 2.4, 1.0);
-      dBox(ax - 1.2, ay - 0.5, 2.4, 1.0, u * 0.3, top, '#7a2846', side);
-      dBox(ax - 1.2, ay - 0.85, 2.4, 0.4, u * 0.78, side, '#611d33', top); };
-    sofa(16.6, 6.6, '#c24e72', '#a63a5c'); sofa(17.4, 2.6, '#8a4fd0', '#6a37b0'); sofa(12.9, 7.7, '#c24e72', '#a63a5c');
-    // Bottle-Service-Tische mit Wunderkerzen (animiert)
-    for (const [tx, ty] of [[13.3, 5.6], [15.6, 3.3], [16.9, 7.4]]) { dShadow(tx - 0.35, ty - 0.35, 0.7, 0.7);
-      dBox(tx - 0.35, ty - 0.35, 0.7, 0.7, u * 0.6, '#3a2044', '#1f1026', '#4a2a55');
-      const p = detailProj(tx, ty); ctx.font = `${u * 0.5}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('🍾', p.x, p.y - u * 0.6);
-      ctx.save(); ctx.globalCompositeOperation = 'lighter';
-      for (let s = 0; s < 6; s++) { const ang = t * 7 + s;
-        ctx.fillStyle = `hsla(${(t * 220 + s * 60) % 360},100%,72%,${0.4 + 0.4 * Math.sin(t * 22 + s)})`;
-        ctx.beginPath(); ctx.arc(p.x + Math.cos(ang) * u * 0.22, p.y - u * 0.95 + Math.sin(ang) * u * 0.22, 1.4, 0, 7); ctx.fill(); }
-      ctx.restore(); }
-    // VIP-Kordel + Host am Eingang (links, wo T1 andockt)
-    { const goldStanch = (wx, wy) => { const p = detailProj(wx, wy);
-        ctx.strokeStyle = '#e8c56a'; ctx.lineWidth = 2.4; ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x, p.y - u * 0.5); ctx.stroke();
-        ctx.fillStyle = '#ffe08a'; ctx.beginPath(); ctx.arc(p.x, p.y - u * 0.52, 3.2, 0, 7); ctx.fill(); return p; };
-      const l1 = goldStanch(10.6, 7.4), l2 = goldStanch(10.6, 8.4);
-      ctx.strokeStyle = '#b3123a'; ctx.lineWidth = 2.4; ctx.beginPath(); ctx.moveTo(l1.x, l1.y - u * 0.5); ctx.quadraticCurveTo(l1.x - 6, (l1.y + l2.y) / 2 - u * 0.5 + 6, l2.x, l2.y - u * 0.5); ctx.stroke();
-      if (roomUnlocked('t2')) dPerson(11.1, 7.9, { s: 1.15, color: '#1a1a26', pants: '#0e0e16', skin: '#8c5a33', hair: '#1a1a22', shades: true, earpiece: true }); }
-    // Palmen/Deko in Gold-Töpfen
-    { const palm = (wx, wy) => { dShadow(wx - 0.3, wy - 0.12, 0.6, 0.3); const p = detailProj(wx, wy);
-        ctx.fillStyle = '#8a6a2e'; ctx.beginPath(); ctx.roundRect(p.x - 6, p.y - 8, 12, 10, 3); ctx.fill();
+      dBox(ax - 1.2, ay - 0.5, 2.4, 1.0, u * 0.3, top, '#242a3a', side);
+      dBox(ax - 1.2, ay - 0.85, 2.4, 0.4, u * 0.78, side, '#1a1f2c', top); };
+    sofa(16.7, 6.6, '#3a4356', '#2a3346'); sofa(17.5, 2.7, '#4a3d6a', '#372c52'); sofa(12.9, 7.8, '#3a4356', '#2a3346');
+    // Steh-/Cocktailtische mit Getränk
+    for (const [tx, ty] of [[13.4, 5.7], [15.7, 3.4], [16.9, 7.5]]) { dShadow(tx - 0.3, ty - 0.3, 0.6, 0.6);
+      dBox(tx - 0.3, ty - 0.3, 0.6, 0.6, u * 0.7, '#20252f', '#12161d', '#2c333f');
+      const p = detailProj(tx, ty); ctx.font = `${u * 0.34}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText(pick(['🍸','🍹','🍺']), p.x, p.y - u * 0.72); }
+    // Türsteher/Host am Eingang (links, wo T1 andockt) — schlicht, keine Gold-Kordel
+    if (roomUnlocked('t2')) dPerson(11.1, 7.9, { s: 1.12, color: '#1a1a26', pants: '#0e0e16', skin: '#8c5a33', hair: '#1a1a22', shades: true, earpiece: true });
+    // grüne Pflanzen in schlichten Töpfen
+    { const plant = (wx, wy) => { dShadow(wx - 0.3, wy - 0.12, 0.6, 0.3); const p = detailProj(wx, wy);
+        ctx.fillStyle = '#3a3f4a'; ctx.beginPath(); ctx.roundRect(p.x - 6, p.y - 8, 12, 10, 3); ctx.fill();
         ctx.fillStyle = '#2f8f4a'; for (const [ox, oy] of [[-8, -16], [8, -16], [0, -22], [-5, -12], [5, -12]]) { ctx.beginPath(); ctx.ellipse(p.x + ox, p.y + oy, 3.5, 8, ox * 0.05, 0, 7); ctx.fill(); } };
-      palm(18.2, 1.4); palm(18.4, 8.2); }
+      plant(18.2, 1.4); plant(18.4, 8.2); }
   } else if (id === 'roof') {
     // Skyline-Silhouette an der Rückwand (Sky-Lounge-Aussicht)
     { const base = detailProj(r.x, r.y).y;
@@ -1563,6 +1676,13 @@ function drawRoomDetail(id, t, beat) {
     ctx.font = `${u * 0.3}px sans-serif`; ctx.textAlign = 'center';
     for (let i = 0; i < 5; i++) { const p = detailProj(10.2 + i * 0.5, 11.0); ctx.fillText(['🍹','🍸','🥃','🍹','🍸'][i], p.x, p.y - u * 0.95); }
     if (roomUnlocked('roof')) dPerson(11.2, 11.9, { s: 1.05, color: '#e6f2f5', pants: '#12303a', skin: '#c68a53', hair: '#1a1a22', bob: Math.sin(t * 2.8) * 1.6, groundZ: u * 0.5 });
+    // === VIP-Signatur: goldene Kordel am Eingang + Champagner-Kübel (Rooftop ist der VIP-Bereich) ===
+    { const goldStanch = (wx, wy) => { const p = detailProj(wx, wy);
+        ctx.strokeStyle = '#e8c56a'; ctx.lineWidth = 2.4; ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x, p.y - u * 0.5); ctx.stroke();
+        ctx.fillStyle = '#ffe08a'; ctx.beginPath(); ctx.arc(p.x, p.y - u * 0.52, 3.2, 0, 7); ctx.fill(); return p; };
+      const l1 = goldStanch(10.7, 15.4), l2 = goldStanch(10.7, 16.4);
+      ctx.strokeStyle = '#b3123a'; ctx.lineWidth = 2.4; ctx.beginPath(); ctx.moveTo(l1.x, l1.y - u * 0.5); ctx.quadraticCurveTo(l1.x - 6, (l1.y + l2.y) / 2 - u * 0.5 + 6, l2.x, l2.y - u * 0.5); ctx.stroke();
+      const cb = detailProj(12.4, 11.0); ctx.font = `${u * 0.4}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('🍾', cb.x, cb.y - u * 0.95); }
     // Pool + Sonnenliegen
     dRect(A.pool.x - 1.55, A.pool.y - 1.15, 3.1, 2.3, '#1f4a6e', '#14324c', 12);
     dRect(A.pool.x - 1.4, A.pool.y - 1.0, 2.8, 2.0, '#2f7fd6', 'rgba(255,255,255,0.35)', 10);
@@ -1746,12 +1866,12 @@ function drawWcAnnex(t) {
   ctx.strokeStyle = 'rgba(255,255,255,0.06)'; ctx.lineWidth = 1;
   for (let i = 1; i < a.w; i++) { const q = detailProj(a.x + i, a.y); ctx.beginPath(); ctx.moveTo(q.x, p0.y); ctx.lineTo(q.x, p1.y); ctx.stroke(); }
   for (let j = 1; j < a.d; j++) { const q = detailProj(a.x, a.y + j); ctx.beginPath(); ctx.moveTo(p0.x, q.y); ctx.lineTo(p1.x, q.y); ctx.stroke(); }
-  // Möbel: 2 Kabinen (links) + Waschbecken (rechts), luftig verteilt
-  for (let k = 0; k < 2; k++) { const bx = a.x + 0.32 + k * 0.92;
-    dShadow(bx, a.y + 0.32, 0.74, 0.8); dBox(bx, a.y + 0.32, 0.74, 0.8, u * 0.4, '#7f93a8', '#495866', '#95a9bd');
-    const q = detailProj(bx + 0.37, a.y + 0.72); ctx.font = `${u * 0.3}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('🚽', q.x, q.y - u * 0.4); }
-  dBox(a.x + 2.18, a.y + 0.34, 0.44, 1.2, u * 0.32, '#ccd4de', '#8f9aa6', '#e4eaf0');
-  { const wsp = detailProj(a.x + 2.4, a.y + 0.95); ctx.font = `${u * 0.22}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('🚰', wsp.x, wsp.y - u * 0.32); }
+  // Möbel: 2 Kabinen (links) + Waschbecken (rechts), kompakt
+  for (let k = 0; k < 2; k++) { const bx = a.x + 0.22 + k * 0.62;
+    dShadow(bx, a.y + 0.28, 0.55, 0.72); dBox(bx, a.y + 0.28, 0.55, 0.72, u * 0.4, '#7f93a8', '#495866', '#95a9bd');
+    const q = detailProj(bx + 0.28, a.y + 0.62); ctx.font = `${u * 0.24}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('🚽', q.x, q.y - u * 0.36); }
+  dBox(a.x + 1.62, a.y + 0.3, 0.35, 0.9, u * 0.32, '#ccd4de', '#8f9aa6', '#e4eaf0');
+  { const wsp = detailProj(a.x + 1.79, a.y + 0.78); ctx.font = `${u * 0.2}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('🚰', wsp.x, wsp.y - u * 0.3); }
   // saubere Wände wie ein Raum (Rückwand hoch + Neon-Trim, Seitenwände)
   const wallH = u * 0.9, ac = ACCENT.klo;
   const wg = ctx.createLinearGradient(0, p0.y - wallH, 0, p0.y); wg.addColorStop(0, '#2c2438'); wg.addColorStop(1, '#181222');
@@ -1781,8 +1901,9 @@ function drawWcAnnex(t) {
 function drawFocusRoom(t, beat) {
   const id = framedRoom, r = RM[id];
   drawGrassBg();
+  if (id === 't1') drawStreetFg(t);   // Laterne, Mülleimer, Taxen im Vordergrund der Straße
   drawRoomDetail(id, t, beat);        // Boden + Wände + Möbel + Deko + Shabby des Raums
-  if (id === 't1') drawWcAnnex(t);    // WC-Anbau oben-links an Terminal 1
+  if (id === 't1') drawWcAnnex(t);    // WC-Eck oben-links in Terminal 1
 
   // Performer auf 3D-Bühne, falls diesem Raum zugewiesen
   if (state.performer.unlocked && state.performer.room === id && roomUnlocked(id)) {
@@ -1790,7 +1911,7 @@ function drawFocusRoom(t, beat) {
     const c = { t1:[6.2,9.0], t2:[15.0,5.2], roof:[13.5,14.5] }[id] || [6,9];
     dShadow(c[0]-0.7, c[1]-0.7, 1.4, 1.4);
     dBox(c[0]-0.7, c[1]-0.7, 1.4, 1.4, u * 0.35, '#ff5e8a', '#a32e52', '#ff85b3');
-    dPerson(c[0], c[1], { s: 1.15, color: '#ff4fa3', skin: '#f0b98c', hair: '#1a1a22', female: true, arms: beat*1.5, dancing: true, bob: Math.sin(beat*1.5)*3, groundZ: u * 0.35 });
+    dPerson(c[0], c[1], { s: 1.2, color: '#ff2d86', skin: '#f0b98c', hair: '#1a1a22', female: true, showgirl: true, arms: beat*1.5, dancing: true, bob: Math.sin(beat*1.5)*3, groundZ: u * 0.35 });
   }
 
   // Gäste NUR strikt INNERHALB des Raums zeichnen (nichts läuft ausserhalb der Wände)
@@ -1799,6 +1920,7 @@ function drawFocusRoom(t, beat) {
     const gs = guests.filter(g => g.x >= r.x + 0.15 && g.x <= r.x + r.w - 0.15 && g.y >= r.y + 0.15 && g.y <= r.y + r.d - 0.05)
       .sort((a, b) => a.y - b.y);
     for (const g of gs) {
+      if (g.ko) { drawKO(g, t); continue; }   // liegt am Boden
       const dancing = g.mode === 'act' && (g.act === 'dance' || g.act === 'vipdance' || g.act === 'roofbar');
       // je später/betrunkener, desto wilder das Tanzen + leichtes Torkeln
       const bob = dancing ? Math.sin(beat + g.bobPhase) * ((dropActive() ? 4 : 2.5) + drunk * 3) : 0;
@@ -1829,6 +1951,27 @@ function drawFocusRoom(t, beat) {
 
   // kurzer weicher Überblend beim Raumwechsel
   if (roomFade > 0) { const p = dPad(); ctx.fillStyle = `rgba(10,7,20,${roomFade * 0.5})`; ctx.fillRect(0, p.top, W, H - p.top - p.bot); }
+}
+
+// betrunkener Gast liegt am Boden (K.O.) — quer liegende Figur + Zzz
+function drawKO(g, t) {
+  const p = detailProj(g.x, g.y), s = dPersonScale() * 34 * 0.9;
+  ctx.save(); ctx.globalAlpha = g.alpha != null ? g.alpha : 1;
+  ctx.fillStyle = 'rgba(10,6,26,0.3)'; ctx.beginPath(); ctx.ellipse(p.x, p.y, 12 * s / 6, 4 * s / 6, 0, 0, 7); ctx.fill();
+  const bx = p.x, by = p.y - 3 * s / 6;
+  // Beine
+  ctx.strokeStyle = g.pants || '#2b2b3a'; ctx.lineWidth = 2.4 * s / 6; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(bx + 2 * s / 6, by); ctx.lineTo(bx + 10 * s / 6, by - 1 * s / 6);
+  ctx.moveTo(bx + 2 * s / 6, by + 1.5 * s / 6); ctx.lineTo(bx + 10 * s / 6, by + 2 * s / 6); ctx.stroke();
+  // Körper (liegend)
+  ctx.fillStyle = g.color; ctx.beginPath(); ctx.ellipse(bx - 1 * s / 6, by, 5 * s / 6, 3.2 * s / 6, 0, 0, 7); ctx.fill();
+  // Kopf
+  ctx.fillStyle = g.skin || '#ffd9b3'; ctx.beginPath(); ctx.arc(bx - 6 * s / 6, by - 0.5 * s / 6, 3.4 * s / 6, 0, 7); ctx.fill();
+  ctx.fillStyle = g.hair || '#2b1c10'; ctx.beginPath(); ctx.arc(bx - 7 * s / 6, by - 1.5 * s / 6, 3.0 * s / 6, Math.PI * 0.6, Math.PI * 1.8); ctx.fill();
+  // Zzz
+  ctx.fillStyle = '#cfe3ff'; ctx.font = `700 ${Math.max(8, s * 0.9)}px system-ui, sans-serif`; ctx.textAlign = 'center';
+  ctx.globalAlpha *= 0.85; ctx.fillText('💤', bx - 6 * s / 6, by - 7 * s / 6 - Math.sin(t * 2 + g.bobPhase) * 2);
+  ctx.restore();
 }
 
 // ein Geld-Pin an Bildschirmkoordinaten
@@ -1903,8 +2046,8 @@ export function renderFrame(now) {
     }
     drawables.sort((a, b) => a.d - b.d);
     for (const it of drawables) it.fn();
-    if (!state.t2Unlocked) drawLockOverlay(RM.t2, 'Terminal 2 · VIP', 'Antippen zum Freischalten');
-    if (!state.roofUnlocked) drawLockOverlay(RM.roof, 'Rooftop', state.t2Unlocked ? 'Antippen zum Freischalten' : 'Erst Terminal 2');
+    if (!state.t2Unlocked) drawLockOverlay(RM.t2, 'Terminal 2', 'Antippen zum Freischalten');
+    if (!state.roofUnlocked) drawLockOverlay(RM.roof, 'Rooftop · VIP', state.t2Unlocked ? 'Antippen zum Freischalten' : 'Erst Terminal 2');
     drawCashPins(t);
   }
 

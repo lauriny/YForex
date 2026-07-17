@@ -14,8 +14,8 @@ import { enterRoom, exitRoom, detailBack, nextRoom, prevRoom, currentRoom } from
 const ROOM_META = {
   t1:   { icon: '🪩', name: 'Terminal 1',        sub: 'Mainfloor' },
   klo:  { icon: '🚻', name: 'WC',                sub: 'Waschräume' },
-  t2:   { icon: '🥂', name: 'Terminal 2 · VIP',  sub: 'VIP-Etage' },
-  roof: { icon: '🌃', name: 'Rooftop',           sub: 'Sky Lounge' },
+  t2:   { icon: '🪩', name: 'Terminal 2',        sub: 'Zweiter Floor' },
+  roof: { icon: '🌃', name: 'Rooftop · VIP',     sub: 'VIP Sky Lounge' },
 };
 
 const $ = sel => document.querySelector(sel);
@@ -375,9 +375,9 @@ function goalRoom(id, icon, title, sub, reqLvl) {
 }
 function buildGoals() {
   const s = G.state, out = [];
-  out.push(goalRoom('t2', '🥂', 'Terminal 2 · VIP', 'VIP-Etage mit Champagner & Lounges', T2_REQ.level));
+  out.push(goalRoom('t2', '🪩', 'Terminal 2', 'Zweiter Dancefloor mit Bar & Lounge', T2_REQ.level));
   out.push({ icon: '💃', title: 'Show-Act', sub: 'Bewegliche Tänzerin, die einen Raum boostet', done: s.performer.unlocked, progress: s.level / PERFORMER.level, reqLabel: `Level ${PERFORMER.level} · du: ${s.level}` });
-  out.push(goalRoom('roof', '🌃', 'Rooftop', 'Sky Lounge mit Pool & Skybar', ROOF_REQ.level));
+  out.push(goalRoom('roof', '🌃', 'Rooftop · VIP', 'VIP Sky Lounge mit Pool, Skybar & Champagner', ROOF_REQ.level));
   const nd = G.nextDrink();
   if (nd) out.push({ icon: nd.e, title: `Drink: ${nd.name}`, sub: `${nd.price} € pro Drink · mehr Bar-Umsatz`, done: false, progress: (s.stations.bar || 0) / nd.lvl, reqLabel: `Bar Stufe ${nd.lvl} · du: ${s.stations.bar || 0}` });
   const nt = CLUB_THEMES.find(x => !G.themeOwned(x.id));

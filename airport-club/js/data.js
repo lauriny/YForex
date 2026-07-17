@@ -94,8 +94,8 @@ export const DAILY_STREAK_MAX = 7;   // Streak-Bonus deckelt bei x7
 // ---- Räume -----------------------------------------------------
 export const ROOMS = [
   { id: 't1',   name: 'Terminal 1', sub: 'Mainfloor',  icon: '🪩' },
-  { id: 't2',   name: 'Terminal 2', sub: 'VIP-Etage',  icon: '🥂' },
-  { id: 'roof', name: 'Rooftop',    sub: 'Sky Lounge', icon: '🌃' },
+  { id: 't2',   name: 'Terminal 2', sub: 'Zweiter Floor', icon: '🪩' },
+  { id: 'roof', name: 'Rooftop',    sub: 'VIP Sky Lounge', icon: '🌃' },
 ];
 
 // ---- Stationen -------------------------------------------------
