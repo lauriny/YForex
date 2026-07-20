@@ -1221,3 +1221,12 @@ button { font-family: inherit; border: none; background: none; cursor: pointer; 
 .theme-btn.on { background: linear-gradient(180deg, #2ea84a, #1d7a33); }
 .theme-btn.buy { background: linear-gradient(180deg, #f0a52a, #cf7d16); }
 .theme-btn.lock { background: rgba(0,0,0,0.35); color: #cdb7e6; }
+
+/* Dev-Mode Code-Eingabe */
+.dev-code-row { display: flex; gap: 8px; margin-top: 4px; }
+.dev-code-row input {
+  flex: 1; min-width: 0; padding: 10px 14px; border-radius: 12px;
+  border: 2px solid var(--line, #d8cfc0); background: rgba(255,255,255,0.06);
+  color: inherit; font: inherit; font-weight: 700; letter-spacing: 2px;
+}
+.dev-code-row .btn-flat { flex: 0 0 auto; width: auto; padding-inline: 18px; }

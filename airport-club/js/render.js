@@ -8,7 +8,7 @@ import {
   depositAtStation, collectStation, roomUnlocked,
   eventDef, eventGuestMult, incomePerSec,
   marketingGuestBonus, marketingSpawnBonus, activeDjDef,
-  currentDrink, activeTheme,
+  currentDrink, activeTheme, goldenBottleReward, nightReport,
 } from './game.js';
 import { fmt, CASH_STATIONS, DRINKS, drinkTier } from './data.js';
 import { musicBpm } from './sfx.js';
@@ -71,7 +71,17 @@ function doorPoint() { const g = t1Grow(); return { x: 4.0 + g.dw * 0.5, y: 14.2
 // ---- Nachtzeit & „je später, desto mehr geht ab" ----
 let clubClock = 22 * 60;                 // Minuten seit Mitternacht, Start 22:00
 const NIGHT_START = 22 * 60, NIGHT_END = 26 * 60;   // 22:00 → 02:00 (dann Loop)
-function updateClock(dt) { clubClock += dt * 0.7; if (clubClock >= NIGHT_END) clubClock = NIGHT_START; }   // ~1 Spielminute/1.4 s
+let nightLifetimeStart = null;           // Einnahmen-Snapshot beim Nacht-Start (für den Nacht-Report)
+export function devSetClock(min) { clubClock = Math.max(NIGHT_START, Math.min(NIGHT_END - 0.5, min)); }
+function updateClock(dt) {
+  if (nightLifetimeStart == null) nightLifetimeStart = state.lifetime;
+  clubClock += dt * 0.7;                 // ~1 Spielminute/1.4 s
+  if (clubClock >= NIGHT_END) {          // 02:00 — Nacht geschafft → Report + Bonus + neue Nacht
+    clubClock = NIGHT_START;
+    nightReport(Math.max(0, state.lifetime - nightLifetimeStart));
+    nightLifetimeStart = state.lifetime;
+  }
+}
 function nightProgress() { return Math.max(0, Math.min(1, (clubClock - NIGHT_START) / (NIGHT_END - NIGHT_START))); }
 function nightDrunk() { return nightProgress() * (dropActive() ? 1 : 0.9); }   // 0..1 Betrunkenheit/Energie
 function clockLabel() { const h = Math.floor(clubClock / 60) % 24, m = Math.floor(clubClock % 60); return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`; }
@@ -252,6 +262,16 @@ function handleTap(e) {
     }
   }
   const roomV = inRoomView();
+  // Goldene Flasche antippen → Bonus
+  if (goldBottle && roomV && goldBottle.room === framedRoom) {
+    const p = detailProj(goldBottle.x, goldBottle.y);
+    if (Math.hypot(mx - p.x, my - (p.y - dTileW() * 0.5)) < 44) {
+      const r = goldenBottleReward();
+      if (onTapFeedback) onTapFeedback({ type: 'gold', x: e.clientX, y: e.clientY, ...r });
+      goldBottle = null; gbTimer = rnd(35, 70);
+      return;
+    }
+  }
   // Geld-Pins einsammeln (Iso-Übersicht ODER im gezeigten Raum)
   for (const [stId, anchorId] of Object.entries(PIN_AT)) {
     if ((state.stationCash[stId] || 0) < 1) continue;
@@ -259,7 +279,7 @@ function handleTap(e) {
     const a = roomV ? anchorWorld(anchorId) : A[anchorId];
     const s = roomV ? (() => { const p = detailProj(a.x, a.y); return { x: p.x, y: p.y - dTileW() * 1.05 }; })() : iso(a.x, a.y, 1.15);
     if (Math.hypot(mx - s.x, my - s.y) < (roomV ? 40 : 30)) {
-      const amount = collectStation(stId);
+      const amount = collectStation(stId, true);   // manuell → Combo-Bonus möglich
       if (amount > 0 && onTapFeedback) onTapFeedback({ type: 'collect', x: e.clientX, y: e.clientY, amount });
       return;
     }
@@ -293,6 +313,20 @@ const BACKSTAGE = { x: 7.35, y: 7.7 };   // oben-rechts, neben dem DJ in Termina
 let guests = [];
 let taxis = [];        // vorbeifahrende Taxen, die vor dem Eingang Gäste absetzen
 let taxiTimer = 5;
+let goldBottle = null; // Goldene Flasche: spawnt zufällig im gezeigten Raum, Antippen = Bonus
+let gbTimer = 25;
+function updateGoldBottle(dt) {
+  if (goldBottle) {
+    goldBottle.ttl -= dt;
+    if (goldBottle.ttl <= 0) { goldBottle = null; gbTimer = rnd(35, 70); }
+    return;
+  }
+  gbTimer -= dt;
+  if (gbTimer <= 0 && inRoomView() && roomUnlocked(framedRoom)) {
+    const r = RM[framedRoom];
+    goldBottle = { room: framedRoom, x: rnd(r.x + 1.2, r.x + r.w - 1.2), y: rnd(r.y + 2.2, r.y + r.d - 1.2), ttl: 11, t0: performance.now() / 1000 };
+  }
+}
 let sec = null;   // aktiver Security/Türsteher-Einsatz bei Randalierern: { x, y, phase, tm }
 
 function aliveGuests() { let n = 0; for (const g of guests) if (!g.celeb) n++; return n; }
@@ -513,6 +547,7 @@ function updateGuests(dt) {
   separateGuests(dt);
   updateSecurity(dt);
   updateTaxis(dt);
+  updateGoldBottle(dt);
   // selten kippt spät nachts ein betrunkener Gast um und liegt kurz am Boden (K.O.)
   if (nightDrunk() > 0.45 && Math.random() < dt * 0.03) {
     const cand = guests.filter(g => !g.celeb && !g.ko && !g.leaving && !g.trouble && g.mode === 'act');
@@ -1138,8 +1173,8 @@ function roomFrame(id) {
   const r = RM[id], p = dPad();
   const aw = W - 2 * p.x, ah = H - p.top - p.bot;
   const wallPad = 1.15;                       // Platz für die Rückwand-Höhe (Welt-Einheiten)
-  const sideMargin = id === 't1' ? 1.1 : 0.3;   // T1: Bürgersteig/Aussenbereich links & rechts sichtbar lassen
-  let x0 = r.x - sideMargin, y0 = r.y - wallPad, x1 = r.x + r.w + sideMargin, y1 = r.y + r.d + 0.2;
+  const sideMargin = id === 't1' ? 1.1 : id === 'roof' ? 1.15 : 0.3;   // T1: Straße, Roof: Dachkante + Himmel sichtbar
+  let x0 = r.x - sideMargin, y0 = r.y - (id === 'roof' ? 0.95 : wallPad), x1 = r.x + r.w + sideMargin, y1 = r.y + r.d + (id === 'roof' ? 1.35 : 0.2);
   // WC ist eine abgetrennte Ecke IN Terminal 1 → keine Extra-Rahmung nötig
   const s = Math.min(aw / (x1 - x0), ah / (y1 - y0));
   return { x: (x0 + x1) / 2, y: (y0 + y1) / 2, s };
@@ -1243,7 +1278,7 @@ function dPerson(wx, wy, o) {
   drawPersonAt(p.x, p.y - (o.groundZ || 0), dPersonScale() * (o.s || 1), o);
 }
 
-const FLOORCOL = { t1: '#463a72', klo: '#46586a', t2: '#3d1f42', roof: '#12203a' };
+const FLOORCOL = { t1: '#463a72', klo: '#46586a', t2: '#26292f', roof: '#1c2438' };   // T2 Beton, Roof dunkles Holzdeck-Blau
 const GRASS = { t1: true, klo: true, t2: true, roof: false };
 // Neon-Akzent je Raum (für Wand-Trims, Türrahmen, Bodenkanten)
 const ACCENT = { t1: '#8b5cf6', klo: '#5aa6c8', t2: '#ffcf6a', roof: '#5ad0ff' };
@@ -1349,6 +1384,90 @@ function drawTaxi(cy, roadH, tx) {
   ctx.restore();
 }
 
+// Rooftop-Hintergrund: man steht AUF dem Dach — Nachthimmel, Mond, Skyline in der Tiefe,
+// Beton-Dachplatte mit Kante, Geländer, Lüftungsanlagen und Antenne.
+function drawRoofBg(t) {
+  // --- Nachthimmel ---
+  const sky = ctx.createLinearGradient(0, 0, 0, H);
+  sky.addColorStop(0, '#070a24'); sky.addColorStop(0.55, '#131a40'); sky.addColorStop(1, '#2b2456');
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+  // Sterne (funkelnd)
+  for (let i = 0; i < 64; i++) {
+    const sx = ((i * 97) % 100) / 100 * W, sy = ((i * 61) % 100) / 100 * H * 0.7;
+    const tw = 0.35 + 0.65 * Math.abs(Math.sin(t * (0.5 + (i % 5) * 0.22) + i));
+    ctx.fillStyle = `rgba(255,255,255,${0.2 + tw * 0.5})`;
+    const sz = i % 9 === 0 ? 2.2 : 1.4;
+    ctx.fillRect(sx, sy, sz, sz);
+  }
+  // Mond mit Glow
+  { const mx2 = W * 0.82, my2 = H * 0.11;
+    const mg = ctx.createRadialGradient(mx2, my2, 4, mx2, my2, 60);
+    mg.addColorStop(0, 'rgba(240,240,255,0.5)'); mg.addColorStop(1, 'rgba(240,240,255,0)');
+    ctx.fillStyle = mg; ctx.beginPath(); ctx.arc(mx2, my2, 60, 0, 7); ctx.fill();
+    ctx.fillStyle = '#f2f2fa'; ctx.beginPath(); ctx.arc(mx2, my2, 15, 0, 7); ctx.fill();
+    ctx.fillStyle = '#d9d9ea'; ctx.beginPath(); ctx.arc(mx2 - 5, my2 - 3, 3.5, 0, 7); ctx.arc(mx2 + 4, my2 + 5, 2.4, 0, 7); ctx.fill(); }
+  // dünne, driftende Wolken
+  ctx.fillStyle = 'rgba(200,210,255,0.05)';
+  for (let c = 0; c < 3; c++) { const cx2 = ((t * 6 + c * 170) % (W + 240)) - 120, cy2 = H * (0.1 + c * 0.09);
+    ctx.beginPath(); ctx.ellipse(cx2, cy2, 90, 12, 0, 0, 7); ctx.ellipse(cx2 + 50, cy2 + 6, 60, 9, 0, 0, 7); ctx.fill(); }
+  // --- Skyline in der TIEFE (unter der Dachkante — man ist weit oben) ---
+  const pb = H - dPad().bot;
+  ctx.save(); ctx.beginPath(); ctx.rect(0, 0, W, pb); ctx.clip();
+  const hz = ctx.createLinearGradient(0, pb - 130, 0, pb);   // Stadt-Glow am Horizont
+  hz.addColorStop(0, 'rgba(255,150,80,0)'); hz.addColorStop(1, 'rgba(255,150,80,0.14)');
+  ctx.fillStyle = hz; ctx.fillRect(0, pb - 130, W, 130);
+  for (let i = 0; i < 14; i++) {                             // ferne Hochhäuser mit Lichtern
+    const bw2 = 26 + (i * 37) % 26, bx = (i / 14) * (W + 30) - 15;
+    const bh2 = 42 + ((i * 53) % 70);
+    ctx.fillStyle = i % 2 ? '#101530' : '#0c1128';
+    ctx.fillRect(bx, pb - bh2, bw2, bh2);
+    ctx.fillStyle = 'rgba(255,220,130,0.5)';
+    for (let wy2 = pb - bh2 + 5; wy2 < pb - 4; wy2 += 9)
+      for (let wx2 = bx + 4; wx2 < bx + bw2 - 4; wx2 += 8)
+        if (((wx2 * 7 + wy2 * 13 + i) % 11) < 4) ctx.fillRect(wx2, wy2, 3, 4);
+  }
+  ctx.restore();
+  // --- Beton-Dachplatte rund um den Raum (mit Kante, Fugen, Geländer) ---
+  const r = RM.roof;
+  const a = detailProj(r.x - 0.85, r.y - 0.6), b = detailProj(r.x + r.w + 0.85, r.y + r.d + 0.85);
+  const aw2 = b.x - a.x, ah2 = b.y - a.y;
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';                                          // Fallkante (Tiefe unter dem Dach)
+  ctx.beginPath(); ctx.roundRect(a.x - 3, a.y + 6, aw2 + 6, ah2 + 6, 14); ctx.fill();
+  ctx.fillStyle = '#262c3d'; ctx.beginPath(); ctx.roundRect(a.x - 3, a.y - 3, aw2 + 6, ah2 + 9, 14); ctx.fill();   // Dachrand-Seite
+  ctx.fillStyle = '#454d61'; ctx.beginPath(); ctx.roundRect(a.x, a.y, aw2, ah2, 12); ctx.fill();                  // Beton-Platte
+  ctx.strokeStyle = 'rgba(0,0,0,0.14)'; ctx.lineWidth = 1;                    // Plattenfugen
+  for (let x = a.x + 42; x < b.x; x += 42) { ctx.beginPath(); ctx.moveTo(x, a.y + 3); ctx.lineTo(x, b.y - 3); ctx.stroke(); }
+  for (let y = a.y + 42; y < b.y; y += 42) { ctx.beginPath(); ctx.moveTo(a.x + 3, y); ctx.lineTo(b.x - 3, y); ctx.stroke(); }
+  ctx.strokeStyle = 'rgba(255,255,255,0.16)'; ctx.lineWidth = 2;              // helle Dachkante
+  ctx.beginPath(); ctx.roundRect(a.x, a.y, aw2, ah2, 12); ctx.stroke();
+  // Sicherheits-Geländer entlang der Außenkante
+  ctx.strokeStyle = '#89a2b8';
+  ctx.lineWidth = 2;
+  const railY = a.y - 10;
+  for (let x = a.x + 8; x <= b.x - 8; x += 34) { ctx.beginPath(); ctx.moveTo(x, a.y); ctx.lineTo(x, railY); ctx.stroke(); }
+  ctx.strokeStyle = '#b9cede'; ctx.lineWidth = 2.6;
+  ctx.beginPath(); ctx.moveTo(a.x + 4, railY); ctx.lineTo(b.x - 4, railY); ctx.stroke();
+  // Lüftungsanlagen (AC-Boxen) unten-links auf der Platte
+  const ac = (x, y, s) => {
+    ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.ellipse(x + 13 * s, y + 15 * s, 16 * s, 5 * s, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#5d6779'; ctx.beginPath(); ctx.roundRect(x, y - 6 * s, 26 * s, 20 * s, 3); ctx.fill();
+    ctx.fillStyle = '#49525f'; ctx.beginPath(); ctx.roundRect(x + 3 * s, y - 3 * s, 20 * s, 14 * s, 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 1;
+    for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.moveTo(x + 4 * s, y + i * 3.4 * s - 1); ctx.lineTo(x + 22 * s, y + i * 3.4 * s - 1); ctx.stroke(); }
+    ctx.fillStyle = '#3a4553'; ctx.beginPath(); ctx.arc(x + 13 * s, y + 4 * s, 5.5 * s, 0, 7); ctx.fill();   // Lüfterrad
+    ctx.strokeStyle = '#8a97a8'; ctx.lineWidth = 1.6;
+    for (let i = 0; i < 3; i++) { const an = t * 9 + i * 2.1; ctx.beginPath(); ctx.moveTo(x + 13 * s, y + 4 * s); ctx.lineTo(x + 13 * s + Math.cos(an) * 4.5 * s, y + 4 * s + Math.sin(an) * 4.5 * s); ctx.stroke(); } };
+  ac(a.x + 8, b.y - 34, 1.0); ac(a.x + 44, b.y - 26, 0.85);
+  // Antenne mit rot blinkendem Licht (oben-rechts)
+  { const ax2 = b.x - 26, ay2 = a.y + 12;
+    ctx.strokeStyle = '#77808f'; ctx.lineWidth = 2.4; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(ax2, ay2); ctx.lineTo(ax2, ay2 - 46); ctx.stroke();
+    ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(ax2 - 8, ay2 - 14); ctx.lineTo(ax2 + 8, ay2 - 14); ctx.moveTo(ax2 - 5, ay2 - 27); ctx.lineTo(ax2 + 5, ay2 - 27); ctx.stroke();
+    const blink = Math.sin(t * 2.5) > 0.4;
+    ctx.fillStyle = blink ? '#ff4a4a' : '#7a2a2a'; ctx.beginPath(); ctx.arc(ax2, ay2 - 48, 3, 0, 7); ctx.fill();
+    if (blink) { ctx.fillStyle = 'rgba(255,74,74,0.25)'; ctx.beginPath(); ctx.arc(ax2, ay2 - 48, 8, 0, 7); ctx.fill(); } }
+}
+
 // Ein einzelner Raum (Boden + Wände + Möbel) an seiner Weltposition im Grundriss
 function drawRoomDetail(id, t, beat) {
   const r = RM[id];
@@ -1359,21 +1478,53 @@ function drawRoomDetail(id, t, beat) {
   // Boden
   ctx.fillStyle = FLOORCOL[id] || '#463a72';
   ctx.beginPath(); ctx.roundRect(a0.x, a0.y, rw, rh, 6); ctx.fill();
-  // Rückwand: dunkle Club-Wand mit Paneelen + Neon-Trim (Akzentfarbe des Raums)
-  const wallH = u * 1.05;
-  const wg = ctx.createLinearGradient(0, a0.y - wallH, 0, a0.y);
-  wg.addColorStop(0, '#282034'); wg.addColorStop(1, '#151020');
-  ctx.fillStyle = wg; ctx.fillRect(a0.x, a0.y - wallH, rw, wallH);
-  ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 1;   // Paneel-Fugen
-  for (let x = a0.x + u * 0.95; x < a0.x + rw - 2; x += u * 0.95) { ctx.beginPath(); ctx.moveTo(x, a0.y - wallH + 3); ctx.lineTo(x, a0.y - 3); ctx.stroke(); }
-  ctx.save(); ctx.globalCompositeOperation = 'lighter';           // Neon-Trim oben
-  ctx.fillStyle = ac; ctx.globalAlpha = 0.75; ctx.fillRect(a0.x, a0.y - wallH + 1, rw, 2.5);
-  ctx.restore();
-  const tg = ctx.createLinearGradient(0, a0.y - 5, 0, a0.y);      // Neon-Glimmen an der Unterkante
-  tg.addColorStop(0, ac); tg.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = tg; ctx.globalAlpha = 0.7; ctx.fillRect(a0.x, a0.y - 5, rw, 5); ctx.globalAlpha = 1;
+  // Rückwand: je Raum ein eigener Look — T1 Club-Paneele, T2 Industrial, Roof Glas-Brüstung
+  const wallH = id === 'roof' ? u * 0.4 : u * 1.05;
+  if (id === 'roof') {
+    // niedrige GLAS-Brüstung: dahinter bleibt der Himmel sichtbar
+    ctx.fillStyle = 'rgba(140,200,255,0.13)'; ctx.fillRect(a0.x, a0.y - wallH, rw, wallH);
+    ctx.strokeStyle = 'rgba(190,230,255,0.5)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(a0.x, a0.y - wallH); ctx.lineTo(a0.x + rw, a0.y - wallH); ctx.stroke();   // Handlauf
+    ctx.strokeStyle = 'rgba(190,230,255,0.25)'; ctx.lineWidth = 1;
+    for (let x = a0.x + u * 1.1; x < a0.x + rw - 2; x += u * 1.1) { ctx.beginPath(); ctx.moveTo(x, a0.y - wallH + 2); ctx.lineTo(x, a0.y - 2); ctx.stroke(); }
+  } else if (id === 't2') {
+    // Industrial: roher Beton, Stahlträger, Warnstreifen, kaltes LED-Band
+    const wg = ctx.createLinearGradient(0, a0.y - wallH, 0, a0.y);
+    wg.addColorStop(0, '#2e3138'); wg.addColorStop(1, '#191b20');
+    ctx.fillStyle = wg; ctx.fillRect(a0.x, a0.y - wallH, rw, wallH);
+    ctx.fillStyle = 'rgba(255,255,255,0.03)';                       // Beton-Flecken
+    for (let i = 0; i < 8; i++) ctx.fillRect(a0.x + (i * 83) % rw, a0.y - wallH + (i * 29) % (wallH * 0.7), 26, 12);
+    ctx.fillStyle = '#3d434e';                                       // Stahlträger (vertikal, mit Nieten)
+    for (let x = a0.x + u * 1.6; x < a0.x + rw - u; x += u * 2.4) {
+      ctx.fillRect(x - 4, a0.y - wallH, 8, wallH);
+      ctx.fillStyle = '#565e6c'; ctx.fillRect(x - 5.5, a0.y - wallH, 2.5, wallH); ctx.fillStyle = '#3d434e';
+      ctx.fillStyle = '#6b7484'; for (let ry = a0.y - wallH + 6; ry < a0.y - 4; ry += 10) { ctx.beginPath(); ctx.arc(x, ry, 1.4, 0, 7); ctx.fill(); } ctx.fillStyle = '#3d434e';
+    }
+    for (let i = 0; i < Math.ceil(rw / 16); i++) {                   // Warnstreifen-Sockel
+      ctx.fillStyle = i % 2 ? '#e8b724' : '#20232a';
+      ctx.beginPath(); ctx.moveTo(a0.x + i * 16, a0.y); ctx.lineTo(Math.min(a0.x + rw, a0.x + i * 16 + 16), a0.y);
+      ctx.lineTo(Math.min(a0.x + rw, a0.x + i * 16 + 10), a0.y - 6); ctx.lineTo(a0.x + i * 16 - 6, a0.y - 6); ctx.closePath(); ctx.fill();
+    }
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';            // kaltes LED-Band, läuft im Takt
+    const led = (t * 120) % rw;
+    ctx.fillStyle = 'rgba(80,220,255,0.7)'; ctx.fillRect(a0.x, a0.y - wallH + 2, rw, 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.fillRect(a0.x + led, a0.y - wallH + 1, 30, 4);
+    ctx.restore();
+  } else {
+    const wg = ctx.createLinearGradient(0, a0.y - wallH, 0, a0.y);
+    wg.addColorStop(0, '#282034'); wg.addColorStop(1, '#151020');
+    ctx.fillStyle = wg; ctx.fillRect(a0.x, a0.y - wallH, rw, wallH);
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 1;   // Paneel-Fugen
+    for (let x = a0.x + u * 0.95; x < a0.x + rw - 2; x += u * 0.95) { ctx.beginPath(); ctx.moveTo(x, a0.y - wallH + 3); ctx.lineTo(x, a0.y - 3); ctx.stroke(); }
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';           // Neon-Trim oben
+    ctx.fillStyle = ac; ctx.globalAlpha = 0.75; ctx.fillRect(a0.x, a0.y - wallH + 1, rw, 2.5);
+    ctx.restore();
+    const tg = ctx.createLinearGradient(0, a0.y - 5, 0, a0.y);      // Neon-Glimmen an der Unterkante
+    tg.addColorStop(0, ac); tg.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = tg; ctx.globalAlpha = 0.7; ctx.fillRect(a0.x, a0.y - 5, rw, 5); ctx.globalAlpha = 1;
+  }
   const wsh = ctx.createLinearGradient(0, a0.y, 0, a0.y + u * 0.7);
-  wsh.addColorStop(0, 'rgba(0,0,0,0.35)'); wsh.addColorStop(1, 'rgba(0,0,0,0)');
+  wsh.addColorStop(0, id === 'roof' ? 'rgba(0,0,0,0.18)' : 'rgba(0,0,0,0.35)'); wsh.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.fillStyle = wsh; ctx.fillRect(a0.x, a0.y, rw, u * 0.7);
   // dünne Sockelleisten an den übrigen Kanten (rahmt den Raum)
   ctx.fillStyle = 'rgba(0,0,0,0.28)';
@@ -1621,10 +1772,32 @@ function drawRoomDetail(id, t, beat) {
     for (let k = 0; k < 3; k++) { const p = detailProj(r.x + 1.0 + k * 1.0, r.y + r.d - 0.85); ctx.font = `${u * 0.26}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('🚰', p.x, p.y - u * 0.35); }
     dLabel(r.x+r.w/2, r.y+0.3, '🚻 WC', '#dfeaf5', 13);
   } else if (id === 't2') {
-    // Terminal 2 — zweiter, ganz normaler Club-Floor (kein Gold/VIP mehr)
+    // Terminal 2 — INDUSTRIAL-Halle: Beton, Stahl, Käfiglampen, Nebel (eigener Charakter, kein VIP)
+    ctx.strokeStyle = 'rgba(255,255,255,0.04)'; ctx.lineWidth = 1;   // Beton-Gussfugen
+    for (let gx = 1.5; gx < r.w; gx += 2.2) { const q1 = detailProj(r.x + gx, r.y), q2 = detailProj(r.x + gx, r.y + r.d); ctx.beginPath(); ctx.moveTo(q1.x, q1.y); ctx.lineTo(q2.x, q2.y); ctx.stroke(); }
+    for (let gy = 2.2; gy < r.d; gy += 2.2) { const q1 = detailProj(r.x, r.y + gy), q2 = detailProj(r.x + r.w, r.y + gy); ctx.beginPath(); ctx.moveTo(q1.x, q1.y); ctx.lineTo(q2.x, q2.y); ctx.stroke(); }
+    { const st = detailProj(r.x + r.w - 1.6, r.y + r.d - 1.1);       // grosses „T2"-Stencil auf dem Boden
+      ctx.save(); ctx.translate(st.x, st.y); ctx.rotate(-0.08);
+      ctx.font = `900 ${u * 1.1}px system-ui, sans-serif`; ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(232,183,36,0.08)'; ctx.fillText('T2', 0, u * 0.3);
+      ctx.restore(); }
     const fl = { x: 12.4, y: 2.6, w: 4.8, d: 4.0 };
     dTiles(fl.x, fl.y, fl.w, fl.d, 5, 4, 'main', t, beat);
     dLabel(fl.x + fl.w / 2, fl.y - 0.35, 'FLOOR 2', 'rgba(255,255,255,0.5)', 10);
+    // hängende Käfiglampen, die leicht schwingen
+    for (let i = 0; i < 3; i++) { const lx = r.x + 3.2 + i * 2.6, sway = Math.sin(t * 1.4 + i * 2) * u * 0.08;
+      const top = detailProj(lx, r.y + 0.15), ly = top.y - u * 1.3;
+      ctx.strokeStyle = '#20242c'; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(top.x, ly); ctx.lineTo(top.x + sway, ly + u * 0.85); ctx.stroke();
+      const bx = top.x + sway, by = ly + u * 0.85;
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';           // Lichtkegel
+      ctx.fillStyle = `hsla(${38 + i * 6},90%,60%,0.06)`;
+      ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx - u * 1.1, by + u * 2.6); ctx.lineTo(bx + u * 1.1, by + u * 2.6); ctx.closePath(); ctx.fill();
+      ctx.restore();
+      ctx.fillStyle = `hsl(${38 + i * 6},95%,62%)`; ctx.beginPath(); ctx.arc(bx, by, u * 0.09, 0, 7); ctx.fill();   // Glühbirne
+      ctx.strokeStyle = '#565e6c'; ctx.lineWidth = 1.2;               // Käfig
+      ctx.beginPath(); ctx.arc(bx, by, u * 0.15, 0, 7); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(bx - u * 0.15, by); ctx.lineTo(bx + u * 0.15, by); ctx.moveTo(bx, by - u * 0.15); ctx.lineTo(bx, by + u * 0.15); ctx.stroke(); }
     // bewegte Club-Lichtkegel über dem Floor (additiv)
     ctx.save(); ctx.globalCompositeOperation = 'lighter';
     const rig = detailProj(fl.x + fl.w / 2, fl.y - 0.2), fb = detailProj(fl.x + fl.w / 2, fl.y + fl.d);
@@ -1655,14 +1828,27 @@ function drawRoomDetail(id, t, beat) {
         ctx.fillStyle = '#3a3f4a'; ctx.beginPath(); ctx.roundRect(p.x - 6, p.y - 8, 12, 10, 3); ctx.fill();
         ctx.fillStyle = '#2f8f4a'; for (const [ox, oy] of [[-8, -16], [8, -16], [0, -22], [-5, -12], [5, -12]]) { ctx.beginPath(); ctx.ellipse(p.x + ox, p.y + oy, 3.5, 8, ox * 0.05, 0, 7); ctx.fill(); } };
       plant(18.2, 1.4); plant(18.4, 8.2); }
+    // Bodennebel, der über den Floor wabert (Industrial-Rave-Feeling)
+    { ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < 4; i++) {
+        const fx = r.x + 1.5 + ((t * 0.35 + i * 2.3) % (r.w - 3)), fy = fl.y + 1 + (i % 2) * 2;
+        const p = detailProj(fx, fy);
+        const fg = ctx.createRadialGradient(p.x, p.y, 2, p.x, p.y, u * 1.3);
+        const al = 0.05 + 0.03 * Math.sin(t * 1.2 + i * 2);
+        fg.addColorStop(0, `rgba(160,180,220,${al})`); fg.addColorStop(1, 'rgba(160,180,220,0)');
+        ctx.fillStyle = fg; ctx.beginPath(); ctx.ellipse(p.x, p.y, u * 1.3, u * 0.5, 0, 0, 7); ctx.fill();
+      }
+      ctx.restore(); }
   } else if (id === 'roof') {
-    // Skyline-Silhouette an der Rückwand (Sky-Lounge-Aussicht)
-    { const base = detailProj(r.x, r.y).y;
-      ctx.fillStyle = 'rgba(20,40,70,0.55)';
-      for (let i = 0; i < 9; i++) { const bx = detailProj(r.x + 0.4 + i * (r.w - 0.8) / 9, r.y).x, bw2 = (r.w - 0.8) / 9 * detailScale * 0.82;
-        const bh2 = u * (0.5 + ((i * 37) % 5) * 0.18); ctx.fillRect(bx, base - bh2, bw2, bh2);
-        ctx.fillStyle = 'rgba(150,200,255,0.25)'; for (let wy2 = base - bh2 + 4; wy2 < base - 4; wy2 += 7) ctx.fillRect(bx + 3, wy2, 3, 3);
-        ctx.fillStyle = 'rgba(20,40,70,0.55)'; } }
+    // === ROOFTOP · VIP: Holzdeck-Fugen + „SKY LOUNGE"-Schriftzug (der Himmel ist echt im Hintergrund) ===
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 1;   // Deck-Dielen
+    for (let dx2 = 0.55; dx2 < r.w; dx2 += 0.55) { const q1 = detailProj(r.x + dx2, r.y), q2 = detailProj(r.x + dx2, r.y + r.d); ctx.beginPath(); ctx.moveTo(q1.x, q1.y); ctx.lineTo(q2.x, q2.y); ctx.stroke(); }
+    { const sg = detailProj(r.x + r.w / 2, r.y + 0.55);              // Neon „SKY LOUNGE" schwebt über der Glas-Brüstung
+      ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = `900 ${Math.max(11, u * 0.38)}px system-ui, sans-serif`;
+      ctx.globalCompositeOperation = 'lighter'; ctx.shadowColor = '#5ad0ff'; ctx.shadowBlur = 14;
+      ctx.fillStyle = '#8fe3ff'; ctx.fillText('✦ SKY LOUNGE · VIP ✦', sg.x, sg.y - u * 1.0);
+      ctx.restore(); ctx.textBaseline = 'alphabetic'; }
     const fl = { x: 12.0, y: 11.0, w: 4.2, d: 3.2 };
     dTiles(fl.x, fl.y, fl.w, fl.d, 5, 4, 'roof', t, beat);
     // Lichterketten über dem Floor
@@ -1701,6 +1887,22 @@ function drawRoomDetail(id, t, beat) {
       for (let s = 0; s < 5; s++) { ctx.fillStyle = `hsla(${20 + s * 8},100%,60%,${0.4 + 0.4 * Math.sin(t * 12 + s)})`;
         ctx.beginPath(); ctx.ellipse(fp.x, fp.y - u * 0.5 - Math.abs(Math.sin(t * 8 + s)) * u * 0.2, u * 0.1, u * 0.2, 0, 0, 7); ctx.fill(); }
       ctx.restore(); }
+    // Infinity-Pool-Glow: Wasser leuchtet von unten (türkis pulsierend)
+    { ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      const pc = detailProj(A.pool.x, A.pool.y);
+      const pg = ctx.createRadialGradient(pc.x, pc.y, 4, pc.x, pc.y, u * 2.2);
+      const al = 0.12 + 0.06 * Math.sin(t * 1.6);
+      pg.addColorStop(0, `rgba(80,220,255,${al})`); pg.addColorStop(1, 'rgba(80,220,255,0)');
+      ctx.fillStyle = pg; ctx.beginPath(); ctx.arc(pc.x, pc.y, u * 2.2, 0, 7); ctx.fill();
+      ctx.restore(); }
+    // Heizstrahler (warmes Glühen) neben den Liegen
+    { const heat = (wx, wy) => { const p = detailProj(wx, wy);
+        ctx.strokeStyle = '#5c5464'; ctx.lineWidth = 2.4; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x, p.y - u * 0.9); ctx.stroke();
+        ctx.fillStyle = '#3a3442'; ctx.beginPath(); ctx.roundRect(p.x - 7, p.y - u * 0.9 - 8, 14, 9, 4); ctx.fill();
+        ctx.fillStyle = `rgba(255,150,60,${0.7 + 0.3 * Math.sin(t * 5 + wx)})`; ctx.beginPath(); ctx.roundRect(p.x - 5, p.y - u * 0.9 - 5, 10, 4, 2); ctx.fill();
+        ctx.fillStyle = 'rgba(255,150,60,0.08)'; ctx.beginPath(); ctx.moveTo(p.x, p.y - u * 0.9); ctx.lineTo(p.x - u * 0.5, p.y + 4); ctx.lineTo(p.x + u * 0.5, p.y + 4); ctx.closePath(); ctx.fill(); };
+      heat(12.3, 16.9); heat(15.8, 16.9); }
   }
   // Alt-&-dunkel-Schleier ganz oben drauf: entsättigt Neon/Möbel am Anfang (schwindet mit Ausbau)
   if (roomUnlocked(id)) {
@@ -1900,7 +2102,8 @@ function drawWcAnnex(t) {
 // Einzel-Raum-Ansicht: genau EIN Raum bildschirmfüllend (Boden, Wände, Möbel, Gäste, Geld-Pins).
 function drawFocusRoom(t, beat) {
   const id = framedRoom, r = RM[id];
-  drawGrassBg();
+  if (id === 'roof') drawRoofBg(t);   // Rooftop: Nachthimmel + Skyline + Dach-Platte statt Bürgersteig
+  else drawGrassBg();
   if (id === 't1') drawStreetFg(t);   // Laterne, Mülleimer, Taxen im Vordergrund der Straße
   drawRoomDetail(id, t, beat);        // Boden + Wände + Möbel + Deko + Shabby des Raums
   if (id === 't1') drawWcAnnex(t);    // WC-Eck oben-links in Terminal 1
@@ -1938,6 +2141,26 @@ function drawFocusRoom(t, beat) {
     }
     // Security/Türsteher im Einsatz
     if (sec) dPerson(sec.x, sec.y, { s: 1.24, color: '#15151f', pants: '#0d0d15', skin: '#8c5a33', hair: '#1a1a22', shades: true, earpiece: true, bob: Math.sin(t * 5) * 1.4 });
+    // Goldene Flasche (Bonus zum Antippen) — pulsierender Glow + Schweben + Countdown-Ring
+    if (goldBottle && goldBottle.room === id) {
+      const gb = goldBottle, p = detailProj(gb.x, gb.y), u2 = dTileW();
+      const age = t - gb.t0, fl = Math.sin(age * 3) * u2 * 0.08;
+      const gy = p.y - u2 * 0.5 + fl;
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const gl = ctx.createRadialGradient(p.x, gy, 2, p.x, gy, u2 * 0.9);
+      gl.addColorStop(0, 'rgba(255,215,80,0.45)'); gl.addColorStop(1, 'rgba(255,215,80,0)');
+      ctx.fillStyle = gl; ctx.beginPath(); ctx.arc(p.x, gy, u2 * 0.9, 0, 7); ctx.fill();
+      ctx.restore();
+      ctx.fillStyle = 'rgba(10,6,26,0.3)'; ctx.beginPath(); ctx.ellipse(p.x, p.y + 2, u2 * 0.28, u2 * 0.1, 0, 0, 7); ctx.fill();
+      ctx.font = `${u2 * 0.62}px sans-serif`; ctx.textAlign = 'center';
+      ctx.save(); ctx.shadowColor = '#ffd94a'; ctx.shadowBlur = 14; ctx.fillText('🍾', p.x, gy); ctx.restore();
+      for (let s2 = 0; s2 < 3; s2++) { const a2 = age * 2.4 + s2 * 2.1;   // Funkeln
+        ctx.fillStyle = `rgba(255,240,160,${0.5 + 0.5 * Math.sin(age * 6 + s2 * 2)})`;
+        ctx.beginPath(); ctx.arc(p.x + Math.cos(a2) * u2 * 0.5, gy - u2 * 0.15 + Math.sin(a2) * u2 * 0.3, 1.6, 0, 7); ctx.fill(); }
+      ctx.strokeStyle = '#ffd94a'; ctx.lineWidth = 3;   // Restzeit-Ring
+      ctx.beginPath(); ctx.arc(p.x, gy - u2 * 0.05, u2 * 0.55, -Math.PI / 2, -Math.PI / 2 + (gb.ttl / 11) * Math.PI * 2); ctx.stroke();
+    }
     // Geld-Pins dieses Raums (Shots/Garderobe wandern mit dem Ausbau nach aussen)
     for (const [stId, anchorId] of Object.entries(PIN_AT)) {
       if (A[anchorId].room !== id) continue;

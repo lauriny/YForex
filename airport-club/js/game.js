@@ -59,6 +59,8 @@ export const state = {
   midChestClaimed: false,
   stats: { drops: 0, celebs: 0, boostsUsed: 0, chests: 0, prestiges: 0 },
   settings: { sound: true, music: true, musicStyle: 'house' },
+  devMode: false,          // Dev-Modus (per Code in den Einstellungen)
+  nightStreak: 0,          // wie viele Club-Nächte in Folge durchgezogen
   createdAt: Date.now(),
 };
 
@@ -377,10 +379,22 @@ export function depositAtStation(id) {
   return add;
 }
 
-export function collectStation(id) {
-  const amount = state.stationCash[id] || 0;
-  if (amount <= 0) return 0;
+// Combo: schnell hintereinander selbst eingesammelte Kassen geben Bonus (Auto-Kassierer nicht)
+let comboN = 0, comboLast = 0;
+export function comboInfo() { return { n: comboN, mult: 1 + Math.min(10, Math.max(0, comboN - 1)) * 0.08 }; }
+export function collectStation(id, manual = false) {
+  const base = state.stationCash[id] || 0;
+  if (base <= 0) return 0;
   state.stationCash[id] = 0;
+  let amount = base;
+  if (manual) {
+    const now = Date.now();
+    comboN = (now - comboLast < 2500) ? comboN + 1 : 1;
+    comboLast = now;
+    const mult = 1 + Math.min(10, comboN - 1) * 0.08;      // bis zu +80 % bei Combo ×11
+    amount = base * mult;
+    if (comboN >= 2) emit('combo', { n: comboN, mult, bonus: amount - base });
+  }
   addMoney(amount, 'collect');
   emit('collect', { id, amount });
   return amount;
@@ -662,6 +676,72 @@ export function tick(now) {
 
   saveTimer += dt;
   if (saveTimer > 5) { saveTimer = 0; save(); }
+}
+
+// ---- Goldene Flasche (Zufalls-Bonus zum Antippen) ---------------------------------
+export function goldenBottleReward() {
+  const base = Math.max(400, incomePerSec() * 45) * (1.2 + Math.random() * 1.3);
+  const gems = Math.random() < 0.15 ? 1 : 0;
+  addMoney(base, 'gold');
+  if (gems) state.gems += gems;
+  save();
+  return { money: base, gems };
+}
+
+// ---- Nacht-Report (Club-Nacht 22:00 → 02:00 durchgezogen) -------------------------
+export function nightReport(earned) {
+  state.nightStreak = (state.nightStreak || 0) + 1;
+  const streak = state.nightStreak;
+  const bonus = Math.max(50, earned * (0.12 + Math.min(0.4, streak * 0.04)));
+  const gems = streak % 3 === 0 ? 2 : 0;
+  addMoney(bonus, 'night');
+  if (gems) state.gems += gems;
+  save();
+  const out = { night: streak, earned, bonus, gems };
+  emit('nightReport', out);
+  return out;
+}
+
+// ---- Dev-Modus (per Code in den Einstellungen) ------------------------------------
+const DEV_CODE = '1337';
+export function devActive() { return !!state.devMode; }
+export function enterDevCode(code) {
+  if (String(code).trim() !== DEV_CODE) return false;
+  state.devMode = true; save();
+  return true;
+}
+export function devAction(kind) {
+  if (!state.devMode) return false;
+  switch (kind) {
+    case 'money1m':  addMoney(1e6, 'dev'); break;
+    case 'money1b':  addMoney(1e9, 'dev'); break;
+    case 'gems':     state.gems += 100; break;
+    case 'level10': {                                  // Lifetime hochziehen, bis Level +10 erreicht ist
+      const target = state.level + 10;
+      let lt = Math.max(100, state.lifetime);
+      while (levelFor(lt) < target) lt *= 1.35;
+      state.lifetime = lt; state.level = levelFor(lt);
+      emit('level', state.level);
+      break;
+    }
+    case 'unlockAll':
+      state.t2Unlocked = true; state.roofUnlocked = true;
+      state.performer.unlocked = true;
+      state.djsOwned = DJS.map(d => d.id);
+      state.themesOwned = CLUB_THEMES.map(t => t.id);
+      emit('t2'); emit('roof'); break;
+    case 'maxClub':
+      state.clubSize = CLUB_EXPAND.max;
+      state.autoCollect = AUTOCOLLECT.max;
+      state.marketing = MARKETING.max;
+      break;
+    case 'stations10':
+      for (const s of STATIONS) if (state.stations[s.id] > 0 || s.id === 'einlass') state.stations[s.id] = (state.stations[s.id] || 0) + 10;
+      break;
+    case 'resetNight': state.nightStreak = 0; break;
+  }
+  save();
+  return true;
 }
 
 // ---- Speichern & Laden ------------------------------------------------------------

@@ -9,7 +9,7 @@ import {
   autoCollectInterval, MILESTONE_STEP, fmt, fmtTime, costOf, milestoneMult, nextMilestone,
 } from './data.js';
 import { playSfx, setMusic, cycleMusicStyle, currentMusicStyleName, setMusicStyle } from './sfx.js';
-import { enterRoom, exitRoom, detailBack, nextRoom, prevRoom, currentRoom } from './render.js';
+import { enterRoom, exitRoom, detailBack, nextRoom, prevRoom, currentRoom, devSetClock } from './render.js';
 
 const ROOM_META = {
   t1:   { icon: '🪩', name: 'Terminal 1',        sub: 'Mainfloor' },
@@ -767,6 +767,11 @@ function openSettingsModal() {
       <button class="btn-flat" id="set-style">🎚️ Stil: ${currentMusicStyleName()}</button>
       <button class="btn-flat" id="set-sound">${G.state.settings.sound ? '🔊 Sound: an' : '🔇 Sound: aus'}</button>
       <button class="btn-flat danger" id="set-reset">🗑️ Spielstand löschen</button>
+      ${G.devActive() ? '<button class="btn-flat" id="set-dev" style="border-color:#38c95c;color:#38c95c">🧪 Dev-Modus öffnen</button>' : `
+      <div class="dev-code-row">
+        <input id="dev-code" type="text" inputmode="numeric" placeholder="Code" maxlength="8" autocomplete="off">
+        <button class="btn-flat" id="dev-code-ok">OK</button>
+      </div>`}
       <p class="modal-text small">„Airport“ Club Simulator · Spielstand wird automatisch lokal gespeichert.<br>
       Ruf-Sterne: ${G.state.fame} ⭐ · Insgesamt verdient: ${fmt(G.state.lifetime)} €</p>`;
     body.querySelector('#set-music').addEventListener('click', e => {
@@ -787,6 +792,42 @@ function openSettingsModal() {
     });
     body.querySelector('#set-reset').addEventListener('click', () => {
       if (confirm('Wirklich ALLES löschen? Das kann nicht rückgängig gemacht werden!')) G.resetSave();
+    });
+    const devBtn = body.querySelector('#set-dev');
+    if (devBtn) devBtn.addEventListener('click', () => { closeModal(); openDevModal(); });
+    const codeOk = body.querySelector('#dev-code-ok');
+    if (codeOk) codeOk.addEventListener('click', () => {
+      const val = body.querySelector('#dev-code').value;
+      if (G.enterDevCode(val)) { playSfx('chest'); toast('🧪 Dev-Modus freigeschaltet!'); closeModal(); openDevModal(); }
+      else { playSfx('click'); toast('❌ Falscher Code'); }
+    });
+  });
+}
+
+// ---- Dev-Modus (alles testen) ------------------------------------------------------
+function openDevModal() {
+  openModal('🧪 Dev-Modus', body => {
+    const rows = [
+      ['dev-m1', '💶 +1 Mio €'], ['dev-m2', '💶 +1 Mrd €'], ['dev-gems', '💎 +100 Diamanten'],
+      ['dev-lvl', '⭐ Level +10'], ['dev-all', '🔓 Alles freischalten (Räume, Tänzerin, DJs, Themes)'],
+      ['dev-club', '🏗️ Club-Ausbau & Marketing & Auto-Kasse MAX'],
+      ['dev-st', '📈 Alle aktiven Stationen +10'],
+      ['dev-night', '🌙 Nacht auf kurz vor 02:00 stellen'],
+    ];
+    body.innerHTML = `<p class="modal-text small">Nur zum Testen — Fortschritt zählt ganz normal.</p>`
+      + rows.map(([id, label]) => `<button class="btn-flat" id="${id}">${label}</button>`).join('');
+    const act = (id, kind, msg) => body.querySelector('#' + id).addEventListener('click', () => {
+      G.devAction(kind); playSfx('buy'); toast(msg); updateHUD(); updateCards();
+    });
+    act('dev-m1', 'money1m', '+1 Mio €');
+    act('dev-m2', 'money1b', '+1 Mrd €');
+    act('dev-gems', 'gems', '+100 💎');
+    act('dev-lvl', 'level10', '⭐ Level +10');
+    act('dev-all', 'unlockAll', '🔓 Alles freigeschaltet');
+    act('dev-club', 'maxClub', '🏗️ Club maximal ausgebaut');
+    act('dev-st', 'stations10', '📈 Stationen +10');
+    body.querySelector('#dev-night').addEventListener('click', () => {
+      devSetClock(25.97 * 60); playSfx('click'); toast('🌙 Gleich ist die Nacht rum …');
     });
   });
 }
@@ -810,6 +851,29 @@ function chestPopup(kind, gems, money) {
   overlay.querySelector('.btn-big').addEventListener('click', () => { overlay.remove(); });
   playSfx('chest');
   confetti(30);
+}
+
+// ---- Nacht-Report (02:00 — Club-Nacht geschafft) -----------------------------------
+function nightReportPopup({ night, earned, bonus, gems }) {
+  const root = $('#modal-root');
+  const overlay = el('div', 'modal-overlay chest-pop');
+  overlay.innerHTML = `
+    <div class="chest-box">
+      <div class="chest-emoji">🌙</div>
+      <h2>Nacht ${night} geschafft!</h2>
+      <p class="modal-text small">Der Club hat bis 02:00 durchgezogen.<br>Einnahmen der Nacht: <b>${fmt(earned)} €</b></p>
+      <div class="chest-rewards">
+        <span>+${fmt(bonus)} € Bonus</span>
+        ${gems ? `<span>+${gems} 💎</span>` : ''}
+      </div>
+      <p class="modal-text small">🔥 Nacht-Serie: ${night} — je länger die Serie, desto fetter der Bonus!</p>
+      <button class="btn-big">Weiter feiern!</button>
+    </div>`;
+  root.appendChild(overlay);
+  requestAnimationFrame(() => overlay.classList.add('open'));
+  overlay.querySelector('.btn-big').addEventListener('click', () => overlay.remove());
+  playSfx('chest');
+  confetti(24);
 }
 
 // ---- Offline-Popup -----------------------------------------------------------------
@@ -901,6 +965,8 @@ export function initUI() {
   G.on('event', def => { playSfx('boost'); toast(`${def.icon} ${def.name}! ${def.txt}`); });
   G.on('eventEnd', () => {});
   G.on('achievement', a => { playSfx('level'); toast(`🏆 Erfolg: ${a.name} · +${a.gems} 💎`); });
+  G.on('combo', ({ n, mult }) => { if (n === 2 || n % 3 === 0) { playSfx('tap'); toast(`🔥 COMBO ×${n} — ${Math.round((mult - 1) * 100)} % Bonus!`); } });
+  G.on('nightReport', r => nightReportPopup(r));
   G.on('boost', () => {});
 
   updateHUD();
@@ -934,6 +1000,10 @@ export function canvasFeedback(fb) {
   } else if (fb.type === 'collect') {
     floatText({ x: fb.x, y: fb.y - 10 }, '+' + fmt(fb.amount) + ' €', 'float-money');
     playSfx('buy');
+  } else if (fb.type === 'gold') {
+    floatText({ x: fb.x, y: fb.y - 10 }, '🍾 +' + fmt(fb.money) + ' €' + (fb.gems ? ' +' + fb.gems + '💎' : ''), 'float-celeb');
+    playSfx('chest');
+    confetti(20);
   } else if (fb.type === 'celeb') {
     floatText({ x: fb.x, y: fb.y - 10 }, '🌟 +' + fmt(fb.money) + ' €' + (fb.gems ? ' +' + fb.gems + '💎' : ''), 'float-celeb');
     playSfx('chest');
