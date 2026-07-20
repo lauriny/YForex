@@ -311,6 +311,7 @@ const WC_DOOR = { t1: { x: 0.55, y: 7.75 }, t2: { x: 17.6, y: 7.9 }, roof: { x: 
 const WC_ANNEX = { x: -2.85, y: 6.2, w: 2.6, d: 3.0 };   // eigenständiger WC-Anbau AUSSEN oben-links, mit Tür nach draußen + Tür ins Gebäude
 const BACKSTAGE = { x: 7.35, y: 7.7 };   // oben-rechts, neben dem DJ in Terminal 1
 let guests = [];
+let guestPool = [];    // recycelte Gäste-Objekte (Object-Pooling gegen GC-Ruckler)
 let taxis = [];        // vorbeifahrende Taxen, die vor dem Eingang Gäste absetzen
 let taxiTimer = 5;
 let goldBottle = null; // Goldene Flasche: spawnt zufällig im gezeigten Raum, Antippen = Bonus
@@ -388,21 +389,30 @@ function targetGuestCount() {
 function spawnGuest(celeb = false) {
   const vip = !celeb && state.t2Unlocked && Math.random() < 0.4;
   const dp = doorPoint();
-  const g = {
-    x: dp.x + rnd(-0.5, 0.5), y: dp.y + rnd(-0.2, 0.3),   // erscheint INNEN am Eingang
-    color: celeb ? '#ffd700' : vip ? pick(['#e6b800', '#d4941e', '#c9a227']) : pick(GUEST_COLORS),
-    skin: pick(SKIN), hair: pick(HAIR),
-    speed: rnd(1.7, 2.5),
-    bobPhase: Math.random() * Math.PI * 2,
-    female: Math.random() < 0.5,
-    vip, celeb, mode: 'walk', act: 'dance', actT: 0,
-    drink: null, alpha: 0.05, fadeIn: true, path: [],   // sanft einblenden
-  };
+  const g = guestPool.pop() || {};        // Object-Pooling: recyceltes Objekt wiederverwenden (kein GC-Churn)
+  initGuest(g, celeb, vip, dp);
   if (!celeb && Math.random() < 0.28) { g.path = [anchorWorld('garderobe')]; g.afterPath = 'ward'; }
   else pushActivity(g, celeb ? 'dance' : chooseAct(g));
   guests.push(g);
   return g;
 }
+// Setzt ALLE Felder eines Gastes frisch — Pflicht fürs Pooling, sonst leaken Alt-Zustände (ko/trouble/path…)
+function initGuest(g, celeb, vip, dp) {
+  g.x = dp.x + rnd(-0.5, 0.5); g.y = dp.y + rnd(-0.2, 0.3);   // erscheint INNEN am Eingang
+  g.color = celeb ? '#ffd700' : vip ? pick(['#e6b800', '#d4941e', '#c9a227']) : pick(GUEST_COLORS);
+  g.skin = pick(SKIN); g.hair = pick(HAIR);
+  g.speed = rnd(1.7, 2.5);
+  g.bobPhase = Math.random() * Math.PI * 2;
+  g.female = Math.random() < 0.5;
+  g.vip = vip; g.celeb = celeb; g.mode = 'walk'; g.act = 'dance'; g.actT = 0;
+  g.drink = null; g.alpha = 0.05; g.fadeIn = true;
+  g.path = g.path || []; g.path.length = 0;                   // Array wiederverwenden statt neu allozieren
+  // Alt-Zustände zurücksetzen (wichtig beim Recyceln):
+  g.afterPath = null; g.leaving = false; g.ko = false; g.koT = 0; g.trouble = false;
+  g.walkT = 0; g.face = 0; g.bob = 0; g.sprite = null;
+}
+// Gast zurück in den Pool (gedeckelt, damit der Pool nicht unbegrenzt wächst)
+function recycleGuest(g) { if (guestPool.length < 90) { if (g.path) g.path.length = 0; guestPool.push(g); } }
 
 // Routing zwischen Räumen über das Zentrum
 function roomOf(x, y) {
@@ -576,7 +586,7 @@ function updateGuests(dt) {
 
   const hasCeleb = guests.some(g => g.celeb);
   if (state.celeb && !hasCeleb) spawnGuest(true);
-  if (!state.celeb && hasCeleb) guests = guests.filter(g => !g.celeb);
+  if (!state.celeb && hasCeleb) guests = guests.filter(g => { if (g.celeb) { recycleGuest(g); return false; } return true; });
 
   const speedMult = (dropActive() ? 1.5 : 1) * (1 + nightDrunk() * 0.15);
   for (let i = guests.length - 1; i >= 0; i--) {
@@ -621,7 +631,7 @@ function updateGuests(dt) {
         else pushActivity(g, chooseAct(g));
       }
     }
-    if (g.leaving) { g.alpha -= dt * 1.8; if (g.alpha <= 0) { guests.splice(i, 1); continue; } }
+    if (g.leaving) { g.alpha -= dt * 1.8; if (g.alpha <= 0) { guests.splice(i, 1); recycleGuest(g); continue; } }
   }
 }
 
@@ -654,6 +664,34 @@ function floorRect(x, y, w, d, fill, stroke) {
 function screenShadow(sx, sy, rx, ry) {
   ctx.fillStyle = 'rgba(10,6,26,0.28)';
   ctx.beginPath(); ctx.ellipse(sx, sy, rx, ry, 0, 0, Math.PI * 2); ctx.fill();
+}
+
+// ---------------- Emoji-Atlas: (Emoji,Größe) einmal offscreen rastern, dann drawImage ----------------
+// fillText mit Emoji ist teuer (Shaping/Glyph-Lookup pro Aufruf). Wir cachen je Größen-Bucket ein
+// kleines Canvas und blitten es — spart bei vielen Gästen hunderte teure Text-Renderings/Frame.
+const _emojiCache = new Map();
+function emoImg(ch, size) {
+  const bucket = Math.max(6, Math.round(size));
+  const key = ch + '|' + bucket;
+  let cv = _emojiCache.get(key);
+  if (!cv) {
+    const pad = Math.ceil(bucket * 0.4), dim = bucket + pad * 2;
+    cv = (typeof document !== 'undefined') ? document.createElement('canvas') : null;
+    if (!cv) return null;
+    cv.width = dim; cv.height = dim;
+    const c2 = cv.getContext('2d');
+    c2.font = `${bucket}px sans-serif`; c2.textAlign = 'center'; c2.textBaseline = 'middle';
+    c2.fillText(ch, dim / 2, dim / 2 + bucket * 0.06);
+    if (_emojiCache.size > 200) { const k = _emojiCache.keys().next().value; _emojiCache.delete(k); }
+    _emojiCache.set(key, cv);
+  }
+  return cv;
+}
+// zentriert an (px,py) zeichnen — respektiert das aktuelle globalAlpha
+function emo(ch, px, py, size) {
+  const cv = emoImg(ch, size);
+  if (cv) ctx.drawImage(cv, px - cv.width / 2, py - cv.height / 2);
+  else { ctx.font = `${size}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText(ch, px, py); }
 }
 
 // ---------------- Figuren (Billboard, detailliert) ----------------
@@ -791,16 +829,14 @@ function drawPersonAt(px, py, s, o = {}) {
 
   if (o.drink) {
     const tilt = Math.sin(performance.now() / 400 + (o.bobPhase || 0)) * 2;
-    ctx.font = `${11 * s}px sans-serif`; ctx.textAlign = 'center';
     ctx.globalAlpha = o.alpha !== undefined ? o.alpha : 1;
-    ctx.fillText(o.drink, px + 6.5 * s, cy - 2 * s - tilt);
+    emo(o.drink, px + 6.5 * s, cy - 3.5 * s - tilt, 11 * s);   // gecachter Emoji-Blit statt fillText
     ctx.globalAlpha = 1;
   }
-  if (o.star) { ctx.font = `${14 * s}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('⭐', px, cy - 15 * s + bob); }
+  if (o.star) emo('⭐', px, cy - 16.5 * s + bob, 14 * s);
   if (o.emote) {
-    ctx.font = `${12 * s}px sans-serif`; ctx.textAlign = 'center';
     ctx.globalAlpha = o.alpha !== undefined ? o.alpha : 1;
-    ctx.fillText(o.emote, px, cy - 15 * s + bob);
+    emo(o.emote, px, cy - 16.5 * s + bob, 12 * s);
     ctx.globalAlpha = 1;
   }
 }
