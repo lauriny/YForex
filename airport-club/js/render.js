@@ -61,7 +61,7 @@ const RM = {
 };
 // Club-Ausbau vergrößert das GEBÄUDE (Terminal 1): Wände wandern nach rechts/unten,
 // Möbel bleiben an den Wänden (nach aussen), die Tanzfläche in der Mitte wird größer.
-function t1Grow() { const cs = state.clubSize || 0; return { dw: cs * 1.7, dd: cs * 1.3 }; }   // Ausbau deutlich spürbar
+function t1Grow() { const cs = state.clubSize || 0; return { dw: cs * 1.0, dd: cs * 0.7 }; }   // moderater Ausbau (Raum bleibt luftig)
 function applyClubSize() { const g = t1Grow(); RM.t1.w = 9 + g.dw; RM.t1.d = 8 + g.dd; }
 // Tanzfläche wächst mit dem Gebäude (gemeinsam genutzt von Zeichnung & Gäste-Ziel)
 function t1DanceFloor() { const g = t1Grow(); return { x: 2.5, y: 9.3, w: 4.6 + g.dw, d: 4.2 + g.dd }; }
@@ -117,7 +117,7 @@ const A = {
   chill:     { x: 17.3, y: 2.4, room: 't2' },
   vipdoor:   { x: 10.7, y: 6.6, room: 't2' },  // vipEinlass
   skybar:    { x: 11.3, y: 11.3, room: 'roof' },
-  pool:      { x: 15.3, y: 15.0, room: 'roof' },
+  pool:      { x: 16.6, y: 15.3, room: 'roof' },
   stars:     { x: 14.0, y: 13.2, room: 'roof' },
 };
 // Station-Id → Anker für Geld-Pin
@@ -306,9 +306,9 @@ function handleTap(e) {
 // ============================================================
 // Lokaler Toiletten-Ausgang je Raum (Gäste bleiben im Raum sichtbar)
 // WC-Ausgang zeigt in die Richtung, in der das Klo in der Übersicht liegt (oben-links)
-const WC_DOOR = { t1: { x: 1.3, y: 9.35 }, t2: { x: 17.6, y: 7.9 }, roof: { x: 17.4, y: 16.6 } };   // t1: Tür zum WC-Eck (unten, öffnet in T1 hinein)
+const WC_DOOR = { t1: { x: 0.55, y: 7.75 }, t2: { x: 17.6, y: 7.9 }, roof: { x: 17.4, y: 16.6 } };   // t1: innere Verbindungstür zum WC-Anbau (an der linken Wand)
 // WC-Anbau: kleiner Raum direkt über Terminal 1 (Teil von T1, kein eigener wechselbarer Raum)
-const WC_ANNEX = { x: 0.15, y: 7.12, w: 2.05, d: 1.5 };   // kompakte, abgetrennte Ecke IN Terminal 1 (oben-links), ragt NICHT über die Rückwand
+const WC_ANNEX = { x: -2.85, y: 6.2, w: 2.6, d: 3.0 };   // eigenständiger WC-Anbau AUSSEN oben-links, mit Tür nach draußen + Tür ins Gebäude
 const BACKSTAGE = { x: 7.35, y: 7.7 };   // oben-rechts, neben dem DJ in Terminal 1
 let guests = [];
 let taxis = [];        // vorbeifahrende Taxen, die vor dem Eingang Gäste absetzen
@@ -333,26 +333,44 @@ function aliveGuests() { let n = 0; for (const g of guests) if (!g.celeb) n++; r
 
 // Taxen: gelegentlich fährt eins vorbei, hält vor dem Eingang und lässt Leute raus.
 // Mit Marketing kommen mehrere Taxen dichter hintereinander (Gäste „strömen von draußen rein").
+const CAR_COLORS = ['#3b6bd6', '#2fa36b', '#c0392b', '#d98a1e', '#5b4b8a', '#2b2f38', '#c9c2b6'];
 function updateTaxis(dt) {
   const mkt = marketingSpawnBonus();          // >0, wenn Marketing aktiv
   const busy = mkt > 0.05;
   taxiTimer -= dt;
-  if (taxiTimer <= 0 && taxis.length < (busy ? 3 : 1) && roomUnlocked('t1')) {
-    taxiTimer = busy ? rnd(4, 9) : rnd(16, 30);
-    taxis.push({ fx: -0.12, state: 'drive', tm: 0, stopFx: rnd(0.4, 0.56),
-      n: busy ? Math.round(rnd(2, 4)) : Math.round(rnd(1, 2)), dropped: 0 });
+  if (taxiTimer <= 0 && taxis.length < (busy ? 3 : 2) && roomUnlocked('t1')) {
+    taxiTimer = busy ? rnd(3.5, 8) : rnd(12, 24);
+    // Fahrzeug-Typ würfeln: meistens Taxi, oft ein normales Auto, selten ein Supercar mit vielen Mädels
+    const roll = Math.random();
+    let v;
+    if (roll < 0.16) {          // Supercar: hält, viele weibliche Gäste steigen aus
+      v = { kind: 'super', color: pick(['#e11d2e', '#ff7a00', '#111318', '#f4c400', '#00b3a4']),
+            state: 'drive', stops: true, allFemale: true, n: Math.round(rnd(3, 5)) };
+    } else if (roll < 0.48) {   // normales Auto: fährt meist nur vorbei, setzt selten jmd. ab
+      const stops = Math.random() < 0.4;
+      v = { kind: 'car', color: pick(CAR_COLORS), state: 'drive', stops, allFemale: false, n: stops ? Math.round(rnd(1, 2)) : 0 };
+    } else {                    // Taxi
+      v = { kind: 'taxi', color: '#f4bf1a', state: 'drive', stops: true, allFemale: false,
+            n: busy ? Math.round(rnd(2, 4)) : Math.round(rnd(1, 2)) };
+    }
+    v.fx = -0.14; v.tm = 0; v.dropped = 0; v.stopFx = rnd(0.4, 0.56);
+    taxis.push(v);
   }
   for (let i = taxis.length - 1; i >= 0; i--) {
     const tx = taxis[i];
-    if (tx.state === 'drive') { tx.fx += dt * 0.34; if (tx.fx >= tx.stopFx) { tx.fx = tx.stopFx; tx.state = 'stop'; tx.tm = 1.8; } }
-    else if (tx.state === 'stop') {
+    if (tx.state === 'drive') {
+      tx.fx += dt * (tx.kind === 'super' ? 0.4 : 0.34);
+      if (tx.stops && tx.fx >= tx.stopFx) { tx.fx = tx.stopFx; tx.state = 'stop'; tx.tm = tx.kind === 'super' ? 2.4 : 1.8; }
+      else if (!tx.stops && tx.fx > 1.25) taxis.splice(i, 1);
+    } else if (tx.state === 'stop') {
       tx.tm -= dt;
-      if (tx.dropped < tx.n && tx.tm < 1.8 - tx.dropped * 0.45) {
-        if (aliveGuests() < targetGuestCount()) spawnGuest();   // Fahrgast „steigt aus" und ist innen am Eingang
+      const dur = tx.kind === 'super' ? 2.4 : 1.8;
+      if (tx.dropped < tx.n && tx.tm < dur - tx.dropped * (tx.kind === 'super' ? 0.32 : 0.45)) {
+        if (aliveGuests() < targetGuestCount()) { const g = spawnGuest(); if (g && tx.allFemale) { g.female = true; g.color = pick(['#ff4fa3', '#e6b3ff', '#ff85b3', '#c98fe0']); } }
         tx.dropped++;
       }
       if (tx.tm <= 0) tx.state = 'go';
-    } else { tx.fx += dt * 0.42; if (tx.fx > 1.25) taxis.splice(i, 1); }
+    } else { tx.fx += dt * (tx.kind === 'super' ? 0.5 : 0.42); if (tx.fx > 1.3) taxis.splice(i, 1); }
   }
 }
 function rnd(a, b) { return a + Math.random() * (b - a); }
@@ -1164,29 +1182,34 @@ function dPad() { return { x: W * 0.06, top: H * 0.085, bot: H * 0.17 }; }   // 
 // Einzel-Raum-Ansicht: genau EIN Raum wird bildschirmfüllend gezeigt (kein Pan, kein Grundriss).
 let detailCam = { x: 4.5, y: 11 };   // Weltmittelpunkt des gezeigten Raums
 let detailScale = 40;                // px pro Welt-Einheit (pro Raum eingepasst)
+let detailBiasY = 0;                 // vertikale Verschiebung (T1: Raum hoch, Straßen-Band unten frei)
 let framedRoom = 't1';               // aktuell gezeigter Raum
 let roomFade = 0;                    // kurzer Überblend-Effekt beim Raumwechsel
 const ROOM_ORDER = ['t1', 't2', 'roof'];   // WC ist als Anbau Teil von Terminal 1, kein eigener Raum
 const CLUB_BB = { x0: -1.2, y0: -1.2, x1: 20.2, y1: 19.6 };   // (nur noch für Iso-Kamerarechnung)
-// passt einen Raum (inkl. Rückwand oben, bei T1 inkl. WC-Anbau) formatfüllend in die Detailfläche ein
+// unten reserviertes Straßen-Band für Terminal 1 (Gebäude sitzt weiter hinten, Straße klar davor)
+function t1StreetBand() { return Math.min(150, H * 0.19); }
+// passt einen Raum formatfüllend in die Detailfläche ein; T1 lässt unten ein Straßen-Band frei,
+// Roof lässt oben/unten etwas Himmel & Dachkante frei
 function roomFrame(id) {
   const r = RM[id], p = dPad();
-  const aw = W - 2 * p.x, ah = H - p.top - p.bot;
+  const band = id === 't1' ? t1StreetBand() : 0;   // Höhe des Straßen-Bands (Pixel), bleibt unten frei
+  const aw = W - 2 * p.x, ah = H - p.top - p.bot - band;
   const wallPad = 1.15;                       // Platz für die Rückwand-Höhe (Welt-Einheiten)
-  const sideMargin = id === 't1' ? 1.1 : id === 'roof' ? 1.15 : 0.3;   // T1: Straße, Roof: Dachkante + Himmel sichtbar
+  const sideMargin = id === 'roof' ? 1.15 : 0.3;   // T1 wieder volle Breite (nicht eng), Roof: Dachkante sichtbar
   let x0 = r.x - sideMargin, y0 = r.y - (id === 'roof' ? 0.95 : wallPad), x1 = r.x + r.w + sideMargin, y1 = r.y + r.d + (id === 'roof' ? 1.35 : 0.2);
-  // WC ist eine abgetrennte Ecke IN Terminal 1 → keine Extra-Rahmung nötig
+  if (id === 't1') { x0 = Math.min(x0, WC_ANNEX.x - 0.5); y0 = Math.min(y0, WC_ANNEX.y - 0.6); }   // WC-Anbau links mit einrahmen
   const s = Math.min(aw / (x1 - x0), ah / (y1 - y0));
-  return { x: (x0 + x1) / 2, y: (y0 + y1) / 2, s };
+  return { x: (x0 + x1) / 2, y: (y0 + y1) / 2, s, biasY: -band / 2 };   // biasY hebt den Raum an, das Band bleibt unten
 }
 function frameRoom(id, fade = true) {
-  const f = roomFrame(id); detailCam.x = f.x; detailCam.y = f.y; detailScale = f.s; framedRoom = id;
+  const f = roomFrame(id); detailCam.x = f.x; detailCam.y = f.y; detailScale = f.s; detailBiasY = f.biasY || 0; framedRoom = id;
   if (fade) roomFade = 1;
 }
 function detailZoom() { return detailScale; }
 function detailViewCy() { const p = dPad(); return p.top + (H - p.top - p.bot) / 2; }
 function detailProj(wx, wy) {
-  return { x: W / 2 + (wx - detailCam.x) * detailScale, y: detailViewCy() + (wy - detailCam.y) * detailScale };
+  return { x: W / 2 + (wx - detailCam.x) * detailScale, y: detailViewCy() + detailBiasY + (wy - detailCam.y) * detailScale };
 }
 function dTileW() { return detailScale; }
 function dPersonScale() { return dTileW() / 34; }
@@ -1330,11 +1353,25 @@ function drawGrassBg() {
 // Straßenstreifen, Laterne, Mülleimer/Hydrant an den Rändern + vorbeifahrende Taxen mit Fahrgästen.
 function drawStreetFg(t) {
   const pb = H - dPad().bot;                    // untere Kante des sichtbaren Detailbereichs
-  const roadH = Math.min(64, H * 0.085);
-  const roadY = pb - roadH;                     // Straße ganz unten im sichtbaren Bereich
+  const band = t1StreetBand();                  // reserviertes Band unter dem Gebäude
+  const bandTop = pb - band;                    // Oberkante Bürgersteig (direkt unter dem Gebäude)
+  const roadH = Math.min(52, band * 0.5);
+  const roadY = pb - roadH;                     // Asphalt ganz unten
   ctx.save();
-  ctx.beginPath(); ctx.rect(0, 0, W, pb); ctx.clip();          // nie ins HUD malen
-  // Asphaltstreifen + Bordstein + Mittellinie
+  ctx.beginPath(); ctx.rect(0, bandTop, W, band); ctx.clip();  // nur ins Straßen-Band malen
+  // Bürgersteig (heller Beton) zwischen Gebäude und Straße
+  const sw = ctx.createLinearGradient(0, bandTop, 0, roadY);
+  sw.addColorStop(0, '#8f96a0'); sw.addColorStop(1, '#7c828c');
+  ctx.fillStyle = sw; ctx.fillRect(0, bandTop, W, roadY - bandTop);
+  ctx.strokeStyle = 'rgba(0,0,0,0.10)'; ctx.lineWidth = 1;     // Plattenfugen
+  for (let x = 0; x < W; x += 40) { ctx.beginPath(); ctx.moveTo(x, bandTop); ctx.lineTo(x, roadY); ctx.stroke(); }
+  // roter Teppich vom Eingang nach VORN bis zur Straße
+  { const cc = detailProj(RM.t1.x + RM.t1.w / 2, RM.t1.y + RM.t1.d).x;   // Gebäude-Mitte (Eingang)
+    const w0 = band * 0.34, w1 = band * 0.46;
+    ctx.fillStyle = '#b3243a'; ctx.beginPath();
+    ctx.moveTo(cc - w0, bandTop); ctx.lineTo(cc + w0, bandTop); ctx.lineTo(cc + w1, roadY); ctx.lineTo(cc - w1, roadY); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fillRect(cc - w0, bandTop, 3, roadY - bandTop); ctx.fillRect(cc + w0 - 3, bandTop, 3, roadY - bandTop); }
+  // Asphalt + Bordstein + Mittellinie
   ctx.fillStyle = '#2f3237'; ctx.fillRect(0, roadY, W, roadH);
   ctx.fillStyle = '#c7ccd2'; ctx.fillRect(0, roadY - 4, W, 4);
   ctx.strokeStyle = 'rgba(240,210,90,0.85)'; ctx.lineWidth = 3; ctx.setLineDash([16, 12]);
@@ -1364,20 +1401,39 @@ function drawStreetFg(t) {
 }
 
 function drawTaxi(cy, roadH, tx) {
-  const w = 74, bh = roadH * 0.5, x = tx.fx * (W + 170) - 85;
+  const kind = tx.kind || 'taxi';
+  const w = kind === 'super' ? 84 : 74, bh = roadH * (kind === 'super' ? 0.4 : 0.5), x = tx.fx * (W + 190) - 95;
   const top = cy - bh / 2;
   ctx.save();
   ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.ellipse(x + w / 2, top + bh + 5, w * 0.55, 5, 0, 0, 7); ctx.fill();
-  ctx.fillStyle = '#f4bf1a'; ctx.beginPath(); ctx.roundRect(x, top, w, bh, 6); ctx.fill();
-  ctx.fillStyle = '#e6b016'; ctx.beginPath(); ctx.roundRect(x + 12, top - bh * 0.55, w - 30, bh * 0.6, 5); ctx.fill();
+  if (kind === 'super') {
+    // flacher, keilförmiger Supercar mit Spoiler + Glanzstreifen
+    ctx.fillStyle = tx.color; ctx.beginPath();
+    ctx.moveTo(x + 2, top + bh); ctx.lineTo(x + 12, top + bh * 0.2); ctx.lineTo(x + w - 24, top + bh * 0.05);
+    ctx.lineTo(x + w - 6, top + bh * 0.5); ctx.lineTo(x + w, top + bh); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.beginPath();   // getönte Kabine
+    ctx.moveTo(x + 20, top + bh * 0.22); ctx.lineTo(x + w - 30, top + bh * 0.1); ctx.lineTo(x + w - 26, top + bh * 0.42); ctx.lineTo(x + 24, top + bh * 0.5); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.fillRect(x + 12, top + bh * 0.52, w - 22, 2);   // Glanzlinie
+    ctx.fillStyle = tx.color; ctx.fillRect(x + w - 10, top - 2, 10, 4);                            // Heckspoiler
+    ctx.fillStyle = '#fff4c0'; ctx.beginPath(); ctx.arc(x + 3, top + bh * 0.6, 2.6, 0, 7); ctx.fill();   // Scheinwerfer vorn (fährt nach links raus? -> vorn links)
+    ctx.fillStyle = '#ff5a4a'; ctx.beginPath(); ctx.arc(x + w - 2, top + bh * 0.6, 2.2, 0, 7); ctx.fill();
+    // Felgen
+    ctx.fillStyle = '#0e0e14'; ctx.beginPath(); ctx.arc(x + 20, top + bh, 7.5, 0, 7); ctx.arc(x + w - 20, top + bh, 7.5, 0, 7); ctx.fill();
+    ctx.fillStyle = '#c7ccd2'; ctx.beginPath(); ctx.arc(x + 20, top + bh, 3, 0, 7); ctx.arc(x + w - 20, top + bh, 3, 0, 7); ctx.fill();
+    if (tx.state === 'stop') { ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('✨', x + w / 2, top - 4); }
+    ctx.restore(); return;
+  }
+  // Taxi / normales Auto (Fließheck)
+  ctx.fillStyle = tx.color; ctx.beginPath(); ctx.roundRect(x, top, w, bh, 6); ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,0.18)'; ctx.beginPath(); ctx.roundRect(x + 12, top - bh * 0.55, w - 30, bh * 0.6, 5); ctx.fill();
   ctx.fillStyle = '#bfe6ff'; ctx.beginPath(); ctx.roundRect(x + 16, top - bh * 0.46, w - 38, bh * 0.46, 3); ctx.fill();
-  // Taxi-Dachschild
-  ctx.fillStyle = '#20232a'; ctx.beginPath(); ctx.roundRect(x + w / 2 - 10, top - bh * 0.82, 20, bh * 0.28, 2); ctx.fill();
-  ctx.fillStyle = '#ffd94a'; ctx.font = `700 ${Math.max(7, bh * 0.24)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText('TAXI', x + w / 2, top - bh * 0.68); ctx.textBaseline = 'alphabetic';
-  // Karo-Streifen
-  ctx.fillStyle = '#20232a'; for (let i = 0; i < 8; i++) ctx.fillRect(x + 4 + i * 9, top + bh * 0.44 + (i % 2) * 3, 9, 4);
-  // Räder + Scheinwerfer
+  if (kind === 'taxi') {
+    ctx.fillStyle = '#20232a'; ctx.beginPath(); ctx.roundRect(x + w / 2 - 10, top - bh * 0.82, 20, bh * 0.28, 2); ctx.fill();
+    ctx.fillStyle = '#ffd94a'; ctx.font = `700 ${Math.max(7, bh * 0.24)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('TAXI', x + w / 2, top - bh * 0.68); ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#20232a'; for (let i = 0; i < 8; i++) ctx.fillRect(x + 4 + i * 9, top + bh * 0.44 + (i % 2) * 3, 9, 4);
+  }
   ctx.fillStyle = '#0e0e14'; ctx.beginPath(); ctx.arc(x + 18, top + bh, 7, 0, 7); ctx.arc(x + w - 18, top + bh, 7, 0, 7); ctx.fill();
   ctx.fillStyle = '#3a3d45'; ctx.beginPath(); ctx.arc(x + 18, top + bh, 3, 0, 7); ctx.arc(x + w - 18, top + bh, 3, 0, 7); ctx.fill();
   ctx.fillStyle = '#fff4c0'; ctx.beginPath(); ctx.arc(x + w - 1, top + bh * 0.4, 3, 0, 7); ctx.fill();
@@ -1601,28 +1657,31 @@ function drawRoomDetail(id, t, beat) {
       const g = ctx.createLinearGradient(sx.x, topY, ex.x, topY + sHt);
       g.addColorStop(0, `hsl(${(t * 45) % 360},85%,42%)`); g.addColorStop(1, `hsl(${(t * 45 + 140) % 360},85%,38%)`);
       ctx.fillStyle = g; ctx.beginPath(); ctx.roundRect(sx.x, topY, sw, sHt, 4); ctx.fill();
-      ctx.save(); ctx.beginPath(); ctx.roundRect(sx.x, topY, sw, sHt, 4); ctx.clip();
+      // Animation NUR im oberen Zwei-Drittel (Logo-Zone), damit der Name klar bleibt
+      const nameH = sHt * 0.36, logoBot = topY + sHt - nameH;
+      ctx.save(); ctx.beginPath(); ctx.rect(sx.x, topY, sw, logoBot - topY); ctx.clip();
       ctx.globalCompositeOperation = 'lighter';
-      for (let i = 0; i < 3; i++) { const rr = (t * 45 + i * 26) % 78;                     // pulsierende Ringe
-        ctx.strokeStyle = `rgba(255,255,255,${0.28 * (1 - rr / 78)})`; ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.arc(sx.x + sw / 2, topY + sHt * 0.38, rr, 0, 7); ctx.stroke(); }
-      if (djT >= 1) { const bars = 11; for (let i = 0; i < bars; i++) {                     // Equalizer unten
-        const bh = (0.12 + 0.5 * Math.abs(Math.sin(beat + i * 0.6))) * sHt;
-        ctx.fillStyle = `hsla(${(t * 80 + i * 30) % 360},95%,65%,0.85)`;
-        ctx.fillRect(sx.x + 3 + i * (sw - 6) / bars, topY + sHt - bh, (sw - 6) / bars - 2, bh); } }
+      for (let i = 0; i < 3; i++) { const rr = (t * 45 + i * 26) % 60;                     // pulsierende Ringe
+        ctx.strokeStyle = `rgba(255,255,255,${0.24 * (1 - rr / 60)})`; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(sx.x + sw / 2, topY + (logoBot - topY) * 0.5, rr, 0, 7); ctx.stroke(); }
+      if (djT >= 1) { const bars = 11; for (let i = 0; i < bars; i++) {                     // Equalizer
+        const bh = (0.1 + 0.42 * Math.abs(Math.sin(beat + i * 0.6))) * (logoBot - topY);
+        ctx.fillStyle = `hsla(${(t * 80 + i * 30) % 360},95%,65%,0.8)`;
+        ctx.fillRect(sx.x + 3 + i * (sw - 6) / bars, logoBot - bh, (sw - 6) / bars - 2, bh); } }
       ctx.restore();
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.font = `${sHt * 0.34}px sans-serif`;                                              // Icon (etwas kleiner)
-      ctx.fillText(dj.icon, sx.x + sw / 2, topY + sHt * 0.3);
-      // Name: dunkler Kontrast-Balken + an Screenbreite angepasste Schrift (gut lesbar)
+      ctx.font = `${(logoBot - topY) * 0.5}px sans-serif`;                                  // Icon in der Logo-Zone
+      ctx.fillText(dj.icon, sx.x + sw / 2, topY + (logoBot - topY) * 0.45);
+      // === cleane, SOLIDE Namensleiste unten (keine Animation dahinter → gut lesbar) ===
+      ctx.fillStyle = '#0a0b12'; ctx.fillRect(sx.x, logoBot, sw, nameH);
+      ctx.fillStyle = ACCENT.t1; ctx.fillRect(sx.x, logoBot, sw, 1.5);                       // dünne Akzentlinie oben
       const nm = dj.name.toUpperCase();
-      let fs = Math.max(9, sHt * 0.24); ctx.font = `900 ${fs}px system-ui, sans-serif`;
-      while (ctx.measureText(nm).width > sw - 8 && fs > 7) { fs -= 0.5; ctx.font = `900 ${fs}px system-ui, sans-serif`; }
-      ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(sx.x, topY + sHt * 0.6, sw, sHt * 0.34);
-      ctx.fillStyle = '#fff'; ctx.shadowColor = 'rgba(0,0,0,0.9)'; ctx.shadowBlur = 3;
-      ctx.fillText(nm, sx.x + sw / 2, topY + sHt * 0.77); ctx.shadowBlur = 0;
+      let fs = Math.max(9, nameH * 0.62); ctx.font = `800 ${fs}px system-ui, sans-serif`;
+      while (ctx.measureText(nm).width > sw - 10 && fs > 6) { fs -= 0.5; ctx.font = `800 ${fs}px system-ui, sans-serif`; }
+      ctx.fillStyle = '#fff'; ctx.textBaseline = 'middle';
+      ctx.fillText(nm, sx.x + sw / 2, logoBot + nameH * 0.56);
       ctx.textBaseline = 'alphabetic';
-      ctx.strokeStyle = 'rgba(190,150,255,0.6)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.roundRect(sx.x, topY, sw, sHt, 4); ctx.stroke();
+      ctx.strokeStyle = 'rgba(190,150,255,0.55)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.roundRect(sx.x - 4, topY - 4, sw + 8, sHt + 8, 7); ctx.stroke();
     }
     if (false) {   // (alte Equalizer-Wand ersetzt durch den DJ-Screen oben)
       const sx = detailProj(3.35, 7.12), ex = detailProj(5.65, 7.12), sw = ex.x - sx.x, sh = u * 0.72;
@@ -1869,17 +1928,17 @@ function drawRoomDetail(id, t, beat) {
       const l1 = goldStanch(10.7, 15.4), l2 = goldStanch(10.7, 16.4);
       ctx.strokeStyle = '#b3123a'; ctx.lineWidth = 2.4; ctx.beginPath(); ctx.moveTo(l1.x, l1.y - u * 0.5); ctx.quadraticCurveTo(l1.x - 6, (l1.y + l2.y) / 2 - u * 0.5 + 6, l2.x, l2.y - u * 0.5); ctx.stroke();
       const cb = detailProj(12.4, 11.0); ctx.font = `${u * 0.4}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('🍾', cb.x, cb.y - u * 0.95); }
-    // Pool + Sonnenliegen
-    dRect(A.pool.x - 1.55, A.pool.y - 1.15, 3.1, 2.3, '#1f4a6e', '#14324c', 12);
-    dRect(A.pool.x - 1.4, A.pool.y - 1.0, 2.8, 2.0, '#2f7fd6', 'rgba(255,255,255,0.35)', 10);
-    { ctx.save(); const pa = detailProj(A.pool.x - 1.4, A.pool.y - 1.0), pb = detailProj(A.pool.x + 1.4, A.pool.y + 1.0);
+    // Pool (bottom-rechts, eigene Ecke mit klarem Abstand) + Sonnenliegen
+    dRect(A.pool.x - 1.35, A.pool.y - 1.05, 2.7, 2.1, '#1f4a6e', '#14324c', 12);
+    dRect(A.pool.x - 1.2, A.pool.y - 0.9, 2.4, 1.8, '#2f7fd6', 'rgba(255,255,255,0.35)', 10);
+    { ctx.save(); const pa = detailProj(A.pool.x - 1.2, A.pool.y - 0.9), pb = detailProj(A.pool.x + 1.2, A.pool.y + 0.9);
       ctx.beginPath(); ctx.rect(pa.x, pa.y, pb.x - pa.x, pb.y - pa.y); ctx.clip();
       ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 1.5;
       for (let i = 0; i < 4; i++) { ctx.beginPath(); const yy = pa.y + (pb.y - pa.y) * (((t * 0.15 + i * 0.25) % 1)); ctx.moveTo(pa.x, yy); ctx.lineTo(pb.x, yy + 4); ctx.stroke(); }
       ctx.restore(); }
     const lounger = (lx, ly) => { dShadow(lx - 0.45, ly - 0.15, 0.9, 0.5); dBox(lx - 0.45, ly - 0.2, 0.9, 0.5, u * 0.26, '#eae3d2', '#b6ae98', '#f6f1e2');
       const p = detailProj(lx + 0.05, ly); ctx.font = `${u * 0.3}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('⛱️', p.x, p.y - u * 0.28); };
-    lounger(13.2, 16.4); lounger(14.6, 16.6); lounger(16.6, 15.4);
+    lounger(11.6, 16.4); lounger(12.7, 16.8); lounger(11.9, 15.1);   // klar links vom Pool
     // Feuerstelle / Lounge-Ecke
     { const fp = detailProj(17.4, 12.4); dShadow(17.05, 12.05, 0.7, 0.7);
       dBox(17.05, 12.05, 0.7, 0.7, u * 0.3, '#3a3038', '#1c161c', '#4a3e48');
@@ -1902,7 +1961,7 @@ function drawRoomDetail(id, t, beat) {
         ctx.fillStyle = '#3a3442'; ctx.beginPath(); ctx.roundRect(p.x - 7, p.y - u * 0.9 - 8, 14, 9, 4); ctx.fill();
         ctx.fillStyle = `rgba(255,150,60,${0.7 + 0.3 * Math.sin(t * 5 + wx)})`; ctx.beginPath(); ctx.roundRect(p.x - 5, p.y - u * 0.9 - 5, 10, 4, 2); ctx.fill();
         ctx.fillStyle = 'rgba(255,150,60,0.08)'; ctx.beginPath(); ctx.moveTo(p.x, p.y - u * 0.9); ctx.lineTo(p.x - u * 0.5, p.y + 4); ctx.lineTo(p.x + u * 0.5, p.y + 4); ctx.closePath(); ctx.fill(); };
-      heat(12.3, 16.9); heat(15.8, 16.9); }
+      heat(10.9, 17.2); heat(18.2, 13.0); }
   }
   // Alt-&-dunkel-Schleier ganz oben drauf: entsättigt Neon/Möbel am Anfang (schwindet mit Ausbau)
   if (roomUnlocked(id)) {
@@ -2057,45 +2116,52 @@ function drawBuildingDecor(t) {
   decoPlant(0.9, 17.6, u); decoPlant(8.2, 17.4, u);
 }
 
-// WC-Anbau als integrierter Nebenraum von Terminal 1 (gemeinsame Wand + echte Türöffnung)
+// Eigenständiger WC-Anbau AUSSEN oben-links: eigenes kleines Gebäude, Tür nach draußen
+// (oben-links) + Verbindungstür ins Terminal 1 (rechte Wand, andockend ans Gebäude).
 function drawWcAnnex(t) {
   const a = WC_ANNEX, u = dTileW();
   const p0 = detailProj(a.x, a.y), p1 = detailProj(a.x + a.w, a.y + a.d);
   const w = p1.x - p0.x, h = p1.y - p0.y;
-  const doorC = a.x + a.w / 2, doorHW = 0.55;                 // zentrierte, breite Türöffnung
-  // Boden (helle, saubere Fliesen)
-  ctx.fillStyle = '#4a5a6b'; ctx.beginPath(); ctx.roundRect(p0.x, p0.y, w, h, 6); ctx.fill();
+  const wallH = u * 0.95, ac = ACCENT.klo;
+  // Schlagschatten des Anbaus auf den Bürgersteig
+  ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.beginPath(); ctx.roundRect(p0.x + 5, p0.y + 7, w, h, 8); ctx.fill();
+  // Boden (helle Fliesen)
+  ctx.fillStyle = '#46586a'; ctx.beginPath(); ctx.roundRect(p0.x, p0.y, w, h, 6); ctx.fill();
   ctx.strokeStyle = 'rgba(255,255,255,0.06)'; ctx.lineWidth = 1;
   for (let i = 1; i < a.w; i++) { const q = detailProj(a.x + i, a.y); ctx.beginPath(); ctx.moveTo(q.x, p0.y); ctx.lineTo(q.x, p1.y); ctx.stroke(); }
   for (let j = 1; j < a.d; j++) { const q = detailProj(a.x, a.y + j); ctx.beginPath(); ctx.moveTo(p0.x, q.y); ctx.lineTo(p1.x, q.y); ctx.stroke(); }
-  // Möbel: 2 Kabinen (links) + Waschbecken (rechts), kompakt
-  for (let k = 0; k < 2; k++) { const bx = a.x + 0.22 + k * 0.62;
-    dShadow(bx, a.y + 0.28, 0.55, 0.72); dBox(bx, a.y + 0.28, 0.55, 0.72, u * 0.4, '#7f93a8', '#495866', '#95a9bd');
-    const q = detailProj(bx + 0.28, a.y + 0.62); ctx.font = `${u * 0.24}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('🚽', q.x, q.y - u * 0.36); }
-  dBox(a.x + 1.62, a.y + 0.3, 0.35, 0.9, u * 0.32, '#ccd4de', '#8f9aa6', '#e4eaf0');
-  { const wsp = detailProj(a.x + 1.79, a.y + 0.78); ctx.font = `${u * 0.2}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('🚰', wsp.x, wsp.y - u * 0.3); }
-  // saubere Wände wie ein Raum (Rückwand hoch + Neon-Trim, Seitenwände)
-  const wallH = u * 0.9, ac = ACCENT.klo;
+  // Verbindungssteg zum Gebäude (dockt rechte Wand an die T1-Linkswand an)
+  { const g0 = detailProj(a.x + a.w, a.y + 0.9), g1 = detailProj(RM.t1.x, a.y + 1.9);
+    ctx.fillStyle = '#3a4453'; ctx.fillRect(g0.x - 1, g0.y, g1.x - g0.x + 2, g1.y - g0.y); }
+  // Möbel: 3 Kabinen (oben) + 2 Waschbecken (unten)
+  for (let k = 0; k < 3; k++) { const bx = a.x + 0.28 + k * 0.72;
+    dShadow(bx, a.y + 0.3, 0.6, 0.8); dBox(bx, a.y + 0.3, 0.6, 0.8, u * 0.42, '#7f93a8', '#495866', '#95a9bd');
+    const q = detailProj(bx + 0.3, a.y + 0.7); ctx.font = `${u * 0.26}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('🚽', q.x, q.y - u * 0.4); }
+  for (let k = 0; k < 2; k++) { const bx = a.x + 0.45 + k * 1.0;
+    dBox(bx, a.y + 2.05, 0.7, 0.42, u * 0.32, '#ccd4de', '#8f9aa6', '#e4eaf0');
+    const q = detailProj(bx + 0.35, a.y + 2.35); ctx.font = `${u * 0.22}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('🚰', q.x, q.y - u * 0.3); }
+  // Wände ringsum (eigenes Gebäude)
   const wg = ctx.createLinearGradient(0, p0.y - wallH, 0, p0.y); wg.addColorStop(0, '#2c2438'); wg.addColorStop(1, '#181222');
-  ctx.fillStyle = wg; ctx.fillRect(p0.x, p0.y - wallH, w, wallH);
-  ctx.fillStyle = ac; ctx.globalAlpha = 0.7; ctx.fillRect(p0.x, p0.y - wallH + 1, w, 2.2); ctx.globalAlpha = 1;
-  ctx.fillStyle = '#241d30'; ctx.fillRect(p0.x - 3, p0.y - wallH, 4, h + wallH); ctx.fillRect(p1.x - 1, p0.y - wallH, 4, h + wallH);
-  // === sauberer Zugang: breite Tür mit Rahmen, beleuchtete Schwelle + Fußmatte in Terminal 1 ===
-  const dl = detailProj(doorC - doorHW, a.y + a.d).x, dr = detailProj(doorC + doorHW, a.y + a.d).x;
-  ctx.fillStyle = '#241d30';                                    // Frontwand links/rechts der Tür
-  ctx.fillRect(p0.x, p1.y - 3, dl - p0.x, 6); ctx.fillRect(dr, p1.y - 3, p1.x - dr, 6);
-  ctx.fillStyle = '#5a5378'; ctx.fillRect(dl - 3, p1.y - u * 0.55, 4, u * 0.55); ctx.fillRect(dr - 1, p1.y - u * 0.55, 4, u * 0.55);   // helle Türpfosten
-  const tg = ctx.createLinearGradient(dl, p1.y - 3, dl, p1.y + u * 0.4);   // beleuchtete Schwelle
-  tg.addColorStop(0, ac); tg.addColorStop(1, 'rgba(90,166,200,0)');
-  ctx.fillStyle = tg; ctx.fillRect(dl, p1.y - 2, dr - dl, u * 0.42);
-  const mat = detailProj(doorC, a.y + a.d + 0.45);              // Fußmatte davor (in T1)
-  ctx.fillStyle = 'rgba(90,166,200,0.18)'; ctx.beginPath(); ctx.ellipse(mat.x, mat.y, (dr - dl) * 0.55, u * 0.28, 0, 0, 7); ctx.fill();
-  // sauberes Türschild
-  const lp = detailProj(doorC, a.y - 0.1);
-  ctx.font = `800 ${Math.max(9, u * 0.22)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = wg; ctx.fillRect(p0.x, p0.y - wallH, w, wallH);                     // Rückwand oben
+  ctx.fillStyle = ac; ctx.globalAlpha = 0.7; ctx.fillRect(p0.x, p0.y - wallH + 1, w, 2.2); ctx.globalAlpha = 1;   // Neon-Trim
+  ctx.fillStyle = '#241d30'; ctx.fillRect(p0.x - 3, p0.y - wallH, 4, h + wallH);       // linke Wand
+  ctx.fillStyle = 'rgba(0,0,0,0.28)'; ctx.fillRect(p0.x, p1.y - 3, w, 3);              // Sockel unten
+  // rechte Wand mit Verbindungstür-Öffnung (Mitte offen → ins Gebäude)
+  { const dt = detailProj(a.x + a.w, a.y + 0.9).y, db = detailProj(a.x + a.w, a.y + 1.9).y;
+    ctx.fillStyle = '#241d30'; ctx.fillRect(p1.x - 1, p0.y - wallH, 4, dt - (p0.y - wallH)); ctx.fillRect(p1.x - 1, db, 4, p1.y - db);
+    ctx.fillStyle = ac; ctx.globalAlpha = 0.5; ctx.fillRect(p1.x - 1, dt, 3, db - dt); ctx.globalAlpha = 1; }   // beleuchtete Schwelle (innen)
+  // Aussentür oben-links (zur Straße/Bürgersteig) — Rahmen + kleine Stufe
+  { const od0 = detailProj(a.x + 0.35, a.y).x, od1 = detailProj(a.x + 1.15, a.y).x;
+    ctx.fillStyle = '#5a5378'; ctx.fillRect(od0 - 2, p0.y - wallH, 3, wallH); ctx.fillRect(od1 - 1, p0.y - wallH, 3, wallH);   // Türpfosten
+    ctx.fillStyle = '#120d1c'; ctx.fillRect(od0, p0.y - wallH + 2, od1 - od0, wallH - 2);                                     // dunkle Türöffnung
+    const step = detailProj(a.x + 0.75, a.y - 0.35); ctx.fillStyle = 'rgba(90,166,200,0.2)';
+    ctx.beginPath(); ctx.ellipse(step.x, step.y, (od1 - od0) * 0.7, u * 0.22, 0, 0, 7); ctx.fill(); }   // Stufe/Matte draussen
+  // Türschild oben
+  const lp = detailProj(a.x + a.w / 2, a.y - 0.15);
+  ctx.font = `800 ${Math.max(9, u * 0.24)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   const lw = ctx.measureText('🚻 WC').width;
-  ctx.fillStyle = 'rgba(12,10,20,0.72)'; ctx.beginPath(); ctx.roundRect(lp.x - lw / 2 - 7, lp.y - u * 0.19, lw + 14, u * 0.36, u * 0.18); ctx.fill();
-  ctx.strokeStyle = 'rgba(90,166,200,0.5)'; ctx.lineWidth = 1.2; ctx.stroke();
+  ctx.fillStyle = 'rgba(12,10,20,0.78)'; ctx.beginPath(); ctx.roundRect(lp.x - lw / 2 - 7, lp.y - u * 0.2, lw + 14, u * 0.38, u * 0.19); ctx.fill();
+  ctx.strokeStyle = 'rgba(90,166,200,0.6)'; ctx.lineWidth = 1.2; ctx.stroke();
   ctx.fillStyle = '#eaf3fb'; ctx.fillText('🚻 WC', lp.x, lp.y); ctx.textBaseline = 'alphabetic';
 }
 
@@ -2104,9 +2170,9 @@ function drawFocusRoom(t, beat) {
   const id = framedRoom, r = RM[id];
   if (id === 'roof') drawRoofBg(t);   // Rooftop: Nachthimmel + Skyline + Dach-Platte statt Bürgersteig
   else drawGrassBg();
-  if (id === 't1') drawStreetFg(t);   // Laterne, Mülleimer, Taxen im Vordergrund der Straße
   drawRoomDetail(id, t, beat);        // Boden + Wände + Möbel + Deko + Shabby des Raums
-  if (id === 't1') drawWcAnnex(t);    // WC-Eck oben-links in Terminal 1
+  if (id === 't1') drawWcAnnex(t);    // WC-Anbau außen oben-links
+  if (id === 't1') drawStreetFg(t);   // Straßen-Band unten VOR dem Gebäude (Autos fahren nie drunter durch)
 
   // Performer auf 3D-Bühne, falls diesem Raum zugewiesen
   if (state.performer.unlocked && state.performer.room === id && roomUnlocked(id)) {
