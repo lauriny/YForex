@@ -1874,10 +1874,31 @@ function drawRoomDetail(id, t, beat) {
     ctx.strokeStyle = 'rgba(255,215,120,0.04)'; ctx.lineWidth = 1;
     for (let gx = 2; gx < r.w; gx += 2.4) { const q1 = detailProj(r.x + gx, r.y), q2 = detailProj(r.x + gx, r.y + r.d); ctx.beginPath(); ctx.moveTo(q1.x, q1.y); ctx.lineTo(q2.x, q2.y); ctx.stroke(); }
 
+    // Neon-Schild „TERMINAL 2" an der Rückwand (Raum-Identität, wie AIRPORT in T1)
+    { const sgx = detailProj(r.x + r.w / 2, r.y).x, sy = a0.y - wallH + u * 0.44;
+      ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = `900 ${Math.max(11, u * 0.36)}px system-ui, sans-serif`;
+      ctx.globalCompositeOperation = 'lighter'; ctx.shadowColor = '#ffd27a'; ctx.shadowBlur = 12;
+      ctx.fillStyle = '#ffe0a0'; ctx.fillText('✦ TERMINAL 2 ✦', sgx, sy);
+      ctx.restore(); ctx.textBaseline = 'alphabetic'; }
+
     // --- SECOND FLOOR (Station 'second'): zweite Tanzfläche in der Mitte ---
     const fl = { x: 12.5, y: 3.0, w: 4.4, d: 3.4 };
     dTiles(fl.x, fl.y, fl.w, fl.d, 5, 4, 'main', t, beat);
     dLabel(fl.x + fl.w / 2, fl.y - 0.35, 'SECOND FLOOR', 'rgba(255,255,255,0.55)', 10);
+    // LED-Traverse über dem Floor: Par-Cans blitzen im Takt + Lichtkegel nach unten
+    { const l = detailProj(fl.x - 0.15, fl.y - 0.55), rr = detailProj(fl.x + fl.w + 0.15, fl.y - 0.55);
+      ctx.strokeStyle = '#3a3f4a'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(l.x, l.y); ctx.lineTo(rr.x, rr.y); ctx.stroke();
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      const nP = 5;
+      for (let i = 0; i < nP; i++) { const x = l.x + (rr.x - l.x) * (i + 0.5) / nP;
+        const hue = (t * 90 + i * 60) % 360, br = 0.35 + 0.5 * Math.abs(Math.sin(beat + i));
+        ctx.fillStyle = `hsla(${hue},95%,62%,${br * 0.11})`;
+        ctx.beginPath(); ctx.moveTo(x, l.y + 5); ctx.lineTo(x - u * 0.55, l.y + u * 1.7); ctx.lineTo(x + u * 0.55, l.y + u * 1.7); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = `hsla(${hue},95%,62%,${br})`;
+        ctx.beginPath(); ctx.arc(x, l.y + 4, 3.2, 0, 7); ctx.fill(); }
+      ctx.restore(); }
     { const dj2 = detailProj(fl.x + fl.w / 2, fl.y - 0.1), fb = detailProj(fl.x + fl.w / 2, fl.y + fl.d);
       ctx.save(); ctx.globalCompositeOperation = 'lighter';        // Lichtstrahlen (mehr je Stufe)
       const rays = 2 + sT('second');
@@ -1939,6 +1960,17 @@ function drawRoomDetail(id, t, beat) {
       for (const lx of [17.0, 18.6]) { const p = detailProj(lx, 1.75); ctx.font = `${u * 0.3}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('🏮', p.x, p.y - u * 0.35); }
       dLabel(17.85, 1.25, 'CHILL-OUT', '#ffcf9a', 9); }
 
+    // --- COCKTAIL-INSEL unten-mittig: füllt die leere Fläche & bringt Leben ---
+    { const cx = 13.5, cy = 7.7;
+      dShadow(cx - 0.75, cy - 0.5, 1.5, 1.0);
+      dBox(cx - 0.75, cy - 0.5, 1.5, 1.0, u * 0.62, '#2c2138', '#180f24', '#3c2e4e');
+      ctx.strokeStyle = '#c9a24a'; ctx.lineWidth = 2;
+      { const a = detailProj(cx - 0.75, cy - 0.5), c = detailProj(cx + 0.75, cy - 0.5); ctx.beginPath(); ctx.moveTo(a.x, a.y - u * 0.62); ctx.lineTo(c.x, c.y - u * 0.62); ctx.stroke(); }
+      ctx.font = `${u * 0.24}px sans-serif`; ctx.textAlign = 'center';
+      for (let i = 0; i < 3; i++) { const p = detailProj(cx - 0.42 + i * 0.42, cy - 0.35); ctx.fillText(['🍸', '🍹', '🍸'][i], p.x, p.y - u * 0.62); }
+      if (roomUnlocked('t2')) dPerson(cx, cy + 0.55, { s: 1.0, color: '#efe6f5', pants: '#241233', skin: '#f0b98c', hair: '#3a2a1a', apron: '#3a2452', bob: Math.sin(t * 2.2) * 1.3, groundZ: u * 0.3 });
+      dLabel(cx, cy - 0.95, 'COCKTAILS', '#bfe6ff', 9); }
+
     // --- Deko-Palmen in Gold-Töpfen ---
     { const palm = (wx, wy) => { dShadow(wx - 0.3, wy - 0.12, 0.6, 0.3); const p = detailProj(wx, wy);
         ctx.fillStyle = '#8a6a2e'; ctx.beginPath(); ctx.roundRect(p.x - 6, p.y - 8, 12, 10, 3); ctx.fill();
@@ -1992,6 +2024,18 @@ function drawRoomDetail(id, t, beat) {
       for (let s = 0; s < 5; s++) { ctx.fillStyle = `hsla(${20 + s * 8},100%,60%,${0.4 + 0.4 * Math.sin(t * 12 + s)})`;
         ctx.beginPath(); ctx.ellipse(fp.x, fp.y - u * 0.5 - Math.abs(Math.sin(t * 8 + s)) * u * 0.2, u * 0.1, u * 0.2, 0, 0, 7); ctx.fill(); }
       ctx.restore(); }
+    // VIP-Cabana (Baldachin-Daybed) rechts unten — extra Luxus
+    { const cx = 17.3, cy = 15.7;
+      dShadow(cx - 0.8, cy - 0.4, 1.6, 1.0);
+      dBox(cx - 0.8, cy - 0.4, 1.6, 0.9, u * 0.26, '#efe6da', '#c3b9a6', '#fbf5ea');       // Daybed
+      dBox(cx - 0.8, cy - 0.55, 1.6, 0.28, u * 0.5, '#d9cdb6', '#b0a48c');                  // Rückenpolster
+      const post = (px, py) => { const p = detailProj(px, py); ctx.strokeStyle = '#e8dcc4'; ctx.lineWidth = 2.4; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x, p.y - u * 1.2); ctx.stroke(); return { x: p.x, y: p.y - u * 1.2 }; };
+      const pa = post(cx - 0.8, cy - 0.4), pb = post(cx + 0.8, cy - 0.4), pc = post(cx - 0.8, cy + 0.5), pd = post(cx + 0.8, cy + 0.5);
+      ctx.fillStyle = 'rgba(235,190,130,0.32)'; ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.lineTo(pb.x, pb.y); ctx.lineTo(pd.x, pd.y); ctx.lineTo(pc.x, pc.y); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,220,160,0.5)'; ctx.lineWidth = 1.4; ctx.stroke();
+      if (roomUnlocked('roof')) dPerson(cx + 0.1, cy + 0.05, { s: 1.0, color: '#ffd24a', skin: '#f0b98c', hair: '#2a1a12', female: true, drink: '🍸', bob: Math.sin(t * 1.6) * 1.0, groundZ: u * 0.26 });
+      dLabel(cx, cy - 1.5, 'VIP CABANA', '#ffe0a0', 9); }
     // Infinity-Pool-Glow: Wasser leuchtet von unten (türkis pulsierend)
     { ctx.save(); ctx.globalCompositeOperation = 'lighter';
       const pc = detailProj(A.pool.x, A.pool.y);
