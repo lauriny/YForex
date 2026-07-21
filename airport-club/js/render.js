@@ -707,30 +707,41 @@ function drawPersonAt(px, py, s, o = {}) {
   const cy = py - 13 * s + bob;      // Körperzentrum
   if (o.glow) { ctx.shadowColor = '#ffd700'; ctx.shadowBlur = 16; }
 
-  // Beine
-  ctx.strokeStyle = o.pants || '#2b2b3a';
-  ctx.lineWidth = 2.4 * s; ctx.lineCap = 'round';
-  const legSpread = o.dancing ? Math.sin((o.arms || 0)) * 2 * s : 1.2 * s;
-  ctx.beginPath();
-  ctx.moveTo(px - 1.6 * s, py - 6 * s + bob); ctx.lineTo(px - legSpread, py - 0.5 * s);
-  ctx.moveTo(px + 1.6 * s, py - 6 * s + bob); ctx.lineTo(px + legSpread, py - 0.5 * s);
-  ctx.stroke();
-
-  // Arme (tanzend hoch)
-  ctx.strokeStyle = o.skin || '#ffd9b3';
-  ctx.lineWidth = 2.2 * s;
-  if (o.arms != null) {
-    const a = Math.sin(o.arms) * 5 * s;
+  // ---- Beine (voluminös, verjüngt) + Schuhe ----
+  const hipY = cy + 4 * s, footY = py - 0.4 * s;
+  const spread = o.dancing ? 1.3 * s + Math.abs(Math.sin(o.arms || 0)) * 2.1 * s : 1.6 * s;
+  ctx.fillStyle = o.pants || '#2b2b3a';
+  for (const sgn of [-1, 1]) {
+    const hx = px + sgn * 1.6 * s, fx = px + sgn * spread;
     ctx.beginPath();
-    ctx.moveTo(px - 3 * s, cy + 1 * s); ctx.lineTo(px - 6.5 * s, cy - 6 * s - a);
-    ctx.moveTo(px + 3 * s, cy + 1 * s); ctx.lineTo(px + 6.5 * s, cy - 6 * s + a);
-    ctx.stroke();
-  } else {
-    ctx.beginPath();
-    ctx.moveTo(px - 3 * s, cy); ctx.lineTo(px - 4.5 * s, cy + 6 * s);
-    ctx.moveTo(px + 3 * s, cy); ctx.lineTo(px + 4.5 * s, cy + 6 * s);
-    ctx.stroke();
+    ctx.moveTo(hx - 1.5 * s, hipY); ctx.lineTo(hx + 1.5 * s, hipY);
+    ctx.lineTo(fx + 1.25 * s, footY); ctx.lineTo(fx - 1.25 * s, footY);
+    ctx.closePath(); ctx.fill();
   }
+  ctx.fillStyle = o.shoes || '#15151d';   // Schuhe
+  for (const sgn of [-1, 1]) { const fx = px + sgn * spread; ctx.beginPath(); ctx.ellipse(fx, footY + 0.4 * s, 2.3 * s, 1.35 * s, 0, 0, 7); ctx.fill(); }
+
+  // ---- Arme (hinter dem Rumpf) + Hände ----
+  const armDraw = () => {
+    ctx.strokeStyle = o.skin || '#ffd9b3';
+    ctx.lineWidth = 2.7 * s; ctx.lineCap = 'round';
+    let hlx, hly, hrx, hry;
+    if (o.arms != null) {
+      const a = Math.sin(o.arms) * 5 * s;
+      hlx = px - 6.6 * s; hly = cy - 6 * s - a; hrx = px + 6.6 * s; hry = cy - 6 * s + a;
+      ctx.beginPath();
+      ctx.moveTo(px - 3.2 * s, cy + 1 * s); ctx.lineTo(hlx, hly);
+      ctx.moveTo(px + 3.2 * s, cy + 1 * s); ctx.lineTo(hrx, hry); ctx.stroke();
+    } else {
+      hlx = px - 4.7 * s; hly = cy + 6 * s; hrx = px + 4.7 * s; hry = cy + 6 * s;
+      ctx.beginPath();
+      ctx.moveTo(px - 3.2 * s, cy - 0.5 * s); ctx.lineTo(hlx, hly);
+      ctx.moveTo(px + 3.2 * s, cy - 0.5 * s); ctx.lineTo(hrx, hry); ctx.stroke();
+    }
+    ctx.fillStyle = o.skin || '#ffd9b3';   // Hände
+    ctx.beginPath(); ctx.arc(hlx, hly, 1.5 * s, 0, 7); ctx.arc(hrx, hry, 1.5 * s, 0, 7); ctx.fill();
+  };
+  armDraw();
 
   // Oberkörper (Kleid/Shirt) — Showgirl-Tänzerin, Frau oder Standard
   if (o.showgirl) {
@@ -760,19 +771,33 @@ function drawPersonAt(px, py, s, o = {}) {
     ctx.closePath(); ctx.fill();
     ctx.fillStyle = 'rgba(255,255,255,0.18)'; roundRectP(px - 3 * s, cy - 3 * s, 2 * s, 8 * s, 1 * s); ctx.fill();
   } else {
+    // Rumpf mit Schultern (oben breiter) + weiche Taille — plastischer als ein reines Rechteck
     ctx.fillStyle = o.color;
-    roundRectP(px - 3.6 * s, cy - 4 * s, 7.2 * s, 11 * s, 3 * s); ctx.fill();
-    if (o.apron) { ctx.fillStyle = o.apron; roundRectP(px - 2.9 * s, cy - 0.5 * s, 5.8 * s, 7.6 * s, 1.4 * s); ctx.fill();   // Barkeeper-Schürze
-      ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fillRect(px - 0.4 * s, cy - 0.5 * s, 0.8 * s, 7 * s); }
+    ctx.beginPath();
+    ctx.moveTo(px - 3.7 * s, cy - 3.3 * s);
+    ctx.quadraticCurveTo(px, cy - 5.1 * s, px + 3.7 * s, cy - 3.3 * s);          // Schulterlinie
+    ctx.quadraticCurveTo(px + 4.4 * s, cy + 1 * s, px + 3.5 * s, cy + 5.4 * s);
+    ctx.quadraticCurveTo(px, cy + 6.3 * s, px - 3.5 * s, cy + 5.4 * s);
+    ctx.quadraticCurveTo(px - 4.4 * s, cy + 1 * s, px - 3.7 * s, cy - 3.3 * s);
+    ctx.closePath(); ctx.fill();
+    if (o.apron) { ctx.fillStyle = o.apron; roundRectP(px - 2.9 * s, cy - 0.5 * s, 5.8 * s, 6.4 * s, 1.4 * s); ctx.fill();   // Barkeeper-Schürze
+      ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fillRect(px - 0.4 * s, cy - 0.5 * s, 0.8 * s, 6 * s); }
     if (o.bowtie) { ctx.fillStyle = '#c0392b';                                 // Fliege
       ctx.beginPath(); ctx.moveTo(px - 2 * s, cy - 3.6 * s); ctx.lineTo(px - 0.2 * s, cy - 2.8 * s); ctx.lineTo(px - 2 * s, cy - 2 * s); ctx.closePath();
       ctx.moveTo(px + 2 * s, cy - 3.6 * s); ctx.lineTo(px + 0.2 * s, cy - 2.8 * s); ctx.lineTo(px + 2 * s, cy - 2 * s); ctx.closePath(); ctx.fill(); }
-    ctx.fillStyle = 'rgba(255,255,255,0.18)'; roundRectP(px - 3 * s, cy - 3 * s, 2 * s, 8 * s, 1 * s); ctx.fill();
+    // Schulter-Highlight (oben-links) + Seiten-Schatten (rechts) für Volumen
+    ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.beginPath(); ctx.ellipse(px - 1.5 * s, cy - 2.4 * s, 2.3 * s, 1.4 * s, -0.35, 0, 7); ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,0.14)'; ctx.beginPath(); ctx.ellipse(px + 2.6 * s, cy + 1.6 * s, 1.2 * s, 3.4 * s, 0, 0, 7); ctx.fill();
   }
 
-  // Kopf
+  // Hals
   ctx.fillStyle = o.skin || '#ffd9b3';
-  ctx.beginPath(); ctx.arc(px, cy - 8 * s, 3.9 * s, 0, Math.PI * 2); ctx.fill();
+  roundRectP(px - 1.5 * s, cy - 6.2 * s, 3 * s, 3 * s, 1 * s); ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,0.12)'; roundRectP(px - 1.5 * s, cy - 4.0 * s, 3 * s, 1.1 * s, 0.5 * s); ctx.fill();   // Kinnschatten
+  // Kopf (leicht überproportioniert für lesbaren, sympathischen Look)
+  ctx.fillStyle = o.skin || '#ffd9b3';
+  ctx.beginPath(); ctx.arc(px, cy - 8 * s, 4.1 * s, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.beginPath(); ctx.arc(px - 1.3 * s, cy - 9.1 * s, 1.5 * s, 0, 7); ctx.fill();   // Wangen-/Stirn-Highlight
   // Haare
   ctx.fillStyle = o.hair || '#2b1c10';
   ctx.beginPath();
@@ -818,6 +843,12 @@ function drawPersonAt(px, py, s, o = {}) {
     ctx.fillStyle = '#1a1a22';
     ctx.beginPath(); ctx.arc(px - 4.4 * s, cy - 7.6 * s, 1.7 * s, 0, 7); ctx.fill();
     ctx.beginPath(); ctx.arc(px + 4.4 * s, cy - 7.6 * s, 1.7 * s, 0, 7); ctx.fill();
+  }
+  if (o.cap) {   // Basecap (moderner DJ-Look)
+    ctx.fillStyle = o.cap;
+    ctx.beginPath(); ctx.arc(px, cy - 8.4 * s, 4.2 * s, Math.PI * 1.02, Math.PI * 2.02); ctx.fill();   // Kappe
+    ctx.beginPath(); ctx.ellipse(px + 3.4 * s, cy - 8.3 * s, 3.2 * s, 1.3 * s, -0.1, Math.PI * 1.1, Math.PI * 2.05); ctx.fill();   // Schirm
+    ctx.fillStyle = 'rgba(255,255,255,0.14)'; ctx.beginPath(); ctx.arc(px - 1 * s, cy - 9.4 * s, 1.2 * s, 0, 7); ctx.fill();
   }
   if (o.shades) { ctx.fillStyle = '#111'; roundRectP(px - 3.4 * s, cy - 9 * s, 6.8 * s, 2 * s, 1); ctx.fill(); }
   if (o.earpiece) {
@@ -1544,11 +1575,10 @@ function drawRoofBg(t) {
     ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.ellipse(x + 13 * s, y + 15 * s, 16 * s, 5 * s, 0, 0, 7); ctx.fill();
     ctx.fillStyle = '#5d6779'; ctx.beginPath(); ctx.roundRect(x, y - 6 * s, 26 * s, 20 * s, 3); ctx.fill();
     ctx.fillStyle = '#49525f'; ctx.beginPath(); ctx.roundRect(x + 3 * s, y - 3 * s, 20 * s, 14 * s, 2); ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 1;
-    for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.moveTo(x + 4 * s, y + i * 3.4 * s - 1); ctx.lineTo(x + 22 * s, y + i * 3.4 * s - 1); ctx.stroke(); }
-    ctx.fillStyle = '#3a4553'; ctx.beginPath(); ctx.arc(x + 13 * s, y + 4 * s, 5.5 * s, 0, 7); ctx.fill();   // Lüfterrad
-    ctx.strokeStyle = '#8a97a8'; ctx.lineWidth = 1.6;
-    for (let i = 0; i < 3; i++) { const an = t * 9 + i * 2.1; ctx.beginPath(); ctx.moveTo(x + 13 * s, y + 4 * s); ctx.lineTo(x + 13 * s + Math.cos(an) * 4.5 * s, y + 4 * s + Math.sin(an) * 4.5 * s); ctx.stroke(); } };
+    // statisches Lüftungsgitter (kein rotierender „Ventilator" mehr — der irritierte unter der Fläche)
+    ctx.fillStyle = '#3a4553'; ctx.beginPath(); ctx.roundRect(x + 5 * s, y - 1 * s, 16 * s, 11 * s, 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(200,215,230,0.35)'; ctx.lineWidth = 1;
+    for (let i = 0; i < 5; i++) { ctx.beginPath(); ctx.moveTo(x + 6 * s, y + 0.4 * s + i * 2.0 * s); ctx.lineTo(x + 20 * s, y + 0.4 * s + i * 2.0 * s); ctx.stroke(); } };
   ac(a.x + 8, b.y - 34, 1.0); ac(a.x + 44, b.y - 26, 0.85);
   // Antenne mit rot blinkendem Licht (oben-rechts)
   { const ax2 = b.x - 26, ay2 = a.y + 12;
@@ -1910,6 +1940,21 @@ function drawRoomDetail(id, t, beat) {
       ctx.fillStyle = '#cfd6e6'; ctx.beginPath(); ctx.arc(dj2.x, dj2.y - u * 1.15, u * 0.16, 0, 7); ctx.fill();   // Disco-Kugel
       ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.beginPath(); ctx.arc(dj2.x - u * 0.05, dj2.y - u * 1.2, u * 0.05, 0, 7); ctx.fill(); }
 
+    // --- DJ (Terminal 2): moderne LED-Kanzel oben-mittig — anderes Design als T1 (Cap statt Kopfhörer) ---
+    { const djx = fl.x + fl.w / 2, djy = 2.35;
+      dShadow(djx - 1.05, djy + 0.05, 2.1, 0.7);
+      dBox(djx - 1.05, djy - 0.2, 2.1, 0.7, u * 0.6, '#141826', '#0a0c14', '#20263a');            // Pult-Korpus
+      { const a = detailProj(djx - 1.05, djy + 0.5), c = detailProj(djx + 1.05, djy + 0.5);       // LED-Front (cyan, pulsiert)
+        ctx.save(); ctx.globalCompositeOperation = 'lighter';
+        for (let i = 0; i < 11; i++) { const bx = a.x + (c.x - a.x) * (i + 0.5) / 11;
+          ctx.fillStyle = `hsla(${185 + 15 * Math.sin(i)},95%,60%,${0.28 + 0.5 * Math.abs(Math.sin(beat * 1.3 + i))})`;
+          ctx.fillRect(bx - 1.6, a.y - u * 0.5, 3.2, u * 0.48); }
+        ctx.restore(); }
+      for (const dx of [djx - 0.42, djx + 0.42]) { const p = detailProj(dx, djy + 0.08); ctx.strokeStyle = '#4fe0ff'; ctx.lineWidth = 2;   // 2 CDJ-Decks
+        ctx.beginPath(); ctx.arc(p.x, p.y - u * 0.64, u * 0.13, t * 4, t * 4 + Math.PI * 1.4); ctx.stroke(); }
+      if (roomUnlocked('t2')) dPerson(djx, djy + 0.62, { s: 1.12, color: '#13b7b7', pants: '#101820', skin: '#f0b98c', hair: '#141018', cap: '#0e6e6e', arms: beat, bob: Math.sin(beat) * 2, groundZ: u * 0.55 });
+      dLabel(djx, djy - 0.45, 'DJ', '#7ff0ff', 9); }
+
     // --- CHAMPAGNER-LOUNGE (Station 'champus'): Bar oben-links, Flaschen in Eiskübeln + Wunderkerzen ---
     { const bx = 9.9, by = 1.55, bt = sT('champus');
       dShadow(bx - 0.05, by + 0.15, 2.9, 1.0);
@@ -1999,6 +2044,17 @@ function drawRoomDetail(id, t, beat) {
     ctx.font = `${u * 0.3}px sans-serif`; ctx.textAlign = 'center';
     for (let i = 0; i < 5; i++) { const p = detailProj(10.2 + i * 0.5, 11.0); ctx.fillText(['🍹','🍸','🥃','🍹','🍸'][i], p.x, p.y - u * 0.95); }
     if (roomUnlocked('roof')) dPerson(11.2, 11.9, { s: 1.05, color: '#e6f2f5', pants: '#12303a', skin: '#c68a53', hair: '#1a1a22', bob: Math.sin(t * 2.8) * 1.6, groundZ: u * 0.5 });
+    // --- DJ (Rooftop): Open-Air-Holzkanzel rechts der Skybar — Sonnenbrille, Ibiza-Look (anders als T1/T2) ---
+    { const djx = 14.7, djy = 10.55;
+      dShadow(djx - 0.9, djy + 0.1, 1.8, 0.65);
+      dBox(djx - 0.9, djy - 0.15, 1.8, 0.65, u * 0.58, '#6a4a2c', '#3e2a17', '#8a6238');       // Rattan/Holz-Pult
+      ctx.strokeStyle = 'rgba(0,0,0,0.18)'; ctx.lineWidth = 1;
+      { const a = detailProj(djx - 0.9, djy + 0.5), c = detailProj(djx + 0.9, djy + 0.5);
+        for (let i = 1; i < 6; i++) { const bx = a.x + (c.x - a.x) * i / 6; ctx.beginPath(); ctx.moveTo(bx, a.y - u * 0.55); ctx.lineTo(bx, a.y); ctx.stroke(); } }
+      for (const dx of [djx - 0.36, djx + 0.36]) { const p = detailProj(dx, djy + 0.06); ctx.strokeStyle = '#ffd98a'; ctx.lineWidth = 2;   // Decks
+        ctx.beginPath(); ctx.arc(p.x, p.y - u * 0.62, u * 0.12, t * 4, t * 4 + Math.PI * 1.4); ctx.stroke(); }
+      if (roomUnlocked('roof')) dPerson(djx, djy + 0.58, { s: 1.1, color: '#f2efe6', pants: '#d8cfbe', skin: '#f0b98c', hair: '#caa24a', shades: true, arms: beat, bob: Math.sin(beat) * 2, groundZ: u * 0.55 });
+      dLabel(djx, djy - 0.4, 'DJ', '#ffe0a0', 9); }
     // === VIP-Signatur: goldene Kordel am Eingang + Champagner-Kübel (Rooftop ist der VIP-Bereich) ===
     { const goldStanch = (wx, wy) => { const p = detailProj(wx, wy);
         ctx.strokeStyle = '#e8c56a'; ctx.lineWidth = 2.4; ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x, p.y - u * 0.5); ctx.stroke();
