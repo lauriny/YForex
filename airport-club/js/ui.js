@@ -77,6 +77,11 @@ export function updateHUD() {
   const ugBadge = $('#badge-ug');
   ugBadge.classList.toggle('on', ugUnseen || !!G.activeJob());
   ugBadge.textContent = G.activeJob() ? '⏳' : (ugUnseen ? '!' : '');
+  // „Das Boot"-Endgame: einmalige Ankündigung, wenn erreichbar
+  if (G.bootProgress().ready && !G.state.bootTeased) {
+    G.state.bootTeased = true; playSfx('chest'); confetti(40);
+    toast('🚢 „Das Boot" ist bereit — das große Franchise-Endgame wartet!');
+  }
 
   // Boost-Button
   const bs = G.boostState();
@@ -396,6 +401,10 @@ function buildGoals() {
   const ndj = DJS.find(d => !G.djOwned(d.id));
   if (ndj) out.push({ icon: ndj.icon, title: `DJ: ${ndj.name}`, sub: ndj.desc, done: false, progress: s.money / ndj.cost, reqLabel: `${fmt(ndj.cost)} €` });
   out.push({ icon: '♻️', title: 'Neueröffnung (Prestige)', sub: 'Ruf-Sterne für dauerhaften Bonus', done: s.fame > 0, progress: s.level / PRESTIGE.minLevel, reqLabel: `Level ${PRESTIGE.minLevel} · du: ${s.level}` });
+  const bp = G.bootProgress();
+  out.push({ icon: '🚢', title: 'Franchise: „Das Boot“', sub: 'Der 2. Club (Würzburg) — 3 Etagen, Wasser-Theme. Das große Endgame.',
+    done: bp.ready, progress: Math.min(bp.fame / bp.fameReq, bp.lifetime / bp.ltReq),
+    reqLabel: `${bp.fame}/${bp.fameReq} ⭐ Ruf · ${fmt(bp.lifetime)} / ${fmt(bp.ltReq)} €` });
   return out;
 }
 function openGoalsModal() {

@@ -314,6 +314,8 @@ let guests = [];
 let guestPool = [];    // recycelte Gäste-Objekte (Object-Pooling gegen GC-Ruckler)
 let taxis = [];        // vorbeifahrende Taxen, die vor dem Eingang Gäste absetzen
 let taxiTimer = 5;
+let passers = [];      // Passanten, die über den Bürgersteig laufen (Street-Life)
+let passerTimer = 2;
 let goldBottle = null; // Goldene Flasche: spawnt zufällig im gezeigten Raum, Antippen = Bonus
 let gbTimer = 25;
 function updateGoldBottle(dt) {
@@ -373,6 +375,16 @@ function updateTaxis(dt) {
       if (tx.tm <= 0) tx.state = 'go';
     } else { tx.fx += dt * (tx.kind === 'super' ? 0.5 : 0.42); if (tx.fx > 1.3) taxis.splice(i, 1); }
   }
+  // --- Passanten auf dem Bürgersteig (laufen einfach vorbei) ---
+  passerTimer -= dt;
+  if (passerTimer <= 0 && passers.length < 5 && roomUnlocked('t1')) {
+    passerTimer = rnd(1.4, 3.8);
+    const dir = Math.random() < 0.5 ? 1 : -1;
+    passers.push({ fx: dir === 1 ? -0.06 : 1.06, dir, speed: rnd(0.05, 0.085), lane: rnd(0.28, 0.72), phase: Math.random() * 7,
+      color: pick(GUEST_COLORS), skin: pick(SKIN), hair: pick(HAIR), female: Math.random() < 0.5 });
+  }
+  for (let i = passers.length - 1; i >= 0; i--) { const q = passers[i]; q.fx += q.dir * q.speed * dt;
+    if (q.fx < -0.12 || q.fx > 1.12) passers.splice(i, 1); }
 }
 function rnd(a, b) { return a + Math.random() * (b - a); }
 function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -1462,6 +1474,15 @@ function drawStreetFg(t) {
   const cy0 = roadY - 6;
   trash(42, cy0, 1.0, '#3f6b4a'); trash(60, cy0 + 2, 0.85, '#4a5566');
   hydrant(W - 26, cy0, 1.0); trash(W - 50, cy0 + 2, 0.9, '#5a4a3a');
+  // --- Passanten auf dem Bürgersteig (kleine Figuren, laufen vorbei) ---
+  { const ps = Math.max(0.9, (roadY - bandTop) * 0.05);
+    for (const q of passers) {
+      const px = q.fx * W, py = bandTop + (roadY - bandTop) * q.lane;
+      const walk = Math.sin(performance.now() / 1000 * 6 + q.phase);   // Gang-Wackeln
+      drawPersonAt(px, py, ps, { color: q.color, skin: q.skin, hair: q.hair, female: q.female,
+        bob: Math.abs(walk) * 1.2 * ps, arms: null, alpha: 0.96 });
+    }
+  }
   // --- Taxen auf der Straße ---
   for (const tx of taxis) drawTaxi(roadY + roadH * 0.52, roadH, tx);
   ctx.restore();
