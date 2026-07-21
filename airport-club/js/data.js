@@ -67,6 +67,43 @@ export const OFFLINE = { cap: 8 * 3600, eff: 0.3 };       // Offline: max 8 h, 3
 export const CELEB = { minGap: 180, maxGap: 360, stay: 20 }; // Promi-Gast (Sekunden)
 export const PRESTIGE = { minLevel: 25, div: 5e10, multPerStar: 0.25 };
 
+// ---- Globale Rangliste (Rivalen-System) ------------------------
+// Offline simuliert: fiktive Club-Bosse mit „Vermögen". Der Spieler misst sich
+// über sein Lifetime-Vermögen. Jeder überholte Rivale gibt eine einmalige Belohnung
+// (Diamanten) + einen kleinen dauerhaften Einkommens-Bonus (bindet & motiviert).
+export const RIVAL_OVERTAKE_MULT = 0.015;   // +1,5 % Einkommen je überholtem Rivalen (dauerhaft)
+export const RIVALS = [
+  { id: 'r01', name: 'DJ Kevin',        worth: 3.0e3,  gems: 1 },
+  { id: 'r02', name: 'Tanja vom Tresen',worth: 2.5e4,  gems: 1 },
+  { id: 'r03', name: 'Malle-Manni',     worth: 1.8e5,  gems: 2 },
+  { id: 'r04', name: 'Baron von Beat',  worth: 1.2e6,  gems: 2 },
+  { id: 'r05', name: 'Ibiza-Iggy',      worth: 8.0e6,  gems: 3 },
+  { id: 'r06', name: 'Lady Lumière',    worth: 5.0e7,  gems: 3 },
+  { id: 'r07', name: 'Don Discoteca',   worth: 3.0e8,  gems: 4 },
+  { id: 'r08', name: 'Sheikh Sound',    worth: 2.0e9,  gems: 5 },
+  { id: 'r09', name: 'Vegas Vivian',    worth: 1.4e10, gems: 6 },
+  { id: 'r10', name: 'Mr. Manhattan',   worth: 9.0e10, gems: 8 },
+  { id: 'r11', name: 'Tycoon Tao',      worth: 6.0e11, gems: 10 },
+  { id: 'r12', name: 'Elon M.',         worth: 5.0e12, gems: 14 },
+  { id: 'r13', name: 'König der Nacht',  worth: 4.0e13, gems: 20 },
+];
+
+// ---- Untergrund-Wirtschaft („Das Hinterzimmer") ----------------
+// Riskante Zeit-Jobs: kosten Einsatz, dauern Minuten, bringen fette Boni — oder scheitern.
+// „Heat" steigt pro Job und erhöht die Fehlschlag-Chance (Risiko/Belohnung, kein Spam).
+export const UNDERGROUND_REQ = { level: 8 };          // ab Level 8 spielbar
+export const HEAT_MAX = 100;
+export const HEAT_DECAY = 100 / (12 * 60);            // volle Abkühlung in ~12 Min
+export const UNDERGROUND_JOBS = [
+  { id: 'schmuggel', name: 'Zigaretten-Schmuggel', icon: '📦', dur: 45,  stakeSec: 20,  reward: 3.0, risk: 0.10, heat: 12, txt: 'Ein paar Stangen über die Grenze.' },
+  { id: 'tuersteher',name: 'Schutzgeld eintreiben',icon: '💪', dur: 90,  stakeSec: 45,  reward: 3.4, risk: 0.16, heat: 18, txt: 'Die Nachbar-Bar zahlt „freiwillig".' },
+  { id: 'falschgeld',name: 'Falschgeld waschen',   icon: '💵', dur: 180, stakeSec: 120, reward: 4.2, risk: 0.24, heat: 28, txt: 'Über die Garderobe läuft am meisten.' },
+  { id: 'waffendeal',name: 'Waffendeal',           icon: '🔫', dur: 300, stakeSec: 260, reward: 5.5, risk: 0.34, heat: 42, txt: 'Hohes Risiko, fettes Geld.' },
+];
+
+// ---- Endgame-Ziel: Franchise „Das Boot" (Teaser/Gate) ----------
+export const BOOT_REQ = { fame: 3, lifetime: 5e12 };  // erst mit Prestige-Sternen + Vermögen
+
 // ---- Live-Events (Happy Hour / Rush) ---------------------------
 export const EVENT_GAP = { min: 210, max: 420 };          // Sekunden zwischen Events
 export const EVENTS = [

@@ -1230,3 +1230,37 @@ button { font-family: inherit; border: none; background: none; cursor: pointer; 
   color: inherit; font: inherit; font-weight: 700; letter-spacing: 2px;
 }
 .dev-code-row .btn-flat { flex: 0 0 auto; width: auto; padding-inline: 18px; }
+
+/* ---- Weltrangliste (Rivalen) ---- */
+.rival-list { display: flex; flex-direction: column; gap: 5px; margin-top: 6px; }
+.rival-row {
+  display: grid; grid-template-columns: 40px 1fr auto; align-items: center; gap: 8px;
+  padding: 9px 12px; border-radius: 12px; background: rgba(255,255,255,0.05);
+  border: 2px solid rgba(0,0,0,0.12); color: var(--cream);
+}
+.rival-row .rr-rank { font-weight: 800; color: var(--brown-2); opacity: .8; }
+.rival-row .rr-name { font-weight: 700; }
+.rival-row .rr-worth { font-weight: 800; font-variant-numeric: tabular-nums; opacity: .9; }
+.rival-row.beaten { opacity: .62; }
+.rival-row.beaten .rr-tick { color: var(--green); }
+.rival-row.me {
+  background: linear-gradient(180deg, rgba(139,92,246,.32), rgba(139,92,246,.14));
+  border-color: var(--purple); box-shadow: 0 0 0 1px var(--purple) inset, 0 6px 16px rgba(139,92,246,.3);
+  color: #fff;
+}
+.rival-row.me .rr-rank, .rival-row.me .rr-worth { color: #fff; opacity: 1; }
+
+/* ---- Hinterzimmer (Untergrund) ---- */
+.ug-modal .ug-heat { margin: 4px 4px 12px; }
+.ug-heat > span:first-child { font-weight: 800; color: var(--red); }
+.ug-heatbar { height: 10px; border-radius: 6px; background: rgba(0,0,0,0.28); overflow: hidden; margin: 5px 0 3px; }
+.ug-heatfill { height: 100%; background: linear-gradient(90deg, #ffb03a, #ff5e3a); transition: width .3s; }
+.ug-heat-hint { font-size: 11px; opacity: .6; }
+.ug-active { text-align: center; padding: 16px; border-radius: 16px; margin: 8px 2px;
+  background: rgba(139,92,246,.14); border: 2px solid var(--purple-b); }
+.ug-active-h { font-size: 17px; margin-bottom: 10px; }
+.ug-prog { height: 14px; border-radius: 8px; background: rgba(0,0,0,0.3); overflow: hidden; }
+.ug-progfill { height: 100%; background: linear-gradient(90deg, var(--purple-2), var(--purple)); transition: width .3s; }
+.ug-result { text-align: center; font-weight: 800; padding: 11px; border-radius: 12px; margin: 6px 2px 12px; }
+.ug-result.ok   { background: rgba(67,217,94,.16); border: 2px solid var(--green-d); color: #eafff0; }
+.ug-result.fail { background: rgba(255,94,108,.16); border: 2px solid #b0333f; color: #ffecef; }

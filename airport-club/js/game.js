@@ -8,6 +8,7 @@ import {
   BOOST, DROP, OFFLINE, CELEB, PRESTIGE,
   EVENTS, EVENT_GAP, WHEEL, DAILY_MIN_GAP_H, DAILY_STREAK_MAX, ACHIEVEMENTS,
   getPhase, chestReward, costOf, bulkCost, maxAffordable, milestoneMult,
+  RIVALS, RIVAL_OVERTAKE_MULT, UNDERGROUND_JOBS, UNDERGROUND_REQ, HEAT_MAX, HEAT_DECAY, BOOT_REQ,
 } from './data.js';
 
 const SAVE_KEY = 'airportClub.save.v1';
@@ -61,6 +62,9 @@ export const state = {
   settings: { sound: true, music: true, musicStyle: 'house' },
   devMode: false,          // Dev-Modus (per Code in den Einstellungen)
   nightStreak: 0,          // wie viele Club-Nächte in Folge durchgezogen
+  rivals: { beaten: [], seeded: false },  // ids überholter Rivalen (dauerhafter Einkommens-Bonus)
+  underground: { unlocked: false, job: null, heat: 0, done: 0, lastResult: null },
+  bootTeased: false,       // „Das Boot"-Endgame schon einmal angekündigt?
   createdAt: Date.now(),
 };
 
@@ -122,11 +126,107 @@ export function eventMult() { const d = eventDef(); return d ? d.mult : 1; }
 export function eventGuestMult() { const d = eventDef(); return d ? d.guests : 1; }
 
 export function globalMult() {
-  let m = staffGlobalMult() * fameMult() * djMult();
+  let m = staffGlobalMult() * fameMult() * djMult() * rivalMult();
   if (boostActive()) m *= BOOST.mult;
   if (dropActive()) m *= DROP.mult;
   if (eventActive()) m *= eventMult();
   return m;
+}
+
+// ---- Globale Rangliste (Rivalen) -----------------------------------
+export function rivalMult() { return 1 + (state.rivals?.beaten?.length || 0) * RIVAL_OVERTAKE_MULT; }
+export function playerWorth() { return state.lifetime; }
+// Rangliste absteigend nach Vermögen, Spieler eingefügt
+export function rivalBoard() {
+  const pw = playerWorth();
+  const rows = RIVALS.map(r => ({ id: r.id, name: r.name, worth: r.worth, gems: r.gems, isPlayer: false, beaten: (state.rivals?.beaten || []).includes(r.id) }));
+  rows.push({ id: 'player', name: 'DU', worth: pw, isPlayer: true });
+  rows.sort((a, b) => b.worth - a.worth);
+  return rows;
+}
+export function rivalRank() {
+  const pw = playerWorth();
+  let rank = 1;
+  for (const r of RIVALS) if (r.worth > pw) rank++;
+  return rank;                              // 1 = Weltspitze
+}
+export function nextRival() {
+  const pw = playerWorth();
+  let best = null;
+  for (const r of RIVALS) if (r.worth > pw && (!best || r.worth < best.worth)) best = r;
+  return best;                             // der nächste zu überholende (oder null = ganz oben)
+}
+// prüft Überholmanöver, vergibt einmalige Belohnungen
+export function checkRivals() {
+  const pw = playerWorth();
+  const beaten = state.rivals.beaten || (state.rivals.beaten = []);
+  let gems = 0, newly = [];
+  for (const r of RIVALS) {
+    if (r.worth <= pw && !beaten.includes(r.id)) { beaten.push(r.id); gems += r.gems; newly.push(r); }
+  }
+  if (!state.rivals.seeded) {   // erster Lauf (neues Spiel ODER Alt-Save): Bestand still nachtragen
+    state.rivals.seeded = true;
+    return;
+  }
+  if (!newly.length) return;
+  state.gems += gems;
+  const top = newly.reduce((a, b) => (b.worth > a.worth ? b : a));
+  emit('rivalBeaten', { name: top.name, gems, count: newly.length, rank: rivalRank() });
+}
+
+// ---- Untergrund-Wirtschaft („Das Hinterzimmer") --------------------
+export function undergroundUnlocked() {
+  if (state.underground.unlocked) return true;
+  if (state.level >= UNDERGROUND_REQ.level) { state.underground.unlocked = true; return true; }
+  return false;
+}
+export function jobStake(job) { return Math.max(50, incomePerSec() * job.stakeSec); }
+export function jobReward(job) { return jobStake(job) * job.reward; }
+export function jobFailChance(job) { return Math.min(0.85, job.risk + (state.underground.heat / HEAT_MAX) * 0.4); }
+export function activeJob() {
+  const u = state.underground;
+  if (!u.job) return null;
+  const def = UNDERGROUND_JOBS.find(j => j.id === u.job.id);
+  return def ? { def, endsAt: u.job.endsAt, stake: u.job.stake, left: Math.max(0, (u.job.endsAt - Date.now()) / 1000) } : null;
+}
+export function startJob(id) {
+  const u = state.underground;
+  if (u.job || !undergroundUnlocked()) return false;
+  const job = UNDERGROUND_JOBS.find(j => j.id === id);
+  if (!job) return false;
+  const stake = jobStake(job);
+  if (state.money < stake) return false;
+  state.money -= stake;
+  u.job = { id, endsAt: Date.now() + job.dur * 1000, stake };
+  u.lastResult = null;
+  save();
+  return true;
+}
+function resolveJob() {
+  const u = state.underground;
+  const def = UNDERGROUND_JOBS.find(j => j.id === u.job.id);
+  const stake = u.job.stake;
+  const fail = Math.random() < jobFailChance(def);
+  u.job = null;
+  u.heat = Math.min(HEAT_MAX, u.heat + def.heat * (fail ? 1.3 : 1));
+  u.done = (u.done || 0) + 1;
+  let res;
+  if (fail) {
+    res = { ok: false, name: def.name, lost: stake };
+  } else {
+    const gain = stake * def.reward;
+    addMoney(gain, 'underground');
+    res = { ok: true, name: def.name, gain };
+  }
+  u.lastResult = res;
+  emit('ugDone', res);
+  save();
+}
+
+// ---- Endgame „Das Boot" (Teaser-Gate) ------------------------------
+export function bootProgress() {
+  return { fame: state.fame, fameReq: BOOT_REQ.fame, lifetime: state.lifetime, ltReq: BOOT_REQ.lifetime,
+    ready: state.fame >= BOOT_REQ.fame && state.lifetime >= BOOT_REQ.lifetime };
 }
 
 export function incomePerSec() {
@@ -671,8 +771,12 @@ export function tick(now) {
   if (state.event && nowMs > state.event.expires) { state.event = null; emit('eventEnd'); }
   if (!state.event && nowMs > state.nextEventAt) startRandomEvent();
 
+  // Untergrund: Job abschließen + Heat abkühlen
+  if (state.underground.job && nowMs >= state.underground.job.endsAt) resolveJob();
+  if (state.underground.heat > 0) state.underground.heat = Math.max(0, state.underground.heat - HEAT_DECAY * dt);
+
   questTimer += dt;
-  if (questTimer > 0.5) { questTimer = 0; checkQuests(); }
+  if (questTimer > 0.5) { questTimer = 0; checkQuests(); checkRivals(); }
 
   saveTimer += dt;
   if (saveTimer > 5) { saveTimer = 0; save(); }

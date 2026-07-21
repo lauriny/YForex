@@ -6,6 +6,7 @@ import {
   STATIONS, STATION_MAP, STAFF, STAFF_MAP, SHOP, ROOMS,
   T2_REQ, ROOF_REQ, PERFORMER, AUTOCOLLECT, CLUB_EXPAND, WHEEL, ACHIEVEMENTS, PRESTIGE,
   MARKETING, DJS, DJ_MAP, DRINKS, CLUB_THEMES,
+  UNDERGROUND_JOBS, HEAT_MAX, BOOT_REQ,
   autoCollectInterval, MILESTONE_STEP, fmt, fmtTime, costOf, milestoneMult, nextMilestone,
 } from './data.js';
 import { playSfx, setMusic, cycleMusicStyle, currentMusicStyleName, setMusicStyle } from './sfx.js';
@@ -28,6 +29,7 @@ const el = (tag, cls, html) => {
 
 let buyMode = 1; // 1 | 10 | 25 | 'max'
 const BUY_MODES = [1, 10, 25, 'max'];
+let rivalUnseen = false, ugUnseen = false, ugWasUnlocked = false;   // Seiten-Button-Badges
 
 // ------------------------------------------------------------------
 //  HUD
@@ -66,6 +68,15 @@ export function updateHUD() {
   badgeAch.classList.toggle('on', claimable);
   badgeAch.textContent = claimable ? '!' : '';
   $('#btn-showact').classList.toggle('hidden', !(G.state.performer.unlocked || G.state.level >= PERFORMER.level));
+  // Weltrangliste-Badge (neuer Überhol-Erfolg)
+  $('#badge-rivals').classList.toggle('on', rivalUnseen);
+  // Hinterzimmer: sichtbar ab Freischaltung; Badge bei fertigem Job
+  const ugUnlocked = G.undergroundUnlocked();
+  $('#btn-underground').classList.toggle('hidden', !ugUnlocked);
+  if (ugUnlocked && !ugWasUnlocked) { ugWasUnlocked = true; toast('🕶️ Das Hinterzimmer hat geöffnet…'); }
+  const ugBadge = $('#badge-ug');
+  ugBadge.classList.toggle('on', ugUnseen || !!G.activeJob());
+  ugBadge.textContent = G.activeJob() ? '⏳' : (ugUnseen ? '!' : '');
 
   // Boost-Button
   const bs = G.boostState();
@@ -759,6 +770,76 @@ function openAchievementsModal() {
   });
 }
 
+// ---- Weltrangliste (Rivalen) -----------------------------------------------------
+function openRivalsModal() {
+  G.state._rivalSeen = (G.state.rivals?.beaten || []).length;   // Badge quittieren
+  openModal('🌍 Weltrangliste', body => {
+    const render = () => {
+      const rank = G.rivalRank(), board = G.rivalBoard(), nx = G.nextRival();
+      body.innerHTML = `<div class="modal-text">Dein Rang: <b>#${rank}</b> von ${board.length} · dauerhafter Bonus: <b style="color:#43d95e">+${Math.round((G.rivalMult() - 1) * 100)} %</b> Einkommen</div>`;
+      body.insertAdjacentHTML('beforeend', nx
+        ? `<div class="modal-text">🎯 Nächstes Ziel: <b>${nx.name}</b> — noch <b>${fmt(nx.worth - G.playerWorth())} €</b> Vermögen (Career-€)</div>`
+        : `<div class="modal-text">👑 Du bist der reichste Club-Boss der Welt!</div>`);
+      const list = el('div', 'rival-list');
+      board.forEach((r, i) => {
+        const row = el('div', 'rival-row' + (r.isPlayer ? ' me' : (r.beaten ? ' beaten' : '')));
+        row.innerHTML = `<span class="rr-rank">#${i + 1}</span>
+          <span class="rr-name">${r.isPlayer ? '⭐ DU' : r.name}${r.beaten ? ' <span class="rr-tick">✓</span>' : ''}</span>
+          <span class="rr-worth">${fmt(r.worth)} €</span>`;
+        list.appendChild(row);
+      });
+      body.appendChild(list);
+    };
+    render(); setRefresher(render);
+  });
+  updateHUD();
+}
+
+// ---- Untergrund-Wirtschaft („Das Hinterzimmer") ----------------------------------
+function openUndergroundModal() {
+  openModal('🕶️ Das Hinterzimmer', body => {
+    body.classList.add('ug-modal');
+    const render = () => {
+      const u = G.state.underground;
+      body.innerHTML = `<div class="ug-heat"><span>🔥 Heat ${Math.round(u.heat)} %</span>
+        <div class="ug-heatbar"><div class="ug-heatfill" style="width:${(u.heat / HEAT_MAX * 100).toFixed(0)}%"></div></div>
+        <span class="ug-heat-hint">Heat erhöht das Risiko — lass den Laden abkühlen.</span></div>`;
+      const active = G.activeJob();
+      if (active) {
+        const p = (1 - active.left / active.def.dur) * 100;
+        body.insertAdjacentHTML('beforeend', `<div class="ug-active">
+          <div class="ug-active-h">${active.def.icon} <b>${active.def.name}</b> läuft…</div>
+          <div class="ug-prog"><div class="ug-progfill" style="width:${p.toFixed(1)}%"></div></div>
+          <div class="modal-text">Fertig in <b>${fmtTime(active.left)}</b> · Einsatz ${fmt(active.stake)} €</div></div>`);
+      } else {
+        if (u.lastResult) {
+          const r = u.lastResult;
+          body.insertAdjacentHTML('beforeend', `<div class="ug-result ${r.ok ? 'ok' : 'fail'}">${r.ok
+            ? `✅ ${r.name} erfolgreich — <b>+${fmt(r.gain)} €</b>`
+            : `🚨 ${r.name} ist aufgeflogen — <b>−${fmt(r.lost)} €</b>`}</div>`);
+        }
+        UNDERGROUND_JOBS.forEach(job => {
+          const stake = G.jobStake(job), reward = G.jobReward(job), fail = Math.round(G.jobFailChance(job) * 100);
+          const afford = G.state.money >= stake;
+          const row = el('div', 'station-row' + (afford ? '' : ' dim'));
+          row.innerHTML = `
+            <div class="st-icon">${job.icon}</div>
+            <div class="st-info">
+              <div class="st-name">${job.name} <span class="st-lvl">Risiko ${fail} %</span></div>
+              <div class="st-desc">${job.txt}<br>⏱️ ${fmtTime(job.dur)} · Einsatz ${fmt(stake)} € · Gewinn <b style="color:#43d95e">${fmt(reward)} €</b></div>
+            </div>
+            <button class="btn-buy${afford ? '' : ' disabled'}"><span>Starten</span></button>`;
+          if (afford) row.querySelector('.btn-buy').addEventListener('click', () => {
+            if (G.startJob(job.id)) { playSfx('click'); render(); updateHUD(); }
+          });
+          body.appendChild(row);
+        });
+      }
+    };
+    render(); setRefresher(render);
+  });
+}
+
 // ---- Einstellungen ---------------------------------------------------------------
 function openSettingsModal() {
   openModal('⚙️ Einstellungen', body => {
@@ -930,6 +1011,8 @@ export function initUI() {
   $('#btn-goals').addEventListener('click', openGoalsModal);
   $('#btn-daily').addEventListener('click', openDailyModal);
   $('#btn-ach').addEventListener('click', openAchievementsModal);
+  $('#btn-rivals').addEventListener('click', () => { rivalUnseen = false; openRivalsModal(); });
+  $('#btn-underground').addEventListener('click', () => { ugUnseen = false; openUndergroundModal(); });
   $('#btn-showact').addEventListener('click', openPerformerModal);
   // Zurück aus der Raum-Detailansicht
   $('#room-back').addEventListener('click', closeRoomView);
@@ -965,6 +1048,10 @@ export function initUI() {
   G.on('event', def => { playSfx('boost'); toast(`${def.icon} ${def.name}! ${def.txt}`); });
   G.on('eventEnd', () => {});
   G.on('achievement', a => { playSfx('level'); toast(`🏆 Erfolg: ${a.name} · +${a.gems} 💎`); });
+  G.on('rivalBeaten', ({ name, gems, count }) => { rivalUnseen = true; playSfx('chest'); confetti(24);
+    toast(`🌍 Rivale überholt: ${name}${count > 1 ? ` +${count - 1}` : ''} · +${gems} 💎`); updateHUD(); });
+  G.on('ugDone', r => { ugUnseen = true; playSfx(r.ok ? 'chest' : 'click');
+    toast(r.ok ? `🕶️ Job erledigt: +${fmt(r.gain)} €` : `🚨 Job aufgeflogen: −${fmt(r.lost)} €`); updateHUD(); });
   G.on('combo', ({ n, mult }) => { if (n === 2 || n % 3 === 0) { playSfx('tap'); toast(`🔥 COMBO ×${n} — ${Math.round((mult - 1) * 100)} % Bonus!`); } });
   G.on('nightReport', r => nightReportPopup(r));
   G.on('boost', () => {});
