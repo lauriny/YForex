@@ -1264,3 +1264,14 @@ button { font-family: inherit; border: none; background: none; cursor: pointer; 
 .ug-result { text-align: center; font-weight: 800; padding: 11px; border-radius: 12px; margin: 6px 2px 12px; }
 .ug-result.ok   { background: rgba(67,217,94,.16); border: 2px solid var(--green-d); color: #eafff0; }
 .ug-result.fail { background: rgba(255,94,108,.16); border: 2px solid #b0333f; color: #ffecef; }
+
+/* Beschaffungs-Run: Vollbild-Stealth-Map – Club-Bedienelemente ausblenden */
+body.run-mode #hud,
+body.run-mode #upgrade-cards,
+body.run-mode #room-hud,
+body.run-mode #side-rail,
+body.run-mode #income-rate,
+body.run-mode #hype-meter,
+body.run-mode #tap-hint,
+body.run-mode #event-banner,
+body.run-mode #bottomnav { display: none !important; }

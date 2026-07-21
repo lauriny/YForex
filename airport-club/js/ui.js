@@ -1087,6 +1087,12 @@ export function initUI() {
     toast(`🌍 Rivale überholt: ${name}${count > 1 ? ` +${count - 1}` : ''} · +${gems} 💎`); updateHUD(); });
   G.on('ugDone', r => { ugUnseen = true; playSfx(r.ok ? 'chest' : 'click');
     toast(r.ok ? `🕶️ Job durchgezogen: +${fmt(r.gain)} €` : `🚨 Erwischt: −${fmt(r.lost)} €`); updateHUD(); });
+  // Schwarzmarkt: Run-Modus blendet die Club-Bedienelemente aus
+  G.on('runStart', () => { document.body.classList.add('run-mode'); });
+  const endRun = () => { document.body.classList.remove('run-mode'); updateHUD(); };
+  G.on('runDone', ({ qty }) => { endRun(); playSfx('chest'); confetti(16); toast(`📦 Run erfolgreich — ${qty} Ware im Lager!`); });
+  G.on('runAbort', ({ busted }) => { endRun(); if (!busted) toast('🏃 Run abgebrochen — Einsatz futsch.'); });
+  G.on('dealDone', r => { updateHUD(); });
   G.on('raid', ({ left, reason }) => { playSfx('milestone');
     toast(reason === 'body'
       ? `🚨 Die Leiche wurde gefunden — RAZZIA! Club ${left}s dicht.`
@@ -1170,6 +1176,25 @@ export function canvasFeedback(fb) {
   } else if (fb.type === 'ugbust') {
     floatText({ x: fb.x, y: fb.y - 10 }, '🚨 ERWISCHT!', 'float-celeb');
     playSfx('milestone');
+  } else if (fb.type === 'runStart') {
+    playSfx('buy');
+  } else if (fb.type === 'runGrab') {
+    playSfx('chest');
+  } else if (fb.type === 'runNoCash') {
+    floatText({ x: fb.x, y: fb.y - 10 }, '❌ Zu wenig Geld', 'float-celeb');
+    playSfx('click');
+  } else if (fb.type === 'dealInstant') {
+    floatText({ x: fb.x, y: fb.y - 10 }, `🤝 Deal! +${fmt(fb.price)} €`, 'float-money');
+    playSfx('chest'); confetti(10);
+  } else if (fb.type === 'dealOk') {
+    floatText({ x: fb.x, y: fb.y - 10 }, `💰 Verkauft! +${fmt(fb.price)} €`, 'float-money');
+    playSfx('buy'); confetti(8);
+  } else if (fb.type === 'dealCounter') {
+    floatText({ x: fb.x, y: fb.y - 10 }, `😒 Gegenangebot ${fmt(fb.counter)} €`, 'float-buy');
+    playSfx('click');
+  } else if (fb.type === 'dealWalkout') {
+    floatText({ x: fb.x, y: fb.y - 10 }, fb.wucher ? '😡 Wucher! Weg.' : '🚪 Kunde geht…', 'float-celeb');
+    playSfx('click');
   } else if (fb.type === 'locked') {
     // Tap auf den gesperrten Nachbarraum → Freischalt-Dialog
     playSfx('click');
