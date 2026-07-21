@@ -17,6 +17,7 @@ const ROOM_META = {
   klo:  { icon: '🚻', name: 'WC',                sub: 'Waschräume' },
   t2:   { icon: '🪩', name: 'Terminal 2',        sub: 'Zweiter Floor' },
   roof: { icon: '🌃', name: 'Rooftop · VIP',     sub: 'VIP Sky Lounge' },
+  hinter: { icon: '🕶️', name: 'Hinterzimmer',    sub: 'Untergrund · aktive Aufträge' },
 };
 
 const $ = sel => document.querySelector(sel);
@@ -587,6 +588,18 @@ function openRoomsModal() {
       else list.appendChild(lockedRoomCard('roof', ROOF_REQ, G.canUnlockRoof, G.unlockRoof,
         G.state.t2Unlocked ? null : 'Erst Terminal 2 freischalten'));
 
+      // Hinterzimmer (Untergrund) — eigener Raum, sobald freigeschaltet
+      if (G.undergroundUnlocked()) {
+        const m = ROOM_META.hinter;
+        const hc = el('div', 'room-card unlocked clickable');
+        const aj = G.activeJob();
+        hc.innerHTML = `<div class="room-emoji">${m.icon}</div>
+          <div class="room-info"><b>${m.name}</b><span>${aj ? '⏳ Auftrag läuft · ' + Math.round(aj.progress * 100) + ' %' : m.sub}</span></div>
+          <div class="room-emoji enter-arrow">→</div>`;
+        hc.addEventListener('click', () => { closeModal(); openRoomView('hinter'); });
+        list.appendChild(hc);
+      }
+
       // Show-Act (Tänzerin) — freischalten oder in einen Raum stellen
       list.appendChild(performerCard(render));
 
@@ -1021,7 +1034,7 @@ export function initUI() {
   $('#btn-daily').addEventListener('click', openDailyModal);
   $('#btn-ach').addEventListener('click', openAchievementsModal);
   $('#btn-rivals').addEventListener('click', () => { rivalUnseen = false; openRivalsModal(); });
-  $('#btn-underground').addEventListener('click', () => { ugUnseen = false; openUndergroundModal(); });
+  $('#btn-underground').addEventListener('click', () => { ugUnseen = false; openRoomView('hinter'); });
   $('#btn-showact').addEventListener('click', openPerformerModal);
   // Zurück aus der Raum-Detailansicht
   $('#room-back').addEventListener('click', closeRoomView);
@@ -1104,6 +1117,13 @@ export function canvasFeedback(fb) {
     floatText({ x: fb.x, y: fb.y - 10 }, '🌟 +' + fmt(fb.money) + ' €' + (fb.gems ? ' +' + fb.gems + '💎' : ''), 'float-celeb');
     playSfx('chest');
     confetti(16);
+  } else if (fb.type === 'work') {
+    floatText({ x: fb.x, y: fb.y - 10 }, '＋', 'float-buy');
+    playSfx('tap');
+  } else if (fb.type === 'ugstart') {
+    playSfx('buy');
+  } else if (fb.type === 'ugdone') {
+    playSfx('chest'); confetti(14);
   } else if (fb.type === 'locked') {
     // Tap auf den gesperrten Nachbarraum → Freischalt-Dialog
     playSfx('click');

@@ -72,6 +72,7 @@ export const state = {
 export function roomUnlocked(roomId) {
   if (roomId === 't2') return state.t2Unlocked;
   if (roomId === 'roof') return state.roofUnlocked;
+  if (roomId === 'hinter') return undergroundUnlocked();
   return true; // t1
 }
 
@@ -183,11 +184,13 @@ export function undergroundUnlocked() {
 export function jobStake(job) { return Math.max(50, incomePerSec() * job.stakeSec); }
 export function jobReward(job) { return jobStake(job) * job.reward; }
 export function jobFailChance(job) { return Math.min(0.85, job.risk + (state.underground.heat / HEAT_MAX) * 0.4); }
+// Aktive Arbeit: so viele Taps braucht ein Auftrag (größere Jobs = mehr Handarbeit)
+export function jobWorkTaps(job) { return Math.round(7 + (job.dur / 300) * 21); }
 export function activeJob() {
   const u = state.underground;
   if (!u.job) return null;
   const def = UNDERGROUND_JOBS.find(j => j.id === u.job.id);
-  return def ? { def, endsAt: u.job.endsAt, stake: u.job.stake, left: Math.max(0, (u.job.endsAt - Date.now()) / 1000) } : null;
+  return def ? { def, stake: u.job.stake, progress: u.job.progress || 0, taps: jobWorkTaps(def) } : null;
 }
 export function startJob(id) {
   const u = state.underground;
@@ -197,10 +200,20 @@ export function startJob(id) {
   const stake = jobStake(job);
   if (state.money < stake) return false;
   state.money -= stake;
-  u.job = { id, endsAt: Date.now() + job.dur * 1000, stake };
+  u.job = { id, stake, progress: 0 };   // wird NUR durch aktives Arbeiten (Tippen) erfüllt
   u.lastResult = null;
   save();
   return true;
+}
+// ein „Arbeitsschritt" im Hinterzimmer (Tap auf das Job-Objekt)
+export function workJob() {
+  const u = state.underground;
+  if (!u.job) return null;
+  const def = UNDERGROUND_JOBS.find(j => j.id === u.job.id);
+  const taps = jobWorkTaps(def);
+  u.job.progress = (u.job.progress || 0) + 1 / taps;
+  if (u.job.progress >= 1) { resolveJob(); return { done: true }; }
+  return { done: false, progress: u.job.progress };
 }
 function resolveJob() {
   const u = state.underground;
@@ -771,8 +784,7 @@ export function tick(now) {
   if (state.event && nowMs > state.event.expires) { state.event = null; emit('eventEnd'); }
   if (!state.event && nowMs > state.nextEventAt) startRandomEvent();
 
-  // Untergrund: Job abschließen + Heat abkühlen
-  if (state.underground.job && nowMs >= state.underground.job.endsAt) resolveJob();
+  // Untergrund: Jobs werden aktiv im Hinterzimmer erledigt (Tippen), Heat kühlt ab
   if (state.underground.heat > 0) state.underground.heat = Math.max(0, state.underground.heat - HEAT_DECAY * dt);
 
   questTimer += dt;

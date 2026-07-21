@@ -9,8 +9,9 @@ import {
   eventDef, eventGuestMult, incomePerSec,
   marketingGuestBonus, marketingSpawnBonus, activeDjDef,
   currentDrink, activeTheme, goldenBottleReward, nightReport,
+  activeJob, startJob, workJob, jobStake, jobFailChance,
 } from './game.js';
-import { fmt, CASH_STATIONS, DRINKS, drinkTier } from './data.js';
+import { fmt, CASH_STATIONS, DRINKS, drinkTier, UNDERGROUND_JOBS, HEAT_MAX } from './data.js';
 import { musicBpm } from './sfx.js';
 
 let canvas, ctx, W = 0, H = 0, DPR = 1;
@@ -58,6 +59,7 @@ const RM = {
   klo:  { x: 0,  y: 0,  w: 4, d: 6, name: 'WC' },
   t2:   { x: 10, y: 0,  w: 9, d: 9, name: 'TERMINAL 2' },
   roof: { x: 10, y: 10, w: 9, d: 8, name: 'ROOFTOP · VIP' },
+  hinter: { x: 22, y: 0, w: 8, d: 7, name: 'HINTERZIMMER' },   // Untergrund-Raum: aktiv Aufträge abarbeiten
 };
 // Club-Ausbau vergrößert das GEBÄUDE (Terminal 1): Wände wandern nach rechts/unten,
 // Möbel bleiben an den Wänden (nach aussen), die Tanzfläche in der Mitte wird größer.
@@ -262,6 +264,23 @@ function handleTap(e) {
     }
   }
   const roomV = inRoomView();
+  // Hinterzimmer: Aufträge wählen / aktiv arbeiten (Tap-Zonen)
+  if (roomV && framedRoom === 'hinter') {
+    for (const h of hinterHits) {
+      const hit = h.r != null ? Math.hypot(mx - h.x, my - h.y) < h.r
+        : (mx >= h.rectX && mx <= h.rectX + h.rectW && my >= h.rectY && my <= h.rectY + h.rectH);
+      if (!hit) continue;
+      if (h.fn === 'work') {
+        const res = workJob();
+        hinterFx.push({ x: h.x, y: h.y, life: 1 });
+        if (onTapFeedback) onTapFeedback({ type: res && res.done ? 'ugdone' : 'work', x: e.clientX, y: e.clientY });
+      } else if (h.fn === 'start') {
+        if (startJob(h.job) && onTapFeedback) onTapFeedback({ type: 'ugstart', x: e.clientX, y: e.clientY });
+      }
+      return;
+    }
+    return;   // im Hinterzimmer keine anderen Tap-Aktionen
+  }
   // Goldene Flasche antippen → Bonus
   if (goldBottle && roomV && goldBottle.room === framedRoom) {
     const p = detailProj(goldBottle.x, goldBottle.y);
@@ -316,6 +335,8 @@ let taxis = [];        // vorbeifahrende Taxen, die vor dem Eingang Gäste abset
 let taxiTimer = 5;
 let passers = [];      // Passanten, die über den Bürgersteig laufen (Street-Life)
 let passerTimer = 2;
+let hinterHits = [];   // antippbare Zonen im Hinterzimmer (Aufträge wählen / aktiv arbeiten)
+let hinterFx = [];     // kleine Arbeits-Partikel beim Tippen
 let goldBottle = null; // Goldene Flasche: spawnt zufällig im gezeigten Raum, Antippen = Bonus
 let gbTimer = 25;
 function updateGoldBottle(dt) {
@@ -385,6 +406,8 @@ function updateTaxis(dt) {
   }
   for (let i = passers.length - 1; i >= 0; i--) { const q = passers[i]; q.fx += q.dir * q.speed * dt;
     if (q.fx < -0.12 || q.fx > 1.12) passers.splice(i, 1); }
+  // Hinterzimmer-Arbeitspartikel abklingen
+  for (let i = hinterFx.length - 1; i >= 0; i--) { hinterFx[i].life -= dt * 1.7; if (hinterFx[i].life <= 0) hinterFx.splice(i, 1); }
 }
 function rnd(a, b) { return a + Math.random() * (b - a); }
 function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -1264,7 +1287,7 @@ let detailScale = 40;                // px pro Welt-Einheit (pro Raum eingepasst
 let detailBiasY = 0;                 // vertikale Verschiebung (T1: Raum hoch, Straßen-Band unten frei)
 let framedRoom = 't1';               // aktuell gezeigter Raum
 let roomFade = 0;                    // kurzer Überblend-Effekt beim Raumwechsel
-const ROOM_ORDER = ['t1', 't2', 'roof'];   // WC ist als Anbau Teil von Terminal 1, kein eigener Raum
+const ROOM_ORDER = ['t1', 't2', 'roof', 'hinter'];   // WC ist als Anbau Teil von Terminal 1; Hinterzimmer ganz am Ende
 const CLUB_BB = { x0: -1.2, y0: -1.2, x1: 20.2, y1: 19.6 };   // (nur noch für Iso-Kamerarechnung)
 // unten reserviertes Straßen-Band für Terminal 1 (Gebäude sitzt weiter hinten, Straße klar davor)
 function t1StreetBand() { return Math.min(150, H * 0.19); }
@@ -1380,10 +1403,10 @@ function dPerson(wx, wy, o) {
   drawPersonAt(p.x, p.y - (o.groundZ || 0), dPersonScale() * (o.s || 1), o);
 }
 
-const FLOORCOL = { t1: '#463a72', klo: '#46586a', t2: '#2c2140', roof: '#1c2438' };   // T2 dunkles Lounge-Plum, Roof Holzdeck-Blau
+const FLOORCOL = { t1: '#463a72', klo: '#46586a', t2: '#2c2140', roof: '#1c2438', hinter: '#241f22' };   // Hinterzimmer: dunkler Beton
 const GRASS = { t1: true, klo: true, t2: true, roof: false };
 // Neon-Akzent je Raum (für Wand-Trims, Türrahmen, Bodenkanten)
-const ACCENT = { t1: '#8b5cf6', klo: '#5aa6c8', t2: '#ffcf6a', roof: '#5ad0ff' };   // T2 warmes Gold (Upscale-Lounge)
+const ACCENT = { t1: '#8b5cf6', klo: '#5aa6c8', t2: '#ffcf6a', roof: '#5ad0ff', hinter: '#c0392b' };   // Hinterzimmer: schummriges Rot
 // Durchgänge zwischen direkt anliegenden Räumen: Boden-Schwelle + Türrahmen im Wandspalt
 const DOORWAYS = [
   { a: 'klo', b: 't1',  rect: { x: 1.4,  y: 5.85, w: 1.3, d: 1.3  }, dir: 'v' },  // WC ↕ Terminal 1
@@ -2131,6 +2154,74 @@ function drawRoomDetail(id, t, beat) {
         ctx.fillStyle = `rgba(255,150,60,${0.7 + 0.3 * Math.sin(t * 5 + wx)})`; ctx.beginPath(); ctx.roundRect(p.x - 5, p.y - u * 0.9 - 5, 10, 4, 2); ctx.fill();
         ctx.fillStyle = 'rgba(255,150,60,0.08)'; ctx.beginPath(); ctx.moveTo(p.x, p.y - u * 0.9); ctx.lineTo(p.x - u * 0.5, p.y + 4); ctx.lineTo(p.x + u * 0.5, p.y + 4); ctx.closePath(); ctx.fill(); };
       heat(10.9, 17.2); heat(18.2, 13.0); }
+  } else if (id === 'hinter') {
+    // ===== HINTERZIMMER: aktiv Aufträge abarbeiten (nicht upgraden) =====
+    hinterHits = [];
+    const midX = a0.x + rw / 2;
+    // hängende Glühbirne + Lichtkegel über dem Tisch
+    const lampY = a0.y + u * 0.2, tableCY = a0.y + rh * 0.5;
+    ctx.strokeStyle = '#26262c'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(midX, a0.y - wallH); ctx.lineTo(midX, lampY); ctx.stroke();
+    ctx.fillStyle = '#e8d28a'; ctx.beginPath(); ctx.arc(midX, lampY + 4, 4.5, 0, 7); ctx.fill();
+    ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = 'rgba(255,214,140,0.10)';
+    ctx.beginPath(); ctx.moveTo(midX - 9, lampY); ctx.lineTo(midX + 9, lampY); ctx.lineTo(midX + u * 2.6, tableCY + u); ctx.lineTo(midX - u * 2.6, tableCY + u); ctx.closePath(); ctx.fill();
+    ctx.restore();
+    // Safe rechts + gestapelte Kisten links
+    { dShadow(r.x + r.w - 1.8, r.y + 0.8, 1.2, 1.0); dBox(r.x + r.w - 1.8, r.y + 0.8, 1.2, 1.0, u * 0.9, '#3a3f47', '#20242a', '#4a515a');
+      const sp = detailProj(r.x + r.w - 1.2, r.y + 1.3); ctx.strokeStyle = '#8a929c'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(sp.x, sp.y - u * 0.55, u * 0.16, t, t + 5); ctx.stroke();
+      ctx.fillStyle = '#c9a24a'; ctx.beginPath(); ctx.arc(sp.x, sp.y - u * 0.55, u * 0.05, 0, 7); ctx.fill(); }
+    for (let k = 0; k < 3; k++) dBox(r.x + 0.5 + (k % 2) * 0.45, r.y + 0.8 + k * 0.32, 0.9, 0.7, u * 0.46, '#5a4530', '#33260f', '#6e5638');
+    // „Kontakt" hinter dem Tisch (Sonnenbrille, düster)
+    dShadow(r.x + r.w / 2 - 0.4, r.y + 1.9, 0.9, 0.7);
+    dPerson(r.x + r.w / 2, r.y + 2.2, { s: 1.15, color: '#20222b', pants: '#14141a', skin: '#8c5a33', hair: '#141018', shades: true, bob: Math.sin(t * 1.4) * 1.0, groundZ: u * 0.42 });
+    // Deal-Tisch
+    dShadow(r.x + r.w / 2 - 1.35, r.y + 3.0, 2.7, 1.5); dBox(r.x + r.w / 2 - 1.35, r.y + 3.0, 2.7, 1.5, u * 0.5, '#3a2a1c', '#20160e', '#4a3626');
+    // Heat-Balken an der Rückwand
+    { const heat = (state.underground?.heat || 0); const hw = rw * 0.52, hx = midX - hw / 2, hy = a0.y - wallH + u * 0.3;
+      ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.beginPath(); ctx.roundRect(hx, hy, hw, 8, 4); ctx.fill();
+      ctx.fillStyle = '#ff5e3a'; ctx.beginPath(); ctx.roundRect(hx, hy, hw * Math.min(1, heat / HEAT_MAX), 8, 4); ctx.fill();
+      ctx.fillStyle = '#ffd0a0'; ctx.font = `800 ${Math.max(8, u * 0.2)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText(`🔥 HEAT ${Math.round(heat)} %`, midX, hy - 4); }
+    // Arbeits-Partikel
+    for (const f of hinterFx) { ctx.globalAlpha = Math.max(0, f.life); ctx.fillStyle = '#43d95e'; ctx.font = `800 ${12 + (1 - f.life) * 6}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.fillText('＋', f.x, f.y - (1 - f.life) * 26); ctx.globalAlpha = 1; }
+    const aj = activeJob();
+    if (aj) {
+      // großes Job-Objekt auf dem Tisch → antippen zum Arbeiten
+      const op = detailProj(r.x + r.w / 2, r.y + 3.5);
+      const oy = op.y - u * 0.75 - Math.abs(Math.sin(t * 3)) * 4, pulse = 1 + Math.sin(t * 5) * 0.06;
+      ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = 'rgba(255,210,120,0.16)'; ctx.beginPath(); ctx.arc(op.x, oy, u * 1.05, 0, 7); ctx.fill(); ctx.restore();
+      ctx.font = `${u * 0.95 * pulse}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(aj.def.icon, op.x, oy);
+      hinterHits.push({ x: op.x, y: oy, r: Math.max(38, u * 1.0), fn: 'work' });
+      ctx.fillStyle = `rgba(255,220,120,${0.55 + 0.45 * Math.sin(t * 6)})`; ctx.font = `800 ${Math.max(10, u * 0.3)}px system-ui, sans-serif`; ctx.textBaseline = 'alphabetic';
+      ctx.fillText('👆 TIPPEN zum Arbeiten!', midX, oy - u * 1.15);
+      const pw = rw * 0.64, pxx = midX - pw / 2, pyy = a0.y + rh - u * 0.55;
+      ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.beginPath(); ctx.roundRect(pxx, pyy, pw, 15, 7); ctx.fill();
+      ctx.fillStyle = '#43d95e'; ctx.beginPath(); ctx.roundRect(pxx, pyy, pw * Math.min(1, aj.progress), 15, 7); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.font = `800 ${Math.max(9, u * 0.22)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(`${aj.def.name} · ${Math.round(aj.progress * 100)} %`, midX, pyy + 8); ctx.textBaseline = 'alphabetic';
+    } else {
+      // Auftragsbrett: 4 antippbare Karten (Auftrag wählen)
+      if (state.underground?.lastResult) { const rr = state.underground.lastResult;
+        ctx.fillStyle = rr.ok ? '#43d95e' : '#ff6b78'; ctx.font = `800 ${Math.max(9, u * 0.24)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+        ctx.fillText(rr.ok ? `✅ Letzter Job: +${fmt(rr.gain)} €` : `🚨 Aufgeflogen: −${fmt(rr.lost)} €`, midX, a0.y + u * 0.55); }
+      ctx.fillStyle = 'rgba(255,220,120,0.85)'; ctx.font = `800 ${Math.max(9, u * 0.24)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText('AUFTRÄGE — wählen & im Raum abarbeiten', midX, a0.y + rh * 0.46 - 8);
+      const n = UNDERGROUND_JOBS.length, cwd = rw / n;
+      UNDERGROUND_JOBS.forEach((job, i) => {
+        const stake = jobStake(job), fail = Math.round(jobFailChance(job) * 100), afford = state.money >= stake;
+        const bw = cwd - 8, bh = rh * 0.4, bx = a0.x + i * cwd + 4, by = a0.y + rh * 0.5;
+        ctx.fillStyle = afford ? 'rgba(42,32,26,0.95)' : 'rgba(28,24,24,0.6)';
+        ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 8); ctx.fill();
+        ctx.strokeStyle = afford ? '#c0392b' : '#4a2a26'; ctx.lineWidth = 2; ctx.stroke();
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.font = `${Math.max(15, bw * 0.42)}px sans-serif`; ctx.fillText(job.icon, bx + bw / 2, by + bh * 0.3);
+        ctx.fillStyle = afford ? '#ffe6b0' : '#8a7a6a'; ctx.font = `800 ${Math.max(8, bw * 0.16)}px system-ui, sans-serif`;
+        ctx.fillText(job.short, bx + bw / 2, by + bh * 0.62);
+        ctx.fillStyle = afford ? '#bfe6ff' : '#6a6a6a'; ctx.font = `700 ${Math.max(7, bw * 0.12)}px system-ui, sans-serif`;
+        ctx.fillText(`${fmt(stake)}€·${fail}%`, bx + bw / 2, by + bh * 0.85);
+        ctx.textBaseline = 'alphabetic';
+        if (afford) hinterHits.push({ rectX: bx, rectY: by, rectW: bw, rectH: bh, fn: 'start', job: job.id });
+      });
+    }
   }
   // Alt-&-dunkel-Schleier ganz oben drauf: entsättigt Neon/Möbel am Anfang (schwindet mit Ausbau)
   if (roomUnlocked(id)) {
@@ -2338,6 +2429,7 @@ function drawWcAnnex(t) {
 function drawFocusRoom(t, beat) {
   const id = framedRoom, r = RM[id];
   if (id === 'roof') drawRoofBg(t);   // Rooftop: Nachthimmel + Skyline + Dach-Platte statt Bürgersteig
+  else if (id === 'hinter') { const p = dPad(); ctx.fillStyle = '#0c0a0e'; ctx.fillRect(0, p.top, W, H - p.top - p.bot); }   // dunkler Kellerraum
   else drawGrassBg();
   drawRoomDetail(id, t, beat);        // Boden + Wände + Möbel + Deko + Shabby des Raums
   if (id === 't1') drawWcAnnex(t);    // WC-Anbau außen oben-links

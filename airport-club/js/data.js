@@ -95,10 +95,10 @@ export const UNDERGROUND_REQ = { level: 8 };          // ab Level 8 spielbar
 export const HEAT_MAX = 100;
 export const HEAT_DECAY = 100 / (12 * 60);            // volle Abkühlung in ~12 Min
 export const UNDERGROUND_JOBS = [
-  { id: 'schmuggel', name: 'Zigaretten-Schmuggel', icon: '📦', dur: 45,  stakeSec: 20,  reward: 3.0, risk: 0.10, heat: 12, txt: 'Ein paar Stangen über die Grenze.' },
-  { id: 'tuersteher',name: 'Schutzgeld eintreiben',icon: '💪', dur: 90,  stakeSec: 45,  reward: 3.4, risk: 0.16, heat: 18, txt: 'Die Nachbar-Bar zahlt „freiwillig".' },
-  { id: 'falschgeld',name: 'Falschgeld waschen',   icon: '💵', dur: 180, stakeSec: 120, reward: 4.2, risk: 0.24, heat: 28, txt: 'Über die Garderobe läuft am meisten.' },
-  { id: 'waffendeal',name: 'Waffendeal',           icon: '🔫', dur: 300, stakeSec: 260, reward: 5.5, risk: 0.34, heat: 42, txt: 'Hohes Risiko, fettes Geld.' },
+  { id: 'schmuggel', name: 'Zigaretten-Schmuggel', short: 'Schmuggel', icon: '📦', dur: 45,  stakeSec: 20,  reward: 3.0, risk: 0.10, heat: 12, txt: 'Ein paar Stangen über die Grenze.' },
+  { id: 'tuersteher',name: 'Schutzgeld eintreiben',short: 'Schutzgeld',icon: '💪', dur: 90,  stakeSec: 45,  reward: 3.4, risk: 0.16, heat: 18, txt: 'Die Nachbar-Bar zahlt „freiwillig".' },
+  { id: 'falschgeld',name: 'Falschgeld waschen',   short: 'Falschgeld',icon: '💵', dur: 180, stakeSec: 120, reward: 4.2, risk: 0.24, heat: 28, txt: 'Über die Garderobe läuft am meisten.' },
+  { id: 'waffendeal',name: 'Waffendeal',           short: 'Waffen',   icon: '🔫', dur: 300, stakeSec: 260, reward: 5.5, risk: 0.34, heat: 42, txt: 'Hohes Risiko, fettes Geld.' },
 ];
 
 // ---- Endgame-Ziel: Franchise „Das Boot" (Teaser/Gate) ----------
