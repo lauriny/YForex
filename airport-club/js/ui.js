@@ -68,7 +68,6 @@ export function updateHUD() {
   const badgeAch = $('#badge-ach');
   badgeAch.classList.toggle('on', claimable);
   badgeAch.textContent = claimable ? '!' : '';
-  $('#btn-showact').classList.toggle('hidden', !(G.state.performer.unlocked || G.state.level >= PERFORMER.level));
   // Weltrangliste-Badge (neuer Überhol-Erfolg)
   $('#badge-rivals').classList.toggle('on', rivalUnseen);
   // Hinterzimmer: sichtbar ab Freischaltung; Badge bei fertigem Job
@@ -463,6 +462,21 @@ function openStaffModal() {
     body.appendChild(list);
     function render() {
       list.innerHTML = '';
+      // Show-Act (Tänzerin) — hier verwalten (nicht mehr als Rand-Symbol)
+      {
+        const unlocked = G.state.performer.unlocked;
+        const avail = unlocked || G.state.level >= PERFORMER.level;
+        const row = el('div', 'station-row' + (avail ? '' : ' dim'));
+        row.innerHTML = `
+          <div class="st-icon">💃</div>
+          <div class="st-info">
+            <div class="st-name">Show-Act <span class="st-lvl">${unlocked ? 'in ' + (ROOM_META[G.state.performer.room]?.name || '') : 'ab Level ' + PERFORMER.level}</span></div>
+            <div class="st-desc">Erotische Tänzerin, die den Raum boostet, in dem sie steht</div>
+          </div>
+          <button class="btn-buy"><span>${unlocked ? 'Verwalten' : 'Ansehen'}</span></button>`;
+        row.querySelector('.btn-buy').addEventListener('click', () => { closeModal(); openPerformerModal(); });
+        list.appendChild(row);
+      }
       // Auto-Kassierer (sammelt Geld-Pins von allein ein)
       {
         const lvl = G.state.autoCollect;
@@ -1035,7 +1049,6 @@ export function initUI() {
   $('#btn-ach').addEventListener('click', openAchievementsModal);
   $('#btn-rivals').addEventListener('click', () => { rivalUnseen = false; openRivalsModal(); });
   $('#btn-underground').addEventListener('click', () => { ugUnseen = false; openRoomView('hinter'); });
-  $('#btn-showact').addEventListener('click', openPerformerModal);
   // Zurück aus der Raum-Detailansicht
   $('#room-back').addEventListener('click', closeRoomView);
   // Raumwechsel per Pfeilen; Titel antippen öffnet die Raum-Auswahl

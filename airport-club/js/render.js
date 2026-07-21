@@ -64,7 +64,7 @@ const RM = {
 };
 // Club-Ausbau vergrößert das GEBÄUDE (Terminal 1): Wände wandern nach rechts/unten,
 // Möbel bleiben an den Wänden (nach aussen), die Tanzfläche in der Mitte wird größer.
-function t1Grow() { const cs = state.clubSize || 0; return { dw: cs * 1.0, dd: cs * 0.7 }; }   // moderater Ausbau (Raum bleibt luftig)
+function t1Grow() { const cs = state.clubSize || 0; return { dw: cs * 1.65, dd: cs * 1.15 }; }   // kräftiger Ausbau: bei max ~1.9× Breite (9→17.25)
 function applyClubSize() { const g = t1Grow(); RM.t1.w = 9 + g.dw; RM.t1.d = 8 + g.dd; }
 // Tanzfläche wächst mit dem Gebäude (gemeinsam genutzt von Zeichnung & Gäste-Ziel)
 function t1DanceFloor() { const g = t1Grow(); return { x: 2.5, y: 9.3, w: 4.6 + g.dw, d: 4.2 + g.dd }; }
@@ -348,7 +348,7 @@ function updateGoldBottle(dt) {
     return;
   }
   gbTimer -= dt;
-  if (gbTimer <= 0 && inRoomView() && roomUnlocked(framedRoom)) {
+  if (gbTimer <= 0 && inRoomView() && roomUnlocked(framedRoom) && framedRoom !== 'hinter') {   // im Hinterzimmer kein passives Einkommen → keine Bonusflasche
     const r = RM[framedRoom];
     goldBottle = { room: framedRoom, x: rnd(r.x + 1.2, r.x + r.w - 1.2), y: rnd(r.y + 2.2, r.y + r.d - 1.2), ttl: 11, t0: performance.now() / 1000 };
   }
@@ -800,22 +800,23 @@ function drawPersonAt(px, py, s, o = {}) {
 
   // Oberkörper (Kleid/Shirt) — Showgirl-Tänzerin, Frau oder Standard
   if (o.showgirl) {
-    // kurvige Silhouette (Taille rein, Hüfte raus) in Haut, mit glänzendem Bühnen-Outfit
+    // stark überzeichnete Silhouette: schmale Taille, sehr breite Hüfte/Po, große Büste (fällt auf)
     ctx.fillStyle = o.skin || '#f0b98c';
     ctx.beginPath();
-    ctx.moveTo(px - 3.0 * s, cy - 3.2 * s);
-    ctx.quadraticCurveTo(px - 4.7 * s, cy + 1 * s, px - 3.2 * s, cy + 3.6 * s);
-    ctx.quadraticCurveTo(px - 4.8 * s, cy + 6 * s, px - 4.0 * s, cy + 8 * s);
-    ctx.lineTo(px + 4.0 * s, cy + 8 * s);
-    ctx.quadraticCurveTo(px + 4.8 * s, cy + 6 * s, px + 3.2 * s, cy + 3.6 * s);
-    ctx.quadraticCurveTo(px + 4.7 * s, cy + 1 * s, px + 3.0 * s, cy - 3.2 * s);
+    ctx.moveTo(px - 3.6 * s, cy - 3.8 * s);
+    ctx.quadraticCurveTo(px - 3.1 * s, cy - 0.4 * s, px - 2.3 * s, cy + 2.2 * s);      // Taille rein
+    ctx.quadraticCurveTo(px - 7.0 * s, cy + 4.4 * s, px - 5.4 * s, cy + 8.2 * s);      // Hüfte/Po weit raus
+    ctx.quadraticCurveTo(px - 2.8 * s, cy + 9.4 * s, px, cy + 8.8 * s);
+    ctx.quadraticCurveTo(px + 2.8 * s, cy + 9.4 * s, px + 5.4 * s, cy + 8.2 * s);
+    ctx.quadraticCurveTo(px + 7.0 * s, cy + 4.4 * s, px + 2.3 * s, cy + 2.2 * s);
+    ctx.quadraticCurveTo(px + 3.1 * s, cy - 0.4 * s, px + 3.6 * s, cy - 3.8 * s);
     ctx.closePath(); ctx.fill();
-    ctx.beginPath(); ctx.arc(px - 1.7 * s, cy - 2.0 * s, 1.9 * s, 0, 7); ctx.arc(px + 1.7 * s, cy - 2.0 * s, 1.9 * s, 0, 7); ctx.fill();   // Büste
+    ctx.beginPath(); ctx.arc(px - 2.2 * s, cy - 2.1 * s, 2.8 * s, 0, 7); ctx.arc(px + 2.2 * s, cy - 2.1 * s, 2.8 * s, 0, 7); ctx.fill();   // große Büste
     ctx.fillStyle = o.color || '#ff2e8a';                                    // Bikini-Oberteil
-    ctx.beginPath(); ctx.ellipse(px - 1.7 * s, cy - 1.9 * s, 2.0 * s, 1.5 * s, 0, 0, 7); ctx.fill();
-    ctx.beginPath(); ctx.ellipse(px + 1.7 * s, cy - 1.9 * s, 2.0 * s, 1.5 * s, 0, 0, 7); ctx.fill();
-    ctx.beginPath(); ctx.moveTo(px - 3.3 * s, cy + 5 * s); ctx.lineTo(px + 3.3 * s, cy + 5 * s); ctx.lineTo(px + 2.5 * s, cy + 8 * s); ctx.lineTo(px - 2.5 * s, cy + 8 * s); ctx.closePath(); ctx.fill();   // Höschen
-    ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.beginPath(); ctx.arc(px - 1.9 * s, cy - 2.3 * s, 0.7 * s, 0, 7); ctx.fill();   // Glanz
+    ctx.beginPath(); ctx.ellipse(px - 2.2 * s, cy - 1.9 * s, 3.0 * s, 2.2 * s, 0, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(px + 2.2 * s, cy - 1.9 * s, 3.0 * s, 2.2 * s, 0, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(px - 4.8 * s, cy + 5.2 * s); ctx.lineTo(px + 4.8 * s, cy + 5.2 * s); ctx.lineTo(px + 3.3 * s, cy + 8.6 * s); ctx.lineTo(px - 3.3 * s, cy + 8.6 * s); ctx.closePath(); ctx.fill();   // Höschen
+    ctx.fillStyle = 'rgba(255,255,255,0.32)'; ctx.beginPath(); ctx.arc(px - 2.5 * s, cy - 2.7 * s, 1.0 * s, 0, 7); ctx.fill();   // Glanz
   } else if (o.female) {
     ctx.fillStyle = o.color;
     ctx.beginPath();
@@ -2482,7 +2483,7 @@ function drawFocusRoom(t, beat) {
     const c = { t1:[6.2,9.0], t2:[15.0,5.2], roof:[13.5,14.5] }[id] || [6,9];
     dShadow(c[0]-0.7, c[1]-0.7, 1.4, 1.4);
     dBox(c[0]-0.7, c[1]-0.7, 1.4, 1.4, u * 0.35, '#ff5e8a', '#a32e52', '#ff85b3');
-    dPerson(c[0], c[1], { s: 1.2, color: '#ff2d86', skin: '#f0b98c', hair: '#1a1a22', female: true, showgirl: true, arms: beat*1.5, dancing: true, bob: Math.sin(beat*1.5)*3, groundZ: u * 0.35 });
+    dPerson(c[0], c[1], { s: 2.4, color: '#ff2d86', skin: '#f0b98c', hair: '#1a1a22', female: true, showgirl: true, arms: beat*1.5, dancing: true, bob: Math.sin(beat*1.5)*3, groundZ: u * 0.35 });
   }
 
   // Gäste NUR strikt INNERHALB des Raums zeichnen (nichts läuft ausserhalb der Wände)
