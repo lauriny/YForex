@@ -97,12 +97,31 @@ export const RAID_DUR = 90;                           // Sek.: Club-Razzia (fast
 export const TAKEDOWN_CD = 240;                       // Sek. Abklingzeit: den Polizisten ausschalten geht nur selten
 export const BODY_RAID_DELAY = [35, 75];              // Sek.-Spanne, bis eine gefundene Leiche zur Razzia führt
 export const HEAT_DECAY = 100 / (12 * 60);            // volle Abkühlung in ~12 Min
+// weight = Gewicht der Ware (0..1) → langsamerer Schmuggler bei schwerem Zeug
 export const UNDERGROUND_JOBS = [
-  { id: 'schmuggel', name: 'Zigaretten-Schmuggel', short: 'Schmuggel', icon: '📦', dur: 45,  stakeSec: 20,  reward: 3.0, risk: 0.10, heat: 12, txt: 'Ein paar Stangen über die Grenze.' },
-  { id: 'tuersteher',name: 'Schutzgeld eintreiben',short: 'Schutzgeld',icon: '💪', dur: 90,  stakeSec: 45,  reward: 3.4, risk: 0.16, heat: 18, txt: 'Die Nachbar-Bar zahlt „freiwillig".' },
-  { id: 'falschgeld',name: 'Falschgeld waschen',   short: 'Falschgeld',icon: '💵', dur: 180, stakeSec: 120, reward: 4.2, risk: 0.24, heat: 28, txt: 'Über die Garderobe läuft am meisten.' },
-  { id: 'waffendeal',name: 'Waffendeal',           short: 'Waffen',   icon: '🔫', dur: 300, stakeSec: 260, reward: 5.5, risk: 0.34, heat: 42, txt: 'Hohes Risiko, fettes Geld.' },
+  { id: 'schmuggel', name: 'Zigaretten-Schmuggel', short: 'Schmuggel', icon: '📦', dur: 45,  stakeSec: 20,  reward: 3.0, risk: 0.10, heat: 12, weight: 0.12, txt: 'Ein paar Stangen über die Grenze.' },
+  { id: 'tuersteher',name: 'Schutzgeld eintreiben',short: 'Schutzgeld',icon: '💪', dur: 90,  stakeSec: 45,  reward: 3.4, risk: 0.16, heat: 18, weight: 0.28, txt: 'Die Nachbar-Bar zahlt „freiwillig".' },
+  { id: 'falschgeld',name: 'Falschgeld waschen',   short: 'Falschgeld',icon: '💵', dur: 180, stakeSec: 120, reward: 4.2, risk: 0.24, heat: 28, weight: 0.42, txt: 'Über die Garderobe läuft am meisten.' },
+  { id: 'waffendeal',name: 'Waffendeal',           short: 'Waffen',   icon: '🔫', dur: 300, stakeSec: 260, reward: 5.5, risk: 0.34, heat: 42, weight: 0.6,  txt: 'Hohes Risiko, fettes Geld.' },
 ];
+
+// ---- Stealth-Minispiel: Tuning je Job-Tier (Index in UNDERGROUND_JOBS) + Heat ----
+export const UG_STEALTH = {
+  tiers: [
+    { guards: 1, coneHalf: 0.42, coneRange: 3.0, guardSpeed: 0.85, look: 0.6 },
+    { guards: 1, coneHalf: 0.48, coneRange: 3.3, guardSpeed: 1.05, look: 0.8 },
+    { guards: 2, coneHalf: 0.54, coneRange: 3.6, guardSpeed: 1.20, look: 1.0 },
+    { guards: 2, coneHalf: 0.60, coneRange: 3.9, guardSpeed: 1.35, look: 1.1 },
+  ],
+  suspicionRise: 0.85,      // pro Sek. bei voller Sicht aus der Nähe
+  suspicionFall: 0.7,       // pro Sek. außer Sicht
+  heatGuardBonus: 1,        // +1 Wache bei hohem Heat (>55 %)
+  heatConeBonus: 0.12,      // Kegel breiter bei hohem Heat
+  distractCharges: 2,       // Ablenk-Ladungen (ab Tier ≥ 1)
+  distractCd: 6,            // Sek. Abklingzeit je Ablenkung
+  smugSpeed: 3.5,           // Basis-Tempo Schmuggler (world/s)
+};
+export const BRIBE_MULT = 1.6;   // Bestechung kostet 1.6× Einsatz (dafür keine Razzia, weiter schmuggeln)
 
 // ---- Endgame-Ziel: Franchise „Das Boot" (Teaser/Gate) ----------
 export const BOOT_REQ = { fame: 3, lifetime: 5e12 };  // erst mit Prestige-Sternen + Vermögen

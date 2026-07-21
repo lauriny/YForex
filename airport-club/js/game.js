@@ -8,7 +8,7 @@ import {
   BOOST, DROP, OFFLINE, CELEB, PRESTIGE,
   EVENTS, EVENT_GAP, WHEEL, DAILY_MIN_GAP_H, DAILY_STREAK_MAX, ACHIEVEMENTS,
   getPhase, chestReward, costOf, bulkCost, maxAffordable, milestoneMult,
-  RIVALS, RIVAL_OVERTAKE_MULT, UNDERGROUND_JOBS, UNDERGROUND_REQ, HEAT_MAX, HEAT_DECAY, BOOT_REQ, RAID_DUR, TAKEDOWN_CD, BODY_RAID_DELAY,
+  RIVALS, RIVAL_OVERTAKE_MULT, UNDERGROUND_JOBS, UNDERGROUND_REQ, HEAT_MAX, HEAT_DECAY, BOOT_REQ, RAID_DUR, TAKEDOWN_CD, BODY_RAID_DELAY, BRIBE_MULT,
 } from './data.js';
 
 const SAVE_KEY = 'airportClub.save.v1';
@@ -232,6 +232,31 @@ export function surrenderJob() {
   u.lastResult = { ok: false, busted: true, name: def.name, lost: stake };
   emit('ugDone', u.lastResult);
   emit('raid', { left: RAID_DUR, reason: 'busted' });
+  save();
+  return true;
+}
+// bestechen: Geld zahlen → keine Razzia, +Heat, Auftrag läuft WEITER
+export function bribeCost() { const u = state.underground; return u.job ? Math.max(100, u.job.stake * BRIBE_MULT) : 0; }
+export function bribeJob() {
+  const u = state.underground;
+  if (!u.job) return false;
+  const cost = bribeCost();
+  if (state.money < cost) return false;
+  state.money -= cost;
+  u.heat = Math.min(HEAT_MAX, u.heat + 10);
+  save();
+  return true;
+}
+// Ware fallen lassen & fliehen: Auftrag weg (Einsatz futsch), aber KEINE Razzia
+export function dropAndFlee() {
+  const u = state.underground;
+  if (!u.job) return false;
+  const def = UNDERGROUND_JOBS.find(j => j.id === u.job.id);
+  const stake = u.job.stake;
+  u.job = null;
+  u.heat = Math.min(HEAT_MAX, u.heat + def.heat * 0.6);
+  u.lastResult = { ok: false, fled: true, name: def.name, lost: stake };
+  emit('ugDone', u.lastResult);
   save();
   return true;
 }
