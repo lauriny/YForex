@@ -605,12 +605,14 @@ function openRoomsModal() {
       // Hinterzimmer (Untergrund) — eigener Raum, sobald freigeschaltet
       if (G.undergroundUnlocked()) {
         const m = ROOM_META.hinter;
-        const hc = el('div', 'room-card unlocked clickable');
+        const jailed = G.dealerJailed && G.dealerJailed();
+        const hc = el('div', 'room-card ' + (jailed ? 'locked' : 'unlocked clickable'));
         const n = G.stockCount ? G.stockCount() : 0;
+        const sub = jailed ? `🔒 Festgenommen — noch ${Math.ceil(G.jailLeft())}s` : (n > 0 ? '📦 ' + n + ' Ware im Lager' : m.sub);
         hc.innerHTML = `<div class="room-emoji">${m.icon}</div>
-          <div class="room-info"><b>${m.name}</b><span>${n > 0 ? '📦 ' + n + ' Ware im Lager' : m.sub}</span></div>
-          <div class="room-emoji enter-arrow">→</div>`;
-        hc.addEventListener('click', () => { closeModal(); openRoomView('hinter'); });
+          <div class="room-info"><b>${m.name}</b><span>${sub}</span></div>
+          <div class="room-emoji enter-arrow">${jailed ? '🔒' : '→'}</div>`;
+        if (!jailed) hc.addEventListener('click', () => { closeModal(); openRoomView('hinter'); });
         list.appendChild(hc);
       }
 
@@ -1092,6 +1094,8 @@ export function initUI() {
   const endRun = () => { document.body.classList.remove('run-mode'); updateHUD(); };
   G.on('runDone', ({ qty }) => { endRun(); playSfx('chest'); confetti(16); toast(`📦 Run erfolgreich — ${qty} Ware im Lager!`); });
   G.on('runAbort', ({ busted }) => { endRun(); if (!busted) toast('🏃 Run abgebrochen — Einsatz futsch.'); });
+  G.on('runBust', b => { playSfx('milestone');
+    toast(`🚨 ERWISCHT! Kaution −${fmt(b.bail)} €, ${b.seized} Ware weg, 🔒 ${b.jail}s gesperrt`); updateHUD(); });
   G.on('dealDone', r => { updateHUD(); });
   G.on('raid', ({ left, reason }) => { playSfx('milestone');
     toast(reason === 'body'
@@ -1183,6 +1187,18 @@ export function canvasFeedback(fb) {
   } else if (fb.type === 'runNoCash') {
     floatText({ x: fb.x, y: fb.y - 10 }, '❌ Zu wenig Geld', 'float-celeb');
     playSfx('click');
+  } else if (fb.type === 'shoot') {
+    playSfx('tap');
+  } else if (fb.type === 'hitGuard') {
+    playSfx('tap');
+  } else if (fb.type === 'guardDown') {
+    playSfx('buy');
+  } else if (fb.type === 'playerHit') {
+    playSfx('click');
+  } else if (fb.type === 'runDead' || fb.type === 'runSurrender') {
+    playSfx('milestone');
+  } else if (fb.type === 'runExit' || fb.type === 'runFled') {
+    document.body.classList.remove('run-mode'); updateHUD();
   } else if (fb.type === 'dealInstant') {
     floatText({ x: fb.x, y: fb.y - 10 }, `🤝 Deal! +${fmt(fb.price)} €`, 'float-money');
     playSfx('chest'); confetti(10);

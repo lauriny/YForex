@@ -15,10 +15,11 @@ import {
   raidActive, raidLeft, ugDangerFrac,
   dealerRep, calcValue, stockList, stockCount, stockByCat,
   runStakeFor, activeRun, startRun, grabLoot, finishRun, abortRun, runBribeCost, runBribe,
+  bustPenalty, dealerJailed, jailLeft,
   offerPrice, rollCustomer, beginNegotiation, currentCustomer, setOffer, nudgeOffer, submitOffer, acceptCounter, dismissCustomer, custSpawnInterval,
 } from './game.js';
 import { fmt, CASH_STATIONS, DRINKS, drinkTier, UNDERGROUND_JOBS, HEAT_MAX, UG_STEALTH,
-  DEAL_CATS, DEAL_GOODS, goodById, CUSTOMER_ARCHETYPES, DEAL_CFG, SOURCING } from './data.js';
+  DEAL_CATS, DEAL_GOODS, goodById, CUSTOMER_ARCHETYPES, DEAL_CFG, SOURCING, SHOOTER, BUST_PENALTY } from './data.js';
 import { musicBpm } from './sfx.js';
 
 let canvas, ctx, W = 0, H = 0, DPR = 1;
@@ -157,7 +158,7 @@ export function initCanvas(el) {
 // Pointer/Wisch: unterscheidet Tippen (Aktion) von Ziehen (Raum verschieben)
 let ptr = null;
 const JOY_R = 42;   // Radius des virtuellen Joysticks (px)
-function runJoyActive() { return runView && rg && !rg.caught && !rg.disposing; }
+function runJoyActive() { return runView && rg && !rg.dead; }
 function onPointerDown(e) {
   ptr = { x0: e.clientX, y0: e.clientY, lx: e.clientX, ly: e.clientY, moved: false };
   try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
@@ -384,203 +385,245 @@ function throwLure(gs, tx, ty) {   // gs: { guards, distract, distractCd, fx }
 }
 
 // ============================================================
-//  Beschaffungs-Run: großer Stealth-Gauntlet (Top-Down, Kamera folgt)
+//  Beschaffungs-Run: Ego-Shooter-Raycaster (Doom-Stil, 3D)
 // ============================================================
 let runView = false;   // Vollbild-Run aktiv?
-let rg = null;         // Run-Game-State
+let rg = null;         // Run-Game-State (Raycaster)
 let runHits = [];      // antippbare Zonen im Run
 export function __run() { return rg; }
 export function inRunView() { return runView; }
-const RUN_TIER = { drugs: 0, fenced: 1, weapons: 2 };
-function rgScale() { return W / (rg.worldW + 1.4); }
-function rgProj(wx, wy) { const sc = rgScale(); return { x: (wx + 0.7) * sc, y: H * 0.52 - (wy - rg.camY) * sc }; }
-function rgMsg(txt) { rg.msg = txt; rg.msgT = 2.4; }
-function rgMakeSpots() {
-  const w = rg.worldW, y = rg.smug.y;
-  rg.spots = [
-    { x: 1.0, y: y + 0.3, label: '🗑️ Müllpresse', risk: 0.14 },
-    { x: w / 2, y: y - 0.7, label: '🕳️ Gully', risk: 0.34 },
-    { x: w - 1.0, y: y + 0.3, label: '🚪 Seitentür', risk: 0.55 },
-  ];
+function rgWall(x, y) { const mx = Math.floor(x), my = Math.floor(y); if (mx < 0 || my < 0 || mx >= rg.mw || my >= rg.mh) return true; return rg.map[my * rg.mw + mx] === 1; }
+function rgMoveEntity(e, nx, ny, rad) {
+  if (!rgWall(nx + Math.sign(nx - e.x) * rad, e.y)) e.x = nx;
+  if (!rgWall(e.x, ny + Math.sign(ny - e.y) * rad)) e.y = ny;
 }
+function rgLos(x0, y0, x1, y1) {
+  const n = Math.ceil(Math.hypot(x1 - x0, y1 - y0) * 3);
+  for (let i = 1; i < n; i++) { const t = i / n; if (rgWall(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t)) return false; }
+  return true;
+}
+function rgMsg(txt) { rg.msg = txt; rg.msgT = 2.4; }
 function rgBuild(cat) {
-  const c = SOURCING.cats[cat]; if (!c) return;
+  const c = SHOOTER.cats[cat] || SHOOTER.cats.drugs;
   const heat = state.underground?.heat || 0, hot = heat > 55;
-  const tier = UG_STEALTH.tiers[Math.min(UG_STEALTH.tiers.length - 1, RUN_TIER[cat] ?? 0)];
-  const nSeg = c.segments + (hot ? SOURCING.heatSegBonus : 0);
-  const gps = c.guards + (hot ? SOURCING.heatGuardBonus : 0);
-  const W_ = SOURCING.segWide, segLen = SOURCING.segLen, worldH = nSeg * segLen + 3;
-  const coneHalf = tier.coneHalf + (hot ? UG_STEALTH.heatConeBonus : 0);
-  const guards = [], occ = [], lamps = [];
-  for (let s = 0; s < nSeg; s++) {
-    const y0 = 2 + s * segLen;
-    for (let g = 0; g < gps; g++) {
-      const laneY = y0 + segLen * (0.28 + 0.44 * (gps > 1 ? g / (gps - 1) : 0.5));
-      const a = { x: 0.9, y: laneY }, b = { x: W_ - 0.9, y: laneY }, flip = (s + g) % 2 === 0;
-      const wps = flip ? [a, b] : [b, a];
-      guards.push({ x: wps[0].x, y: wps[0].y, wps, wi: 1, facing: flip ? 0 : Math.PI, state: 'patrol',
-        invx: 0, invy: 0, invT: 0, pause: 0, speed: tier.guardSpeed, coneHalf, coneRange: tier.coneRange, seed: Math.random() * 6 });
-    }
-    for (let k = 0; k < c.cover; k++)
-      occ.push({ x: 0.7 + Math.random() * (W_ - 2.0), y: y0 + 0.9 + Math.random() * (segLen - 2.2), w: 0.9 + Math.random() * 0.6, h: 0.8 + Math.random() * 0.6 });
-    lamps.push({ x: 1.2 + Math.random() * (W_ - 2.4), y: y0 + segLen * 0.5, rad: 2.0 });
+  const nRooms = c.rooms;
+  const cols = Math.ceil(Math.sqrt(nRooms)), rows = Math.ceil(nRooms / cols);
+  const roomW = 5, roomH = 5, gap = 3, cellW = roomW + gap, cellH = roomH + gap;
+  const mw = cols * cellW + gap, mh = rows * cellH + gap;
+  const map = new Uint8Array(mw * mh); map.fill(1);
+  const at = (x, y) => y * mw + x;
+  const carve = (x0, y0, w, h) => { for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) if (x > 0 && y > 0 && x < mw - 1 && y < mh - 1) map[at(x, y)] = 0; };
+  const order = [];
+  for (let r = 0; r < rows; r++) { const line = []; for (let cc = 0; cc < cols; cc++) line.push(cc); if (r % 2) line.reverse(); for (const cc of line) order.push([cc, r]); }
+  const rooms = order.slice(0, nRooms).map(([cc, r]) => { const x0 = gap + cc * cellW, y0 = gap + r * cellH; carve(x0, y0, roomW, roomH); return { x: x0 + roomW / 2, y: y0 + roomH / 2 }; });
+  for (let i = 1; i < rooms.length; i++) {
+    const a = rooms[i - 1], b = rooms[i], ax = Math.round(a.x), ay = Math.round(a.y), bx = Math.round(b.x), by = Math.round(b.y);
+    for (let x = Math.min(ax, bx); x <= Math.max(ax, bx); x++) carve(x, ay, 1, 1);
+    for (let y = Math.min(ay, by); y <= Math.max(ay, by); y++) carve(bx, y, 1, 1);
   }
-  rg = { cat, worldW: W_, worldH, segLen, nSeg, guards, occ, lamps, fx: [],
-    stash: { x: W_ / 2, y: worldH - 1.3 }, exitY: 0.9,
-    smug: { x: W_ / 2, y: 0.9, carrying: false }, joy: null, camY: 2,
-    suspicion: 0, grace: 1.0, spotSfx: false,
-    caught: false, disposing: false, body: null, spots: [],
-    distract: 2, distractCd: 0, msg: null, msgT: 0 };
+  const nGuards = c.guards + (hot ? SHOOTER.heatGuardBonus : 0), guards = [];
+  for (let i = 0; i < nGuards; i++) {
+    const rm = rooms[1 + Math.floor(Math.random() * (rooms.length - 1))];
+    guards.push({ x: rm.x + (Math.random() - 0.5) * 2.2, y: rm.y + (Math.random() - 0.5) * 2.2,
+      dir: Math.random() * 6.28, hp: SHOOTER.guardHp, state: 'patrol', fireCd: Math.random() * 1.2, wanderT: 0, muzzle: 0 });
+  }
+  const entry = rooms[0], stash = rooms[rooms.length - 1];
+  rg = { cat, map, mw, mh, rooms,
+    px: entry.x, py: entry.y, dir: rooms[1] ? Math.atan2(rooms[1].y - entry.y, rooms[1].x - entry.x) : 0,
+    hp: SHOOTER.playerHp, maxHp: SHOOTER.playerHp, fireCd: 0, muzzle: 0, hitFlash: 0,
+    guards, stash: { x: stash.x, y: stash.y, taken: false }, exit: { x: entry.x, y: entry.y },
+    carrying: false, alarm: 0, fx: [], joy: null, kills: 0,
+    dead: false, bust: null, msg: null, msgT: 0 };
 }
 export function enterRun(cat) { if (startRun(cat)) { rgBuild(cat); runView = true; if (onTapFeedback) onTapFeedback({ type: 'runStart' }); return true; } return false; }
 function rgFlee() { abortRun(false); runView = false; rg = null; if (onTapFeedback) onTapFeedback({ type: 'runFled' }); }
-function rgBust() { abortRun(true); runView = false; rg = null; if (onTapFeedback) onTapFeedback({ type: 'runBust' }); }
+function rgSurrender() { if (!rg || rg.dead) return; rg.dead = true; rg.bust = bustPenalty(rg.cat); if (onTapFeedback) onTapFeedback({ type: 'runSurrender' }); }
+function rgDie() { if (!rg || rg.dead) return; rg.dead = true; rg.bust = bustPenalty(rg.cat); if (onTapFeedback) onTapFeedback({ type: 'runDead' }); }
+function rgExitBust() { runView = false; rg = null; if (onTapFeedback) onTapFeedback({ type: 'runExit' }); }
+function rgFire() {
+  if (!rg || rg.dead || rg.fireCd > 0) return;
+  rg.fireCd = SHOOTER.fireCd; rg.muzzle = 0.09; rg.alarm = Math.min(1, rg.alarm + 0.5);
+  let best = null, bestScore = 1e9;
+  for (const g of rg.guards) {
+    const dx = g.x - rg.px, dy = g.y - rg.py, dist = Math.hypot(dx, dy);
+    if (dist > SHOOTER.guardRange + 3) continue;
+    let diff = Math.atan2(dy, dx) - rg.dir; while (diff > Math.PI) diff -= 6.283; while (diff < -Math.PI) diff += 6.283;
+    if (Math.abs(diff) > SHOOTER.aimAssist) continue;
+    if (!rgLos(rg.px, rg.py, g.x, g.y)) continue;
+    const score = Math.abs(diff) + dist * 0.02;
+    if (score < bestScore) { bestScore = score; best = g; }
+  }
+  if (best) {
+    const tAng = Math.atan2(best.y - rg.py, best.x - rg.px); let d = tAng - rg.dir; while (d > Math.PI) d -= 6.283; while (d < -Math.PI) d += 6.283; rg.dir += d * 0.5;
+    best.hp -= SHOOTER.gunDamage; rg.fx.push({ x: best.x, y: best.y, life: 1, kind: 'spark' });
+    best.state = 'alert';
+    if (onTapFeedback) onTapFeedback({ type: 'hitGuard' });
+    if (best.hp <= 0) { rg.guards.splice(rg.guards.indexOf(best), 1); rg.kills++; rg.fx.push({ x: best.x, y: best.y, life: 1, kind: 'down' }); if (onTapFeedback) onTapFeedback({ type: 'guardDown' }); }
+  } else if (onTapFeedback) onTapFeedback({ type: 'shoot' });
+}
+function rgGuardStep(g, dt) {
+  if (g.fireCd > 0) g.fireCd -= dt;
+  if (g.muzzle > 0) g.muzzle -= dt;
+  const dx = rg.px - g.x, dy = rg.py - g.y, dist = Math.hypot(dx, dy), ang = Math.atan2(dy, dx);
+  let diff = ang - g.dir; while (diff > Math.PI) diff -= 6.283; while (diff < -Math.PI) diff += 6.283;
+  const inView = Math.abs(diff) < SHOOTER.guardViewHalf;
+  const sees = dist < SHOOTER.guardRange && rgLos(g.x, g.y, rg.px, rg.py) && (g.state === 'alert' || inView || rg.alarm > 0.5);
+  if (sees) {
+    g.state = 'alert'; rg.alarm = Math.min(1, rg.alarm + dt * 0.6);
+    g.dir += Math.max(-3 * dt, Math.min(3 * dt, diff));
+    if (dist > 1.7) { const s = SHOOTER.moveSpeed * 0.5 * dt; rgMoveEntity(g, g.x + Math.cos(g.dir) * s, g.y + Math.sin(g.dir) * s, 0.25); }
+    if (g.fireCd <= 0 && Math.abs(diff) < 0.4) {
+      g.fireCd = SHOOTER.guardFireCd; g.muzzle = 0.08;
+      const chance = SHOOTER.hitBaseChance * Math.max(0.25, 1 - dist / SHOOTER.guardRange);
+      if (Math.random() < chance) { rg.hp -= SHOOTER.guardDmg; rg.hitFlash = 0.35; if (onTapFeedback) onTapFeedback({ type: 'playerHit' }); }
+    }
+  } else {
+    g.wanderT -= dt;
+    if (g.wanderT <= 0) { g.dir += (Math.random() - 0.5) * 1.6; g.wanderT = 1 + Math.random() * 2; }
+    const s = SHOOTER.moveSpeed * 0.28 * dt, nx = g.x + Math.cos(g.dir) * s, ny = g.y + Math.sin(g.dir) * s;
+    if (rgWall(nx + Math.sign(Math.cos(g.dir)) * 0.25, g.y) || rgWall(g.x, ny + Math.sign(Math.sin(g.dir)) * 0.25)) g.dir += 1.8 + Math.random();
+    else { g.x = nx; g.y = ny; }
+    if (g.state === 'alert' && rg.alarm < 0.3) g.state = 'patrol';
+  }
+}
 function rgUpdate(dt) {
   if (!rg) return;
   if (rg.msgT > 0) rg.msgT -= dt;
-  if (rg.distractCd > 0) rg.distractCd -= dt;
-  for (let i = rg.fx.length - 1; i >= 0; i--) { rg.fx[i].life -= dt * 1.2; if (rg.fx[i].life <= 0) rg.fx.splice(i, 1); }
-  if (rg.caught || rg.disposing) return;
-  const s = rg.smug;
+  if (rg.muzzle > 0) rg.muzzle -= dt;
+  if (rg.hitFlash > 0) rg.hitFlash -= dt;
+  if (rg.fireCd > 0) rg.fireCd -= dt;
+  for (let i = rg.fx.length - 1; i >= 0; i--) { rg.fx[i].life -= dt * 2; if (rg.fx[i].life <= 0) rg.fx.splice(i, 1); }
+  if (rg.dead) return;
   if (rg.joy && rg.joy.mag > 0.08) {
-    const spd = UG_STEALTH.smugSpeed * (s.carrying ? 0.78 : 1.0);
-    s.x += Math.cos(rg.joy.ang) * rg.joy.mag * spd * dt;
-    s.y += -Math.sin(rg.joy.ang) * rg.joy.mag * spd * dt;   // Joystick oben (Screen) → Welt-hoch
-    s.x = Math.max(0.4, Math.min(rg.worldW - 0.4, s.x));
-    s.y = Math.max(0.5, Math.min(rg.worldH - 0.5, s.y));
+    const fwd = -Math.sin(rg.joy.ang) * rg.joy.mag, turn = Math.cos(rg.joy.ang) * rg.joy.mag;
+    rg.dir += turn * SHOOTER.turnSpeed * dt;
+    const spd = fwd * SHOOTER.moveSpeed * dt;
+    rgMoveEntity(rg, rg.px + Math.cos(rg.dir) * spd, rg.py + Math.sin(rg.dir) * spd, 0.2);
   }
-  const sc = rgScale(), half = (H * 0.5) / sc, minCam = half, maxCam = rg.worldH - half;
-  const target = maxCam < minCam ? rg.worldH / 2 : Math.max(minCam, Math.min(maxCam, s.y));
-  rg.camY += (target - rg.camY) * Math.min(1, dt * 6);
-  if (rg.grace > 0) rg.grace -= dt;
-  // Stash aufnehmen → Rückweg
-  if (!s.carrying && Math.hypot(s.x - rg.stash.x, s.y - rg.stash.y) < 1.0) {
-    s.carrying = true; rg.grace = 0.8; grabLoot(); rgMsg('📦 Ware! Jetzt zum Ausgang zurück.'); if (onTapFeedback) onTapFeedback({ type: 'runGrab' });
+  if (!rg.carrying && Math.hypot(rg.px - rg.stash.x, rg.py - rg.stash.y) < 0.9) {
+    rg.carrying = true; rg.stash.taken = true; grabLoot(); rgMsg('📦 Ware! Zurück zum Ausgang!'); if (onTapFeedback) onTapFeedback({ type: 'runGrab' });
   }
-  // Extraktion erreicht → Erfolg
-  if (s.carrying && s.y <= rg.exitY + 0.35) {
-    const res = finishRun(); runView = false; rg = null; if (onTapFeedback) onTapFeedback({ type: 'runDone', qty: res ? res.qty : 0 }); return;
+  if (rg.carrying && Math.hypot(rg.px - rg.exit.x, rg.py - rg.exit.y) < 0.9) {
+    const res = finishRun(); runView = false; const q = res ? res.qty : 0; rg = null; if (onTapFeedback) onTapFeedback({ type: 'runDone', qty: q }); return;
   }
-  for (const g of rg.guards) guardStep(g, dt);
-  let seen = false;
-  if (rg.grace <= 0) {
-    for (const g of rg.guards) {
-      const vx = s.x - g.x, vy = s.y - g.y, dist = Math.hypot(vx, vy);
-      if (dist > g.coneRange) continue;
-      let a = Math.atan2(vy, vx) - guardViewDir(g); while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI;
-      if (Math.abs(a) < g.coneHalf && !segBlocked(rg.occ, g.x, g.y, s.x, s.y)) {
-        seen = true; const prox = 1 - dist / g.coneRange, light = lightAt(rg.lamps, s.x, s.y);
-        rg.suspicion = Math.min(1, rg.suspicion + UG_STEALTH.suspicionRise * (0.5 + prox * 0.5) * (0.7 + light * 0.6) * dt);
-        if (rg.suspicion > 0.3) { g.state = 'suspicious'; g.invx = s.x; g.invy = s.y; g.invT = 2.6; }
-      }
-    }
+  rg.alarm = Math.max(0, rg.alarm - dt * 0.12);
+  for (const g of rg.guards) rgGuardStep(g, dt);
+  if (rg.hp <= 0) rgDie();
+}
+function rgDrawSprite(s, sx, size, horizon) {
+  const cx = sx;
+  if (s.kind === 'guard') {
+    const g2 = s.g, alert = g2.state === 'alert', bw = size * 0.34, bh = size * 0.6, bx = cx - bw / 2, by = horizon - size * 0.05;
+    ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.beginPath(); ctx.ellipse(cx, by + bh, bw * 0.7, size * 0.05, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = alert ? '#b23b3b' : '#2b4e7a'; ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, size * 0.06); ctx.fill();
+    ctx.fillStyle = '#e9b98c'; ctx.beginPath(); ctx.arc(cx, by - size * 0.06, size * 0.11, 0, 7); ctx.fill();
+    ctx.strokeStyle = '#222'; ctx.lineWidth = Math.max(2, size * 0.03); ctx.beginPath(); ctx.moveTo(cx, by + bh * 0.3); ctx.lineTo(cx + bw * 0.9, by + bh * 0.3); ctx.stroke();
+    if (g2.muzzle > 0) { ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = 'rgba(255,220,120,0.9)'; ctx.beginPath(); ctx.arc(cx + bw * 0.95, by + bh * 0.3, size * 0.07, 0, 7); ctx.fill(); ctx.restore(); }
+    const hy = by - size * 0.2; ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(bx, hy, bw, size * 0.035);
+    ctx.fillStyle = alert ? '#ff6b6b' : '#7de08a'; ctx.fillRect(bx, hy, bw * Math.max(0, g2.hp / SHOOTER.guardHp), size * 0.035);
+    if (alert) { ctx.fillStyle = '#ff5e5e'; ctx.font = `${size * 0.22}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('❗', cx, by - size * 0.34); }
+  } else if (s.kind === 'stash') {
+    const b = size * 0.42; ctx.save(); ctx.globalCompositeOperation = 'lighter'; const gr = ctx.createRadialGradient(cx, horizon, 2, cx, horizon, b); gr.addColorStop(0, 'rgba(120,230,150,0.5)'); gr.addColorStop(1, 'rgba(120,230,150,0)'); ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(cx, horizon, b, 0, 7); ctx.fill(); ctx.restore();
+    ctx.font = `${size * 0.4}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('📦', cx, horizon);
+    ctx.fillStyle = '#9ff0b5'; ctx.font = `800 ${Math.max(9, size * 0.12)}px system-ui, sans-serif`; ctx.fillText('STASH', cx, horizon - size * 0.34);
+  } else if (s.kind === 'exit' || s.kind === 'exit-on') {
+    const on = s.kind === 'exit-on', dw = size * 0.36, dh = size * 0.7;
+    ctx.fillStyle = on ? '#2f6a3a' : '#3a3550'; ctx.beginPath(); ctx.roundRect(cx - dw / 2, horizon - dh * 0.4, dw, dh, 4); ctx.fill();
+    ctx.font = `${size * 0.32}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('🚪', cx, horizon);
+    if (on) { ctx.fillStyle = '#9ff0b5'; ctx.font = `800 ${Math.max(9, size * 0.12)}px system-ui, sans-serif`; ctx.fillText('AUSGANG', cx, horizon - dh * 0.5); }
+  } else if (s.kind === 'spark') {
+    ctx.globalAlpha = Math.max(0, s.f.life); ctx.fillStyle = '#ffd36a'; ctx.beginPath(); ctx.arc(cx, horizon, size * 0.12 * s.f.life + 3, 0, 7); ctx.fill(); ctx.globalAlpha = 1;
+  } else if (s.kind === 'down') {
+    ctx.globalAlpha = Math.max(0, s.f.life); ctx.font = `${size * 0.3}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('💀', cx, horizon + size * 0.2); ctx.globalAlpha = 1;
   }
-  if (seen) { if (!rg.spotSfx) { rg.spotSfx = true; if (onTapFeedback) onTapFeedback({ type: 'ugspotted' }); } }
-  else { rg.spotSfx = false; rg.suspicion = Math.max(0, rg.suspicion - UG_STEALTH.suspicionFall * dt); }
-  if (rg.suspicion >= 1) { rg.caught = true; if (onTapFeedback) onTapFeedback({ type: 'ugcaught' }); }
+}
+function rgDrawGun() {
+  const w = W, h = H, gx = w * 0.5, gy = h, bob = rg.joy && rg.joy.mag > 0.1 ? Math.sin(performance.now() / 120) * 4 : 0;
+  ctx.fillStyle = '#20222a'; ctx.beginPath(); ctx.roundRect(gx + 10, gy - 70 + bob, 28, 74, 5); ctx.fill();
+  ctx.fillStyle = '#2a2d38'; ctx.beginPath(); ctx.roundRect(gx + 2, gy - 98 + bob, 22, 62, 4); ctx.fill();
+  ctx.fillStyle = '#15161c'; ctx.beginPath(); ctx.roundRect(gx + 6, gy - 100 + bob, 14, 10, 3); ctx.fill();
+  if (rg.muzzle > 0) { ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = 'rgba(255,220,120,0.9)'; ctx.beginPath(); ctx.arc(gx + 13, gy - 102 + bob, 14 + 22 * rg.muzzle, 0, 7); ctx.fill(); ctx.restore(); }
+}
+function rgDrawRadar() {
+  const rw = 84, rx = W - rw - 10, sc = rw / rg.mw, ry = 70, rh = rg.mh * sc;
+  ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(rx, ry, rw, rh);
+  for (let y = 0; y < rg.mh; y++) for (let x = 0; x < rg.mw; x++) if (rg.map[y * rg.mw + x] === 0) { ctx.fillStyle = 'rgba(90,80,120,0.35)'; ctx.fillRect(rx + x * sc, ry + y * sc, sc + 0.6, sc + 0.6); }
+  if (!rg.stash.taken) { ctx.fillStyle = '#43d95e'; ctx.fillRect(rx + rg.stash.x * sc - 1.5, ry + rg.stash.y * sc - 1.5, 3, 3); }
+  ctx.fillStyle = rg.carrying ? '#43d95e' : '#888'; ctx.fillRect(rx + rg.exit.x * sc - 1.5, ry + rg.exit.y * sc - 1.5, 3, 3);
+  for (const g of rg.guards) { ctx.fillStyle = g.state === 'alert' ? '#ff5e5e' : '#ff9a5e'; ctx.fillRect(rx + g.x * sc - 1.2, ry + g.y * sc - 1.2, 2.5, 2.5); }
+  ctx.fillStyle = '#7de0ff'; ctx.beginPath(); ctx.arc(rx + rg.px * sc, ry + rg.py * sc, 2.5, 0, 7); ctx.fill();
+  ctx.strokeStyle = '#7de0ff'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(rx + rg.px * sc, ry + rg.py * sc); ctx.lineTo(rx + (rg.px + Math.cos(rg.dir)) * sc, ry + (rg.py + Math.sin(rg.dir)) * sc); ctx.stroke();
+  ctx.strokeStyle = '#4a4560'; ctx.lineWidth = 1; ctx.strokeRect(rx, ry, rw, rh);
+}
+function rgDrawHud() {
+  const w = W, h = H;
+  if (rg.alarm > 0.05) { ctx.fillStyle = `rgba(255,60,40,${0.12 + 0.3 * rg.alarm})`; ctx.fillRect(0, 0, w, 6);
+    if (rg.alarm > 0.5) { ctx.fillStyle = '#ff6b6b'; ctx.font = '800 14px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillText('🚨 ALARM', w / 2, 10); } }
+  const hpw = 130, hx = 12, hy = h - 30; ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.beginPath(); ctx.roundRect(hx, hy, hpw, 14, 7); ctx.fill();
+  const hpc = rg.hp > 50 ? '#43d95e' : rg.hp > 25 ? '#ffd93c' : '#ff5e3a'; ctx.fillStyle = hpc; ctx.beginPath(); ctx.roundRect(hx, hy, hpw * Math.max(0, rg.hp / rg.maxHp), 14, 7); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.font = '800 11px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(`❤️ ${Math.max(0, Math.ceil(rg.hp))}`, hx + 6, hy + 7);
+  ctx.fillStyle = 'rgba(60,50,70,0.92)'; ctx.beginPath(); ctx.roundRect(8, 34, 92, 30, 8); ctx.fill(); ctx.fillStyle = '#e6d6e6'; ctx.font = '800 13px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('‹ Fliehen', 54, 49); runHits.push({ rectX: 8, rectY: 34, rectW: 92, rectH: 30, fn: 'flee' });
+  ctx.fillStyle = 'rgba(90,44,52,0.9)'; ctx.beginPath(); ctx.roundRect(w - 100, 34, 92, 30, 8); ctx.fill(); ctx.fillStyle = '#ffd0d0'; ctx.fillText('🏳️ Stellen', w - 54, 49); runHits.push({ rectX: w - 100, rectY: 34, rectW: 92, rectH: 30, fn: 'surrender' });
+  const fb = 66, fx = w - fb - 16, fy = h - fb - 22; ctx.fillStyle = 'rgba(120,40,40,0.92)'; ctx.beginPath(); ctx.arc(fx + fb / 2, fy + fb / 2, fb / 2, 0, 7); ctx.fill(); ctx.strokeStyle = '#ff8a8a'; ctx.lineWidth = 3; ctx.stroke(); ctx.fillStyle = '#fff'; ctx.font = '26px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('🔫', fx + fb / 2, fy + fb / 2); runHits.push({ rectX: fx, rectY: fy, rectW: fb, rectH: fb, fn: 'fire' });
+  if (rg.joy) { ctx.save(); ctx.globalAlpha = 0.5; ctx.strokeStyle = '#cfe0ff'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(rg.joy.ox, rg.joy.oy, JOY_R, 0, 7); ctx.stroke(); ctx.fillStyle = 'rgba(160,190,255,0.5)'; ctx.beginPath(); ctx.arc(rg.joy.ox + Math.cos(rg.joy.ang) * rg.joy.mag * 34, rg.joy.oy + Math.sin(rg.joy.ang) * rg.joy.mag * 34, 18, 0, 7); ctx.fill(); ctx.restore(); }
+  if (rg.msgT > 0 && rg.msg) { ctx.fillStyle = '#ffd0a0'; ctx.font = '800 15px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(rg.msg, w / 2, h - 60); }
+}
+function rgDrawBust() {
+  const b = rg.bust || {}; ctx.fillStyle = 'rgba(6,4,8,0.9)'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#ff5e5e'; ctx.font = '900 30px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('🚨 ERWISCHT', W / 2, H * 0.22);
+  const lines = [`💸 Kaution: −${fmt(b.bail || 0)} €`, `📦 Lager weg: ${b.seized || 0} Stück`, `🔥 Heat: ${b.heat || 0} %`, `🚔 Razzia: ${b.raid || 0}s`, `🔒 Festnahme: ${b.jail || 0}s gesperrt`];
+  ctx.font = '700 16px system-ui, sans-serif'; ctx.fillStyle = '#ffd0d0';
+  lines.forEach((l, i) => ctx.fillText(l, W / 2, H * 0.34 + i * 30));
+  const bw = 200, bx = W / 2 - bw / 2, by = H * 0.72; ctx.fillStyle = 'rgba(80,40,44,0.95)'; ctx.beginPath(); ctx.roundRect(bx, by, bw, 50, 10); ctx.fill(); ctx.strokeStyle = '#ff8a8a'; ctx.lineWidth = 2; ctx.stroke(); ctx.fillStyle = '#fff'; ctx.font = '800 18px system-ui, sans-serif'; ctx.fillText('Weiter', W / 2, by + 25); runHits.push({ rectX: bx, rectY: by, rectW: bw, rectH: 50, fn: 'continue' });
 }
 function rgDraw(t) {
   runHits = [];
-  const sc = rgScale();
-  ctx.fillStyle = '#0c0b12'; ctx.fillRect(0, 0, W, H);
-  // Segment-Linien
-  for (let s = 0; s <= rg.nSeg; s++) { const p = rgProj(0, 2 + s * rg.segLen); ctx.strokeStyle = 'rgba(120,110,150,0.12)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(0, p.y); ctx.lineTo(W, p.y); ctx.stroke(); }
-  // Lichtpfützen
-  for (const l of rg.lamps) { const p = rgProj(l.x, l.y); ctx.save(); ctx.globalCompositeOperation = 'lighter';
-    const g = ctx.createRadialGradient(p.x, p.y, 4, p.x, p.y, l.rad * sc); g.addColorStop(0, 'rgba(255,220,150,0.12)'); g.addColorStop(1, 'rgba(255,220,150,0)');
-    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, l.rad * sc, 0, 7); ctx.fill(); ctx.restore(); }
-  // Deckung
-  for (const o of rg.occ) { const p = rgProj(o.x, o.y + o.h), w = o.w * sc, h = o.h * sc;
-    ctx.fillStyle = '#2a2333'; ctx.beginPath(); ctx.roundRect(p.x, p.y, w, h, 4); ctx.fill(); ctx.strokeStyle = '#3d3450'; ctx.lineWidth = 1.5; ctx.stroke(); }
-  // Stash
-  { const p = rgProj(rg.stash.x, rg.stash.y); ctx.save(); ctx.globalCompositeOperation = 'lighter';
-    const g = ctx.createRadialGradient(p.x, p.y, 2, p.x, p.y, sc * 1.6); g.addColorStop(0, 'rgba(120,230,150,0.35)'); g.addColorStop(1, 'rgba(120,230,150,0)');
-    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, sc * 1.6, 0, 7); ctx.fill(); ctx.restore();
-    ctx.font = `${sc * 0.9}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('📦', p.x, p.y);
-    ctx.fillStyle = '#9ff0b5'; ctx.font = `800 ${Math.max(9, sc * 0.3)}px system-ui, sans-serif`; ctx.fillText('STASH', p.x, p.y - sc * 0.72); }
-  // Ausgang
-  { const p = rgProj(rg.worldW / 2, rg.exitY); ctx.fillStyle = '#3a3550'; ctx.beginPath(); ctx.roundRect(p.x - sc * 0.7, p.y - sc * 0.5, sc * 1.4, sc, 5); ctx.fill();
-    ctx.font = `${sc * 0.6}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('🚪', p.x, p.y);
-    ctx.fillStyle = rg.smug.carrying ? '#9ff0b5' : '#6a6a7a'; ctx.font = `800 ${Math.max(8, sc * 0.28)}px system-ui, sans-serif`; ctx.fillText('AUSGANG', p.x, p.y - sc * 0.7); }
-  // Wachen + Sichtkegel (an Deckung abgeschnitten)
-  for (const g of rg.guards) {
-    const dir = guardViewDir(g), cp = rgProj(g.x, g.y), sus = g.state === 'suspicious';
-    ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = sus ? 'rgba(255,90,60,0.18)' : 'rgba(120,200,255,0.13)';
-    ctx.beginPath(); ctx.moveTo(cp.x, cp.y); const nseg = 12;
-    for (let k = 0; k <= nseg; k++) { const aa = dir - g.coneHalf + 2 * g.coneHalf * k / nseg; let len = g.coneRange;
-      for (let s2 = 0.4; s2 < g.coneRange; s2 += 0.4) { const wx = g.x + Math.cos(aa) * s2, wy = g.y + Math.sin(aa) * s2;
-        let bl = false; for (const o of rg.occ) if (wx > o.x && wx < o.x + o.w && wy > o.y && wy < o.y + o.h) { bl = true; break; }
-        if (bl) { len = s2; break; } }
-      const e = rgProj(g.x + Math.cos(aa) * len, g.y + Math.sin(aa) * len); ctx.lineTo(e.x, e.y); }
-    ctx.closePath(); ctx.fill(); ctx.restore();
-    ctx.fillStyle = 'rgba(0,0,0,0.32)'; ctx.beginPath(); ctx.ellipse(cp.x, cp.y + sc * 0.26, sc * 0.34, sc * 0.15, 0, 0, 7); ctx.fill();
-    ctx.fillStyle = sus ? '#8a2f2f' : '#1c3f6e'; ctx.beginPath(); ctx.arc(cp.x, cp.y, sc * 0.32, 0, 7); ctx.fill();
-    ctx.strokeStyle = sus ? '#ff8a8a' : '#4a7fc0'; ctx.lineWidth = 2; ctx.stroke();
-    const eye = rgProj(g.x + Math.cos(dir) * 0.35, g.y + Math.sin(dir) * 0.35); ctx.fillStyle = '#cfe0ff'; ctx.beginPath(); ctx.arc(eye.x, eye.y, sc * 0.09, 0, 7); ctx.fill();
-    if (sus) { ctx.fillStyle = '#ff5e5e'; ctx.font = `${sc * 0.5}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('❗', cp.x, cp.y - sc * 0.72); }
+  const w = W, h = H, fov = SHOOTER.fov, horizon = h * 0.5;
+  const dirX = Math.cos(rg.dir), dirY = Math.sin(rg.dir), planeLen = Math.tan(fov / 2), planeX = -dirY * planeLen, planeY = dirX * planeLen;
+  let g = ctx.createLinearGradient(0, 0, 0, horizon); g.addColorStop(0, '#0a0a12'); g.addColorStop(1, '#1a1826'); ctx.fillStyle = g; ctx.fillRect(0, 0, w, horizon);
+  g = ctx.createLinearGradient(0, horizon, 0, h); g.addColorStop(0, '#26201f'); g.addColorStop(1, '#0c0a0c'); ctx.fillStyle = g; ctx.fillRect(0, horizon, w, h - horizon);
+  const step = 2, zbuf = new Float32Array(w + step), maxDist = 22;
+  for (let x = 0; x < w; x += step) {
+    const camX = 2 * x / w - 1, rdx = dirX + planeX * camX, rdy = dirY + planeY * camX;
+    let mapX = Math.floor(rg.px), mapY = Math.floor(rg.py);
+    const ddx = Math.abs(1 / rdx), ddy = Math.abs(1 / rdy);
+    let stepX, stepY, sdx, sdy;
+    if (rdx < 0) { stepX = -1; sdx = (rg.px - mapX) * ddx; } else { stepX = 1; sdx = (mapX + 1 - rg.px) * ddx; }
+    if (rdy < 0) { stepY = -1; sdy = (rg.py - mapY) * ddy; } else { stepY = 1; sdy = (mapY + 1 - rg.py) * ddy; }
+    let side = 0, hit = false, guard = 0;
+    while (!hit && guard++ < 128) {
+      if (sdx < sdy) { sdx += ddx; mapX += stepX; side = 0; } else { sdy += ddy; mapY += stepY; side = 1; }
+      if (mapX < 0 || mapY < 0 || mapX >= rg.mw || mapY >= rg.mh) { hit = true; break; }
+      if (rg.map[mapY * rg.mw + mapX] === 1) hit = true;
+    }
+    const perp = side === 0 ? (sdx - ddx) : (sdy - ddy), dist = Math.max(0.05, perp);
+    for (let k = 0; k < step; k++) zbuf[x + k] = dist;
+    const lineH = h / dist, y0 = horizon - lineH / 2, fog = Math.max(0, 1 - dist / maxDist), base = side === 1 ? 0.6 : 0.92, tile = ((mapX + mapY) & 1) ? 1 : 0.9, shade = base * tile * (0.22 + 0.78 * fog);
+    ctx.fillStyle = `rgb(${Math.round(104 * shade)},${Math.round(74 * shade)},${Math.round(92 * shade)})`;
+    ctx.fillRect(x, y0, step, lineH);
   }
-  // Wurf-/Ablenk-Marker
-  for (const f of rg.fx) { const p = rgProj(f.x, f.y); ctx.globalAlpha = Math.max(0, f.life); ctx.font = `${sc * 0.55}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('🔊', p.x, p.y); ctx.globalAlpha = 1; }
-  // Schmuggler
-  { const s = rg.smug, p = rgProj(s.x, s.y); ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.beginPath(); ctx.ellipse(p.x, p.y + sc * 0.28, sc * 0.34, sc * 0.16, 0, 0, 7); ctx.fill();
-    ctx.fillStyle = '#2e6b3a'; ctx.beginPath(); ctx.arc(p.x, p.y, sc * 0.3, 0, 7); ctx.fill(); ctx.strokeStyle = '#7de0a0'; ctx.lineWidth = 2; ctx.stroke();
-    if (s.carrying) { ctx.font = `${sc * 0.42}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('📦', p.x, p.y - sc * 0.56); } }
-  // HUD oben
-  ctx.fillStyle = 'rgba(8,6,12,0.72)'; ctx.fillRect(0, 0, W, 54);
-  const cc = SOURCING.cats[rg.cat]; ctx.fillStyle = '#ffd0a0'; ctx.font = '800 15px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText(`${cc.icon} ${cc.name}${rg.smug.carrying ? ' · Rückweg' : ''}`, W / 2, 18);
-  { const bw = W * 0.5, bx = W / 2 - bw / 2, by = 36; ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.beginPath(); ctx.roundRect(bx, by, bw, 8, 4); ctx.fill();
-    const col = rg.suspicion < 0.5 ? '#43d95e' : rg.suspicion < 0.8 ? '#ffd93c' : '#ff5e3a'; ctx.fillStyle = col; ctx.beginPath(); ctx.roundRect(bx, by, bw * rg.suspicion, 8, 4); ctx.fill(); }
-  // Fliehen (oben links)
-  ctx.fillStyle = 'rgba(60,50,70,0.92)'; ctx.beginPath(); ctx.roundRect(8, 12, 90, 30, 8); ctx.fill();
-  ctx.fillStyle = '#e6d6e6'; ctx.font = '800 13px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('‹ Fliehen', 53, 27);
-  runHits.push({ rectX: 8, rectY: 12, rectW: 90, rectH: 30, fn: 'flee' });
-  // Ablenken (unten links)
-  { const ready = rg.distract > 0 && rg.distractCd <= 0, bw = 128, bx = 10, by = H - 66, bh = 42;
-    ctx.fillStyle = ready ? 'rgba(60,50,80,0.95)' : 'rgba(34,30,40,0.8)'; ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 10); ctx.fill();
-    ctx.strokeStyle = ready ? '#b98aff' : '#443b52'; ctx.lineWidth = 2; ctx.stroke();
-    ctx.fillStyle = ready ? '#fff' : '#8a7f96'; ctx.font = '800 14px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(rg.distractCd > 0 ? `🔊 ${Math.ceil(rg.distractCd)}s` : `🔊 Ablenken ×${rg.distract}`, bx + bw / 2, by + bh / 2);
-    if (ready) runHits.push({ rectX: bx, rectY: by, rectW: bw, rectH: bh, fn: 'distract' }); }
-  // Joystick
-  if (rg.joy) { ctx.save(); ctx.globalAlpha = 0.5; ctx.strokeStyle = '#cfe0ff'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(rg.joy.ox, rg.joy.oy, JOY_R, 0, 7); ctx.stroke();
-    ctx.fillStyle = 'rgba(160,190,255,0.5)'; ctx.beginPath(); ctx.arc(rg.joy.ox + Math.cos(rg.joy.ang) * rg.joy.mag * 34, rg.joy.oy + Math.sin(rg.joy.ang) * rg.joy.mag * 34, 18, 0, 7); ctx.fill(); ctx.restore(); }
-  if (rg.msgT > 0 && rg.msg) { ctx.fillStyle = '#ffd0a0'; ctx.font = '800 15px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(rg.msg, W / 2, H - 100); }
-  if (rg.caught) rgDrawCaught();
-  else if (rg.disposing) rgDrawDispose();
-}
-function rgDrawCaught() {
-  ctx.fillStyle = 'rgba(6,4,8,0.85)'; ctx.fillRect(0, 0, W, H);
-  const bw = Math.min(340, W - 40), bx = W / 2 - bw / 2, by = H * 0.34;
-  ctx.fillStyle = '#ff6b6b'; ctx.font = '900 30px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('🚨 ERWISCHT!', W / 2, by - 20);
-  const pw = (bw - 10) / 2, ph = 54, lx = bx, rx2 = bx + pw + 10, r1 = by + 6, r2 = r1 + ph + 10;
-  const btn = (x, y, on, bg, brd, title, sub, fn) => {
-    ctx.fillStyle = on ? bg : '#2a2530'; ctx.beginPath(); ctx.roundRect(x, y, pw, ph, 10); ctx.fill();
-    ctx.strokeStyle = on ? brd : '#443b52'; ctx.lineWidth = 2; ctx.stroke();
-    ctx.fillStyle = on ? '#fff' : '#8a7f96'; ctx.font = '800 14px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(title, x + pw / 2, y + ph * 0.36);
-    ctx.font = '600 10px system-ui, sans-serif'; ctx.fillStyle = on ? 'rgba(255,255,255,0.78)' : '#8a7f96'; ctx.fillText(sub, x + pw / 2, y + ph * 0.72);
-    if (on && fn) runHits.push({ rectX: x, rectY: y, rectW: pw, rectH: ph, fn });
-  };
-  const tdAvail = takedownAvailable(), bribe = runBribeCost(), canBribe = state.money >= bribe;
-  btn(lx, r1, true, '#7a2f2f', '#ff9a9a', '🙌 Stellen', 'Einsatz weg + Razzia', 'surrender');
-  btn(rx2, r1, tdAvail, '#4a2f6a', '#b98aff', '🔫 Ausschalten', tdAvail ? 'Leiche entsorgen!' : `in ${Math.ceil(takedownLeft())}s`, tdAvail ? 'takedown' : null);
-  btn(lx, r2, canBribe, '#2f5a4a', '#7de0b0', '💶 Bestechen', `${fmt(bribe)} € · keine Razzia`, canBribe ? 'bribe' : null);
-  btn(rx2, r2, true, '#3a3550', '#9aa0c0', '🏃 Fliehen', 'Ware weg, keine Razzia', 'flee');
-}
-function rgDrawDispose() {
-  const sc = rgScale();
-  ctx.fillStyle = 'rgba(6,4,8,0.55)'; ctx.fillRect(0, 0, W, H);
-  ctx.fillStyle = '#ffcf6a'; ctx.font = '900 17px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('🩸 Leiche entsorgen — Ort wählen', W / 2, 80);
-  if (rg.body) { const bp = rgProj(rg.body.x, rg.body.y); ctx.font = `${sc * 0.7}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('💀', bp.x, bp.y); }
-  for (const sp of rg.spots) {
-    const p = rgProj(sp.x, sp.y), w = 148, h = 46;
-    const bx = Math.max(6, Math.min(W - w - 6, p.x - w / 2)), by = Math.max(96, Math.min(H - h - 6, p.y - h / 2));
-    ctx.fillStyle = 'rgba(28,24,28,0.96)'; ctx.beginPath(); ctx.roundRect(bx, by, w, h, 8); ctx.fill();
-    ctx.strokeStyle = sp.risk < 0.2 ? '#43d95e' : sp.risk < 0.4 ? '#ffd93c' : '#ff6b6b'; ctx.lineWidth = 2; ctx.stroke();
-    ctx.fillStyle = '#fff'; ctx.font = '800 13px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(sp.label, bx + w / 2, by + 16);
-    ctx.fillStyle = sp.risk < 0.2 ? '#9ff0b5' : sp.risk < 0.4 ? '#ffe89a' : '#ffb0b0'; ctx.font = '700 11px system-ui, sans-serif'; ctx.fillText(`Fund-Risiko ${Math.round(sp.risk * 100)} %`, bx + w / 2, by + 32);
-    runHits.push({ rectX: bx, rectY: by, rectW: w, rectH: h, fn: 'dispose', risk: sp.risk });
+  const sprites = [];
+  if (!rg.stash.taken) sprites.push({ x: rg.stash.x, y: rg.stash.y, kind: 'stash' });
+  sprites.push({ x: rg.exit.x, y: rg.exit.y, kind: rg.carrying ? 'exit-on' : 'exit' });
+  for (const gd of rg.guards) sprites.push({ x: gd.x, y: gd.y, kind: 'guard', g: gd });
+  for (const f of rg.fx) sprites.push({ x: f.x, y: f.y, kind: f.kind === 'down' ? 'down' : 'spark', f });
+  const invDet = 1 / (planeX * dirY - dirX * planeY);
+  for (const s of sprites) { const rx = s.x - rg.px, ry = s.y - rg.py; s.tx = invDet * (dirY * rx - dirX * ry); s.ty = invDet * (-planeY * rx + planeX * ry); }
+  sprites.sort((a, b) => b.ty - a.ty);
+  for (const s of sprites) {
+    if (s.ty <= 0.2) continue;
+    const sx = (w / 2) * (1 + s.tx / s.ty), size = Math.min(h * 1.5, h / s.ty), col = Math.max(0, Math.min(w - 1, Math.round(sx)));
+    if (zbuf[col] < s.ty) continue;
+    rgDrawSprite(s, sx, size, horizon);
   }
+  if (rg.hitFlash > 0) { ctx.fillStyle = `rgba(180,20,20,${0.4 * rg.hitFlash})`; ctx.fillRect(0, 0, w, h); }
+  rgDrawGun();
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 2; ctx.beginPath();
+  ctx.moveTo(w / 2 - 11, h / 2); ctx.lineTo(w / 2 - 4, h / 2); ctx.moveTo(w / 2 + 4, h / 2); ctx.lineTo(w / 2 + 11, h / 2);
+  ctx.moveTo(w / 2, h / 2 - 11); ctx.lineTo(w / 2, h / 2 - 4); ctx.moveTo(w / 2, h / 2 + 4); ctx.lineTo(w / 2, h / 2 + 11); ctx.stroke();
+  rgDrawHud();
+  rgDrawRadar();
+  if (rg.dead) rgDrawBust();
 }
 
 // ============================================================
@@ -619,27 +662,12 @@ function handleRunTap(mx, my, e) {
   for (const h of runHits) {
     if (!(mx >= h.rectX && mx <= h.rectX + h.rectW && my >= h.rectY && my <= h.rectY + h.rectH)) continue;
     if (h.fn === 'flee') { rgFlee(); return; }
-    if (h.fn === 'surrender') { rgBust(); return; }
-    if (h.fn === 'takedown') { if (doTakedown()) {
-        const s = rg.smug; let bi = -1, bd = 1e9;
-        rg.guards.forEach((g, i) => { const d = Math.hypot(g.x - s.x, g.y - s.y); if (d < bd) { bd = d; bi = i; } });
-        rg.body = bi >= 0 ? { x: rg.guards[bi].x, y: rg.guards[bi].y } : { x: s.x, y: s.y };
-        if (bi >= 0) rg.guards.splice(bi, 1);
-        rg.caught = false; rg.disposing = true; rgMakeSpots();
-        if (onTapFeedback) onTapFeedback({ type: 'ugkill', x: e.clientX, y: e.clientY });
-      } return; }
-    if (h.fn === 'bribe') { if (runBribe()) { rg.caught = false; rg.suspicion = 0; rg.grace = 2.0;
-        rgMsg('💶 Bestochen — die Wache schaut weg.'); if (onTapFeedback) onTapFeedback({ type: 'ugbribe', x: e.clientX, y: e.clientY }); } return; }
-    if (h.fn === 'dispose') { const res = disposeBody(h.risk); rg.disposing = false; rg.body = null;
-        rg.suspicion = 0; rg.grace = 2.0; rg.spotSfx = false;
-        rgMsg(res.found ? '😱 Die Leiche wird wohl gefunden…' : '😮‍💨 Sauber entsorgt.');
-        if (onTapFeedback) onTapFeedback({ type: res.found ? 'ugbodyfound' : 'ugbodyhid', x: e.clientX, y: e.clientY }); return; }
-    if (h.fn === 'distract') {
-      const s = rg.smug, tx = s.x < rg.worldW / 2 ? rg.worldW - 1.0 : 1.0, ty = s.y + 1.5;
-      if (throwLure(rg, tx, ty) && onTapFeedback) onTapFeedback({ type: 'ugdistract', x: e.clientX, y: e.clientY });
-      return;
-    }
+    if (h.fn === 'surrender') { rgSurrender(); return; }
+    if (h.fn === 'fire') { rgFire(); return; }
+    if (h.fn === 'continue') { rgExitBust(); return; }
+    return;
   }
+  if (!rg.dead) rgFire();   // Tap ins Bild = Auto-Aim-Schuss
 }
 // Tap an der Theke: Run starten (Sparten-Picker) oder Feilsch-Buttons
 function handleCounterTap(mx, my, e) {
