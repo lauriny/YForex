@@ -1474,10 +1474,12 @@ function drawStreetFg(t) {
   const cy0 = roadY - 6;
   trash(42, cy0, 1.0, '#3f6b4a'); trash(60, cy0 + 2, 0.85, '#4a5566');
   hydrant(W - 26, cy0, 1.0); trash(W - 50, cy0 + 2, 0.9, '#5a4a3a');
-  // --- Passanten auf dem Bürgersteig (kleine Figuren, laufen vorbei) ---
-  { const ps = Math.max(0.9, (roadY - bandTop) * 0.05);
+  // --- Passanten auf dem Bürgersteig (gleiche Figurengröße wie die Gäste im Klub) ---
+  { const ps = dPersonScale();
+    const swH = roadY - bandTop, headRoom = 26 * ps;   // Füße so tief, dass der Kopf nicht abgeschnitten wird
     for (const q of passers) {
-      const px = q.fx * W, py = bandTop + (roadY - bandTop) * q.lane;
+      const px = q.fx * W;
+      const py = Math.min(roadY - 3, Math.max(bandTop + headRoom, bandTop + swH * q.lane));
       const walk = Math.sin(performance.now() / 1000 * 6 + q.phase);   // Gang-Wackeln
       drawPersonAt(px, py, ps, { color: q.color, skin: q.skin, hair: q.hair, female: q.female,
         bob: Math.abs(walk) * 1.2 * ps, arms: null, alpha: 0.96 });
