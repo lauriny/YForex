@@ -1140,10 +1140,22 @@ export function canvasFeedback(fb) {
   } else if (fb.type === 'ugstart') {
     playSfx('buy');
   } else if (fb.type === 'ugtrip') {
-    floatText({ x: fb.x, y: fb.y - 10 }, '📦 Fuhre geschafft', 'float-money');
+    const p = fb.x != null ? { x: fb.x, y: fb.y - 10 } : { x: window.innerWidth / 2, y: window.innerHeight * 0.4 };
+    floatText(p, '📦 Fuhre geschafft', 'float-money');
     playSfx('buy');
   } else if (fb.type === 'ugdone') {
     playSfx('chest'); confetti(14);
+  } else if (fb.type === 'ugspotted') {
+    playSfx('click');
+  } else if (fb.type === 'ugdistract') {
+    floatText({ x: fb.x, y: fb.y - 10 }, '🔊 Ablenkung', 'float-buy');
+    playSfx('tap');
+  } else if (fb.type === 'ugbribe') {
+    floatText({ x: fb.x, y: fb.y - 10 }, '💶 Bestochen', 'float-money');
+    playSfx('buy');
+  } else if (fb.type === 'ugflee') {
+    floatText({ x: fb.x, y: fb.y - 10 }, '🏃 Abgehauen', 'float-celeb');
+    playSfx('click');
   } else if (fb.type === 'ugcaught') {
     playSfx('milestone');
   } else if (fb.type === 'ugkill') {

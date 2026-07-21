@@ -11,9 +11,10 @@ import {
   currentDrink, activeTheme, goldenBottleReward, nightReport,
   activeJob, startJob, jobStake, jobFailChance,
   deliverGoods, surrenderJob, doTakedown, disposeBody, takedownAvailable, takedownLeft,
+  bribeCost, bribeJob, dropAndFlee,
   raidActive, raidLeft, ugDangerFrac,
 } from './game.js';
-import { fmt, CASH_STATIONS, DRINKS, drinkTier, UNDERGROUND_JOBS, HEAT_MAX } from './data.js';
+import { fmt, CASH_STATIONS, DRINKS, drinkTier, UNDERGROUND_JOBS, HEAT_MAX, UG_STEALTH } from './data.js';
 import { musicBpm } from './sfx.js';
 
 let canvas, ctx, W = 0, H = 0, DPR = 1;
@@ -151,19 +152,35 @@ export function initCanvas(el) {
 
 // Pointer/Wisch: unterscheidet Tippen (Aktion) von Ziehen (Raum verschieben)
 let ptr = null;
+const JOY_R = 42;   // Radius des virtuellen Joysticks (px)
+function hgTransportActive() {
+  return inRoomView() && framedRoom === 'hinter' && hg && activeJob() && !hg.caught && !hg.disposing;
+}
 function onPointerDown(e) {
   ptr = { x0: e.clientX, y0: e.clientY, lx: e.clientX, ly: e.clientY, moved: false };
   try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+  // Virtueller Joystick: nur im Transport-Modus des Hinterzimmers
+  if (hgTransportActive()) {
+    const rect = canvas.getBoundingClientRect();
+    hg.joy = { ox: e.clientX - rect.left, oy: e.clientY - rect.top, ang: 0, mag: 0 };
+  }
 }
 function onPointerMove(e) {
   if (!ptr) return;
   ptr.lx = e.clientX; ptr.ly = e.clientY;
   if (Math.abs(e.clientX - ptr.x0) + Math.abs(e.clientY - ptr.y0) > 8) ptr.moved = true;
+  if (hg && hg.joy) {
+    const rect = canvas.getBoundingClientRect();
+    const dx = (e.clientX - rect.left) - hg.joy.ox, dy = (e.clientY - rect.top) - hg.joy.oy, d = Math.hypot(dx, dy);
+    hg.joy.ang = Math.atan2(dy, dx);
+    hg.joy.mag = Math.min(1, d / JOY_R);
+  }
   // kein Kamera-Pan mehr: Räume werden per ◀ ▶ gewechselt, nicht durch Wischen
 }
 function onPointerUp(e) {
   if (!ptr) return;
   const moved = ptr.moved; ptr = null;
+  if (hg && hg.joy) hg.joy = null;
   if (!moved) handleTap(e);
 }
 
@@ -270,24 +287,35 @@ function handleTap(e) {
   // Hinterzimmer: Buttons/Karten/Orte, sonst den Schmuggler steuern
   if (roomV && framedRoom === 'hinter') {
     if (!hg) hgReset();
-    const aj = activeJob();
     for (const h of hinterHits) {
       const hit = h.r != null ? Math.hypot(mx - h.x, my - h.y) < h.r
         : (mx >= h.rectX && mx <= h.rectX + h.rectW && my >= h.rectY && my <= h.rectY + h.rectH);
       if (!hit) continue;
       if (h.fn === 'start') { if (startJob(h.job)) { hgReset(); if (onTapFeedback) onTapFeedback({ type: 'ugstart', x: e.clientX, y: e.clientY }); } return; }
       if (h.fn === 'surrender') { surrenderJob(); hgReset(); if (onTapFeedback) onTapFeedback({ type: 'ugbust', x: e.clientX, y: e.clientY }); return; }
-      if (h.fn === 'takedown') { if (doTakedown()) { hg.caught = false; hg.disposing = true; hg.body = hgCop(); hg.cop.gone = true; hgMakeSpots(); if (onTapFeedback) onTapFeedback({ type: 'ugkill', x: e.clientX, y: e.clientY }); } return; }
-      if (h.fn === 'dispose') { const res = disposeBody(h.risk); hg.disposing = false; hg.body = null; hg.cop.respawnAt = performance.now() + 4500;
-        hgMsg(res.found ? '😱 Die Leiche wird wohl gefunden…' : '😮‍💨 Sauber entsorgt.');
-        if (onTapFeedback) onTapFeedback({ type: res.found ? 'ugbodyfound' : 'ugbodyhid', x: e.clientX, y: e.clientY }); return; }
-    }
-    // sonst: im Transport-Modus Schmuggler zum getippten Punkt steuern (mit Schnapp aufs Ziel)
-    if (aj && !hg.caught && !hg.disposing) {
-      const w = detailUnproj(mx, my), r = RM.hinter;
-      const goal = hg.smug.carrying ? hgDrop() : hgPickup();
-      if (Math.hypot(w.x - goal.x, w.y - goal.y) < 1.6) { hg.smug.tx = goal.x; hg.smug.ty = goal.y; }   // in Zielnähe getippt → exakt hinlaufen
-      else { hg.smug.tx = Math.max(r.x + 0.6, Math.min(r.x + r.w - 0.6, w.x)); hg.smug.ty = Math.max(r.y + 1.4, Math.min(r.y + r.d - 0.4, w.y)); }
+      if (h.fn === 'takedown') { if (doTakedown()) {
+          // nächsten Wachmann als Leiche markieren und aus der Patrouille nehmen
+          const s = hg.smug; let bi = -1, bd = 1e9;
+          hg.guards.forEach((g, i) => { const d = Math.hypot(g.x - s.x, g.y - s.y); if (d < bd) { bd = d; bi = i; } });
+          hg.body = bi >= 0 ? { x: hg.guards[bi].x, y: hg.guards[bi].y } : { x: s.x, y: s.y };
+          if (bi >= 0) hg.guards.splice(bi, 1);
+          hg.caught = false; hg.disposing = true; hgMakeSpots();
+          if (onTapFeedback) onTapFeedback({ type: 'ugkill', x: e.clientX, y: e.clientY });
+        } return; }
+      if (h.fn === 'bribe') { if (bribeJob()) { hg.caught = false; hg.suspicion = 0; hg.grace = 2.0;
+          hgMsg('💶 Bestochen — der Wachmann schaut weg.');
+          if (onTapFeedback) onTapFeedback({ type: 'ugbribe', x: e.clientX, y: e.clientY }); } return; }
+      if (h.fn === 'flee') { dropAndFlee(); hgReset(); if (onTapFeedback) onTapFeedback({ type: 'ugflee', x: e.clientX, y: e.clientY }); return; }
+      if (h.fn === 'dispose') { const res = disposeBody(h.risk); hg.disposing = false; hg.body = null;
+          hg.suspicion = 0; hg.grace = 2.0; hg.spotSfx = false;
+          hgMsg(res.found ? '😱 Die Leiche wird wohl gefunden…' : '😮‍💨 Sauber entsorgt.');
+          if (onTapFeedback) onTapFeedback({ type: res.found ? 'ugbodyfound' : 'ugbodyhid', x: e.clientX, y: e.clientY }); return; }
+      if (h.fn === 'distract') {
+        // Ablenkung: Wurf auf die dem Schmuggler gegenüberliegende Seite des Raums
+        const s = hg.smug, r = RM.hinter, tx = s.x < r.x + r.w / 2 ? r.x + r.w - 1.2 : r.x + 1.2, ty = r.y + 2.4;
+        if (hgThrow(tx, ty) && onTapFeedback) onTapFeedback({ type: 'ugdistract', x: e.clientX, y: e.clientY });
+        return;
+      }
     }
     return;
   }
@@ -347,18 +375,15 @@ let passers = [];      // Passanten, die über den Bürgersteig laufen (Street-L
 let passerTimer = 2;
 let hinterHits = [];   // antippbare Zonen im Hinterzimmer (Aufträge wählen / Buttons / Orte)
 let hinterFx = [];     // kleine Arbeits-Partikel
-// ---- Hinterzimmer-Schmuggelspiel: Charakter steuern, Ware an der Polizei vorbeitragen ----
+// ---- Hinterzimmer-Schmuggel: Stealth-Minispiel (Joystick, Patrouillen, Sicht, Verdacht) ----
 let hg = null;
-function hgReset() {
-  const r = RM.hinter;
-  hg = { smug: { x: r.x + r.w - 1.2, y: r.y + 5.0, tx: r.x + r.w - 1.2, ty: r.y + 5.0, carrying: false },
-    cop: { gone: false, respawnAt: 0 }, caught: false, disposing: false, grace: 0, body: null, spots: [], msg: null, msgT: 0 };
+let hgFx = [];   // Ablenk-/Wurf-Marker (Welt-Koordinaten)
+function detailUnproj(mx, my) {
+  return { x: detailCam.x + (mx - W / 2) / detailScale, y: detailCam.y + (my - detailViewCy() - detailBiasY) / detailScale };
 }
-function hgPickup() { const r = RM.hinter; return { x: r.x + 1.15, y: r.y + 5.0 }; }
-function hgDrop()   { const r = RM.hinter; return { x: r.x + r.w - 1.15, y: r.y + 5.0 }; }
-function hgCop()    { const r = RM.hinter; return { x: r.x + r.w / 2, y: r.y + 2.6 }; }
-function hgConeDir() { return Math.PI / 2 + Math.sin(performance.now() / 1000 * 1.05) * 1.25; }   // schwenkt nach vorn ±
-function hgConeHalf() { return 0.4 + ugDangerFrac() * 0.45; }                                      // Risiko/Heat → wachsamer
+function hgPickup() { const r = RM.hinter; return { x: r.x + 1.15, y: r.y + 5.4 }; }
+function hgDrop()   { const r = RM.hinter; return { x: r.x + r.w - 1.15, y: r.y + 5.4 }; }
+function hgMsg(txt) { hg.msg = txt; hg.msgT = 2.4; }
 function hgMakeSpots() {
   const r = RM.hinter;
   hg.spots = [
@@ -367,54 +392,120 @@ function hgMakeSpots() {
     { x: r.x + r.w - 0.9, y: r.y + 0.9, label: '🚪 Hinterhof', risk: 0.55 },
   ];
 }
-function detailUnproj(mx, my) {
-  return { x: detailCam.x + (mx - W / 2) / detailScale, y: detailCam.y + (my - detailViewCy() - detailBiasY) / detailScale };
+function hgReset() {
+  const r = RM.hinter, aj = activeJob();
+  const tierIdx = Math.max(0, Math.min(UG_STEALTH.tiers.length - 1, aj ? UNDERGROUND_JOBS.findIndex(j => j.id === aj.def.id) : 0));
+  const T = UG_STEALTH.tiers[tierIdx], heat = state.underground?.heat || 0, hot = heat > 55;
+  const nGuards = Math.min(3, T.guards + (hot ? UG_STEALTH.heatGuardBonus : 0));
+  const coneHalf = T.coneHalf + (hot ? UG_STEALTH.heatConeBonus : 0);
+  const occluders = [
+    { x: r.x + r.w / 2 - 1.35, y: r.y + 3.0, w: 2.7, h: 1.5 },   // Deal-Tisch (Mitte)
+    { x: r.x + 0.4, y: r.y + 0.8, w: 1.4, h: 1.1 },              // Kisten (links)
+    { x: r.x + r.w - 1.9, y: r.y + 0.7, w: 1.3, h: 1.2 },        // Safe/Regal (rechts)
+  ];
+  const lamps = [{ x: r.x + r.w / 2, y: r.y + 4.0, rad: 2.5 }];
+  const guards = [];
+  for (let i = 0; i < nGuards; i++) {
+    const laneY = r.y + 2.1 + i * 1.35;
+    const a = { x: r.x + 1.6, y: laneY }, b = { x: r.x + r.w - 1.6, y: laneY };
+    const wps = i % 2 === 0 ? [a, b] : [b, a];
+    guards.push({ x: wps[0].x, y: wps[0].y, wps, wi: 1, facing: i % 2 === 0 ? 0 : Math.PI, state: 'patrol',
+      invx: 0, invy: 0, invT: 0, pause: 0, speed: T.guardSpeed, coneHalf, coneRange: T.coneRange, seed: Math.random() * 6 });
+  }
+  hg = { smug: { x: r.x + r.w - 1.2, y: r.y + 5.4, carrying: false }, joy: null,
+    guards, occluders, lamps, suspicion: 0, grace: 0, spotSfx: false,
+    caught: false, disposing: false, body: null, spots: [],
+    distract: tierIdx >= 1 ? UG_STEALTH.distractCharges : 0, distractCd: 0,
+    msg: null, msgT: 0 };
 }
-function hgMsg(txt) { hg.msg = txt; hg.msgT = 2.5; }
+export function __hg() { return hg; }   // Debug/Test-Hook für Screenshots
+function hgLightAt(x, y) { let m = 0; for (const l of hg.lamps) { const d = Math.hypot(x - l.x, y - l.y); m = Math.max(m, Math.max(0, 1 - d / l.rad)); } return m; }
+function hgSegBlocked(ax, ay, bx, by) {
+  for (const o of hg.occluders) {
+    for (let i = 1; i < 7; i++) { const t = i / 7, px = ax + (bx - ax) * t, py = ay + (by - ay) * t;
+      if (px > o.x && px < o.x + o.w && py > o.y && py < o.y + o.h) return true; }
+  }
+  return false;
+}
+function hgViewDir(g) { return g.facing + (g.pause > 0 ? Math.sin(performance.now() / 1000 * 2.2 + g.seed) * 0.9 : 0); }
+function hgGuardStep(g, dt) {
+  if (g.state === 'suspicious') {
+    const dx = g.invx - g.x, dy = g.invy - g.y, d = Math.hypot(dx, dy);
+    if (d > 0.12) { const st = g.speed * 1.25 * dt; g.x += dx / d * st; g.y += dy / d * st; g.facing = Math.atan2(dy, dx); }
+    g.invT -= dt; if (g.invT <= 0) { g.state = 'patrol'; g.pause = 0; }
+    return;
+  }
+  if (g.pause > 0) { g.pause -= dt; return; }
+  const wp = g.wps[g.wi], dx = wp.x - g.x, dy = wp.y - g.y, d = Math.hypot(dx, dy), st = g.speed * dt;
+  if (d > st) { g.x += dx / d * st; g.y += dy / d * st; g.facing = Math.atan2(dy, dx); }
+  else { g.x = wp.x; g.y = wp.y; g.wi = (g.wi + 1) % g.wps.length; g.pause = 0.8 + Math.random() * 0.7; }
+}
+function hgThrow(tx, ty) {
+  if (!hg || hg.distract <= 0 || hg.distractCd > 0) return false;
+  hg.distract--; hg.distractCd = UG_STEALTH.distractCd;
+  let best = null, bd = 1e9; for (const g of hg.guards) { const d = Math.hypot(g.x - tx, g.y - ty); if (d < bd) { bd = d; best = g; } }
+  if (best && bd < 6.5) { best.state = 'suspicious'; best.invx = tx; best.invy = ty; best.invT = 3.4; }
+  hgFx.push({ x: tx, y: ty, life: 1 });
+  return true;
+}
 function updateHinterGame(dt) {
   if (!hg) hgReset();
   if (hg.msgT > 0) hg.msgT -= dt;
+  if (hg.distractCd > 0) hg.distractCd -= dt;
+  for (let i = hgFx.length - 1; i >= 0; i--) { hgFx[i].life -= dt * 1.2; if (hgFx[i].life <= 0) hgFx.splice(i, 1); }
   const aj = activeJob();
   if (!aj || hg.caught || hg.disposing) return;
   const r = RM.hinter, s = hg.smug;
-  const dx = s.tx - s.x, dy = s.ty - s.y, d = Math.hypot(dx, dy), step = 3.4 * dt;
-  if (d > step) { s.x += dx / d * step; s.y += dy / d * step; } else { s.x = s.tx; s.y = s.ty; }
+  if (hg.joy && hg.joy.mag > 0.08) {
+    const weight = aj.def.weight || 0.2, spd = UG_STEALTH.smugSpeed * (1 - weight * 0.4);
+    s.x += Math.cos(hg.joy.ang) * hg.joy.mag * spd * dt;
+    s.y += Math.sin(hg.joy.ang) * hg.joy.mag * spd * dt;
+    s.x = Math.max(r.x + 0.5, Math.min(r.x + r.w - 0.5, s.x));
+    s.y = Math.max(r.y + 1.2, Math.min(r.y + r.d - 0.4, s.y));
+  }
   if (hg.grace > 0) hg.grace -= dt;
   const pk = hgPickup(), dr = hgDrop();
-  if (!s.carrying && Math.hypot(s.x - pk.x, s.y - pk.y) < 0.95) { s.carrying = true; hg.grace = 0.7; }
-  if (s.carrying && Math.hypot(s.x - dr.x, s.y - dr.y) < 0.95) {
-    s.carrying = false;
-    const res = deliverGoods();
-    if (onTapFeedback) onTapFeedback({ type: res && res.done ? 'ugdone' : 'ugtrip' });
-  }
-  if (hg.cop.gone && performance.now() >= hg.cop.respawnAt) hg.cop.gone = false;
-  if (s.carrying && hg.grace <= 0 && !hg.cop.gone) {
-    const c = hgCop(), vx = s.x - c.x, vy = s.y - c.y, dist = Math.hypot(vx, vy);
-    if (dist < 2.8) {
-      let a = Math.atan2(vy, vx) - hgConeDir();
-      while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI;
-      if (Math.abs(a) < hgConeHalf()) { hg.caught = true; if (onTapFeedback) onTapFeedback({ type: 'ugcaught' }); }
+  if (!s.carrying && Math.hypot(s.x - pk.x, s.y - pk.y) < 0.9) { s.carrying = true; hg.grace = 0.6; }
+  if (s.carrying && Math.hypot(s.x - dr.x, s.y - dr.y) < 0.9) { s.carrying = false; hg.suspicion = 0;
+    const res = deliverGoods(); if (onTapFeedback) onTapFeedback({ type: res && res.done ? 'ugdone' : 'ugtrip' }); }
+  for (const g of hg.guards) hgGuardStep(g, dt);
+  let seen = false;
+  if (s.carrying && hg.grace <= 0) {
+    for (const g of hg.guards) {
+      const vx = s.x - g.x, vy = s.y - g.y, dist = Math.hypot(vx, vy);
+      if (dist > g.coneRange) continue;
+      let a = Math.atan2(vy, vx) - hgViewDir(g); while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI;
+      if (Math.abs(a) < g.coneHalf && !hgSegBlocked(g.x, g.y, s.x, s.y)) {
+        seen = true; const prox = 1 - dist / g.coneRange, light = hgLightAt(s.x, s.y);
+        hg.suspicion = Math.min(1, hg.suspicion + UG_STEALTH.suspicionRise * (0.5 + prox * 0.5) * (0.7 + light * 0.6) * dt);
+        if (hg.suspicion > 0.3) { g.state = 'suspicious'; g.invx = s.x; g.invy = s.y; g.invT = 2.6; }
+      }
     }
   }
+  if (seen) { if (!hg.spotSfx) { hg.spotSfx = true; if (onTapFeedback) onTapFeedback({ type: 'ugspotted' }); } }
+  else { hg.spotSfx = false; hg.suspicion = Math.max(0, hg.suspicion - UG_STEALTH.suspicionFall * dt); }
+  if (hg.suspicion >= 1) { hg.caught = true; if (onTapFeedback) onTapFeedback({ type: 'ugcaught' }); }
 }
-// Overlay „erwischt": Stellen ODER Ausschalten (Ausschalten nur mit geladener Abklingzeit)
+// Overlay „erwischt": 4 Optionen — Stellen / Ausschalten / Bestechen / Fliehen
 function drawHgCaught(midX, a0, rw, rh, u) {
-  ctx.fillStyle = 'rgba(6,4,8,0.74)'; ctx.fillRect(a0.x - 4, a0.y - u * 1.1, rw + 8, rh + u * 1.1);
-  ctx.fillStyle = '#ff6b6b'; ctx.font = `900 ${Math.max(15, u * 0.42)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-  ctx.fillText('🚨 ERWISCHT!', midX, a0.y + rh * 0.3);
-  const by = a0.y + rh * 0.4, bw = rw * 0.42, bh = u * 1.05;
-  const sx = midX - bw - 6;
-  ctx.fillStyle = '#7a2f2f'; ctx.beginPath(); ctx.roundRect(sx, by, bw, bh, 10); ctx.fill(); ctx.strokeStyle = '#ff9a9a'; ctx.lineWidth = 2; ctx.stroke();
-  ctx.fillStyle = '#fff'; ctx.font = `800 ${Math.max(11, u * 0.26)}px system-ui, sans-serif`; ctx.textBaseline = 'middle'; ctx.fillText('🙌 Stellen', sx + bw / 2, by + bh * 0.42);
-  ctx.font = `600 ${Math.max(8, u * 0.15)}px system-ui, sans-serif`; ctx.fillStyle = '#ffd0d0'; ctx.fillText('Einsatz weg + Razzia', sx + bw / 2, by + bh * 0.74);
-  hinterHits.push({ rectX: sx, rectY: by, rectW: bw, rectH: bh, fn: 'surrender' });
-  const kx = midX + 6, avail = takedownAvailable();
-  ctx.fillStyle = avail ? '#4a2f6a' : '#2a2530'; ctx.beginPath(); ctx.roundRect(kx, by, bw, bh, 10); ctx.fill(); ctx.strokeStyle = avail ? '#b98aff' : '#443b52'; ctx.lineWidth = 2; ctx.stroke();
-  ctx.fillStyle = avail ? '#fff' : '#8a7f96'; ctx.font = `800 ${Math.max(11, u * 0.26)}px system-ui, sans-serif`; ctx.fillText('🔫 Ausschalten', kx + bw / 2, by + bh * 0.42);
-  ctx.font = `600 ${Math.max(8, u * 0.15)}px system-ui, sans-serif`; ctx.fillStyle = avail ? '#e0c1ff' : '#8a7f96';
-  ctx.fillText(avail ? 'riskant — Leiche entsorgen!' : `bereit in ${Math.ceil(takedownLeft())}s`, kx + bw / 2, by + bh * 0.74);
-  if (avail) hinterHits.push({ rectX: kx, rectY: by, rectW: bw, rectH: bh, fn: 'takedown' });
-  ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = 'rgba(6,4,8,0.78)'; ctx.fillRect(a0.x - 4, a0.y - u * 1.1, rw + 8, rh + u * 1.1);
+  ctx.fillStyle = '#ff6b6b'; ctx.font = `900 ${Math.max(15, u * 0.4)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.fillText('🚨 ERWISCHT!', midX, a0.y + rh * 0.2);
+  const bw = rw * 0.44, bh = u * 0.92, gap = 8, lx = midX - bw - gap / 2, rx2 = midX + gap / 2;
+  const row1 = a0.y + rh * 0.28, row2 = row1 + bh + 8;
+  const btn = (x, y, on, bg, brd, title, sub, fn) => {
+    ctx.fillStyle = on ? bg : '#2a2530'; ctx.beginPath(); ctx.roundRect(x, y, bw, bh, 10); ctx.fill();
+    ctx.strokeStyle = on ? brd : '#443b52'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = on ? '#fff' : '#8a7f96'; ctx.font = `800 ${Math.max(10, u * 0.23)}px system-ui, sans-serif`; ctx.textBaseline = 'middle'; ctx.fillText(title, x + bw / 2, y + bh * 0.4);
+    ctx.font = `600 ${Math.max(7, u * 0.135)}px system-ui, sans-serif`; ctx.fillStyle = on ? 'rgba(255,255,255,0.75)' : '#8a7f96'; ctx.fillText(sub, x + bw / 2, y + bh * 0.72);
+    if (on && fn) hinterHits.push({ rectX: x, rectY: y, rectW: bw, rectH: bh, fn });
+    ctx.textBaseline = 'alphabetic';
+  };
+  const tdAvail = takedownAvailable(), bribe = bribeCost(), canBribe = state.money >= bribe;
+  btn(lx, row1, true, '#7a2f2f', '#ff9a9a', '🙌 Stellen', 'Einsatz weg + Razzia', 'surrender');
+  btn(rx2, row1, tdAvail, '#4a2f6a', '#b98aff', '🔫 Ausschalten', tdAvail ? 'Leiche entsorgen!' : `in ${Math.ceil(takedownLeft())}s`, tdAvail ? 'takedown' : null);
+  btn(lx, row2, canBribe, '#2f5a4a', '#7de0b0', '💶 Bestechen', `${fmt(bribe)} € · keine Razzia`, canBribe ? 'bribe' : null);
+  btn(rx2, row2, true, '#3a3550', '#9aa0c0', '🏃 Fliehen', 'Ware weg, keine Razzia', 'flee');
 }
 // Overlay „Leiche entsorgen": Ort mit Fund-Risiko wählen
 function drawHgDispose(u) {
@@ -2297,43 +2388,75 @@ function drawRoomDetail(id, t, beat) {
       ctx.fillStyle = '#ff5e3a'; ctx.beginPath(); ctx.roundRect(hx, hy, hw * Math.min(1, heat / HEAT_MAX), 8, 4); ctx.fill();
       ctx.fillStyle = '#ffd0a0'; ctx.font = `800 ${Math.max(8, u * 0.2)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
       ctx.fillText(`🔥 HEAT ${Math.round(heat)} %`, midX, hy - 4); }
-    // Arbeits-Partikel
-    for (const f of hinterFx) { ctx.globalAlpha = Math.max(0, f.life); ctx.fillStyle = '#43d95e'; ctx.font = `800 ${12 + (1 - f.life) * 6}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.fillText('＋', f.x, f.y - (1 - f.life) * 26); ctx.globalAlpha = 1; }
     const aj = activeJob();
     if (aj) {
-      // === Schmuggel-Transport: Figur steuern, Ware an der Polizei vorbeitragen ===
+      // === Schmuggel-Stealth: Joystick-Figur, Ware an Patrouillen vorbei tragen ===
       if (!hg) hgReset();
-      const carrying = hg.smug.carrying;
-      const pk = hgPickup(), dr = hgDrop(), cop = hgCop();
+      const carrying = hg.smug.carrying, pk = hgPickup(), dr = hgDrop();
+      // Lichtpfützen (hell = riskanter)
+      for (const l of hg.lamps) { const lp = detailProj(l.x, l.y);
+        ctx.save(); ctx.globalCompositeOperation = 'lighter';
+        const g = ctx.createRadialGradient(lp.x, lp.y, 4, lp.x, lp.y, l.rad * u);
+        g.addColorStop(0, 'rgba(255,220,150,0.10)'); g.addColorStop(1, 'rgba(255,220,150,0)');
+        ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(lp.x, lp.y, l.rad * u, l.rad * u * 0.5, 0, 0, 7); ctx.fill(); ctx.restore(); }
+      // Ziel-Marker
       const glow = (wx, wy, on, col, ic, icS) => { const p = detailProj(wx, wy);
         ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = on ? col : 'rgba(255,255,255,0.05)';
         ctx.beginPath(); ctx.ellipse(p.x, p.y, u * 0.75, u * 0.34, 0, 0, 7); ctx.fill(); ctx.restore();
         if (ic) { ctx.font = `${u * icS}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(ic, p.x, p.y - u * 0.42); } };
-      glow(pk.x, pk.y, !carrying, 'rgba(90,230,120,0.32)', carrying ? null : aj.def.icon, 0.5);   // Ware links
-      glow(dr.x, dr.y, carrying, 'rgba(90,180,255,0.32)', '📥', 0.42);                             // Übergabe rechts
-      // Polizist mit rotierendem Sichtkegel
-      if (!hg.cop.gone) {
-        const dir = hgConeDir(), half = hgConeHalf(), cp = detailProj(cop.x, cop.y), coneLen = 2.8;
-        const vx = hg.smug.x - cop.x, vy = hg.smug.y - cop.y; let da = Math.atan2(vy, vx) - dir; while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI;
-        const inView = carrying && hg.grace <= 0 && Math.hypot(vx, vy) < 2.8 && Math.abs(da) < half;
-        const e1 = detailProj(cop.x + Math.cos(dir - half) * coneLen, cop.y + Math.sin(dir - half) * coneLen);
-        const e2 = detailProj(cop.x + Math.cos(dir + half) * coneLen, cop.y + Math.sin(dir + half) * coneLen);
-        ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = inView ? 'rgba(255,70,70,0.24)' : 'rgba(120,200,255,0.13)';
-        ctx.beginPath(); ctx.moveTo(cp.x, cp.y - u * 0.4); ctx.lineTo(e1.x, e1.y); ctx.lineTo(e2.x, e2.y); ctx.closePath(); ctx.fill(); ctx.restore();
-        dPerson(cop.x, cop.y, { s: 1.15, color: '#1c3f6e', pants: '#101d33', skin: '#e9b98c', hair: '#20242c', cap: '#132a4d', bob: Math.sin(t * 1.6), groundZ: u * 0.4 });
+      glow(pk.x, pk.y, !carrying, 'rgba(90,230,120,0.32)', carrying ? null : aj.def.icon, 0.5);
+      glow(dr.x, dr.y, carrying, 'rgba(90,180,255,0.32)', '📥', 0.42);
+      // Wachen mit Sichtkegel (an Occludern abgeschnitten → Deckung sichtbar)
+      for (const gd of hg.guards) {
+        const dir = hgViewDir(gd), half = gd.coneHalf, cp = detailProj(gd.x, gd.y), coneLen = gd.coneRange;
+        const sus = gd.state === 'suspicious';
+        ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = sus ? 'rgba(255,90,60,0.17)' : 'rgba(120,200,255,0.12)';
+        ctx.beginPath(); ctx.moveTo(cp.x, cp.y - u * 0.35);
+        const nseg = 12;
+        for (let k = 0; k <= nseg; k++) { const aa = dir - half + 2 * half * k / nseg; let len = coneLen;
+          for (let s2 = 0.4; s2 < coneLen; s2 += 0.4) { const wx = gd.x + Math.cos(aa) * s2, wy = gd.y + Math.sin(aa) * s2;
+            let bl = false; for (const o of hg.occluders) if (wx > o.x && wx < o.x + o.w && wy > o.y && wy < o.y + o.h) { bl = true; break; }
+            if (bl) { len = s2; break; } }
+          const e = detailProj(gd.x + Math.cos(aa) * len, gd.y + Math.sin(aa) * len); ctx.lineTo(e.x, e.y); }
+        ctx.closePath(); ctx.fill(); ctx.restore();
+        dPerson(gd.x, gd.y, { s: 1.12, color: sus ? '#8a2f2f' : '#1c3f6e', pants: '#101d33', skin: '#e9b98c', hair: '#20242c', cap: sus ? '#7a1f1f' : '#132a4d', groundZ: u * 0.4 });
+        if (sus) { ctx.fillStyle = '#ff5e5e'; ctx.font = `${u * 0.5}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('❗', cp.x, cp.y - u * 1.3); }
       }
+      // Wurf-/Ablenk-Marker
+      for (const f of hgFx) { const p = detailProj(f.x, f.y); ctx.globalAlpha = Math.max(0, f.life); ctx.font = `${u * 0.5}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('🔊', p.x, p.y - u * 0.3); ctx.globalAlpha = 1; }
       // Schmuggler
       dPerson(hg.smug.x, hg.smug.y, { s: 1.1, color: '#2e6b3a', pants: '#1a1a22', skin: '#f0b98c', hair: '#241810', drink: carrying ? aj.def.icon : null, groundZ: u * 0.35 });
+      // Verdachts-Leiste oben
+      { const bw2 = rw * 0.5, bx2 = midX - bw2 / 2, by2 = a0.y + u * 0.24;
+        ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.beginPath(); ctx.roundRect(bx2, by2, bw2, 9, 5); ctx.fill();
+        const sc = hg.suspicion < 0.5 ? '#43d95e' : hg.suspicion < 0.8 ? '#ffd93c' : '#ff5e3a';
+        ctx.fillStyle = sc; ctx.beginPath(); ctx.roundRect(bx2, by2, bw2 * hg.suspicion, 9, 5); ctx.fill();
+        ctx.fillStyle = '#ffd0a0'; ctx.font = `800 ${Math.max(8, u * 0.17)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'; ctx.fillText('👁️ Verdacht', midX, by2 - 3); }
       // HUD
-      ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-      ctx.fillStyle = 'rgba(255,220,120,0.92)'; ctx.font = `800 ${Math.max(10, u * 0.24)}px system-ui, sans-serif`;
-      ctx.fillText(carrying ? '➡️ Ware zur Übergabe bringen — Blick meiden!' : '⬅️ Tippe zur Ware, um sie zu holen', midX, a0.y + u * 0.5);
-      const pw = rw * 0.64, pxx = midX - pw / 2, pyy = a0.y + rh - u * 0.5;
+      ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(255,220,120,0.92)'; ctx.font = `800 ${Math.max(9, u * 0.22)}px system-ui, sans-serif`;
+      ctx.fillText(carrying ? '➡️ Zur Übergabe — nicht in den Blick laufen!' : '⬅️ Mit Joystick zur Ware', midX, a0.y + u * 0.95);
+      const pw = rw * 0.62, pxx = midX - pw / 2, pyy = a0.y + rh - u * 0.5;
       ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.beginPath(); ctx.roundRect(pxx, pyy, pw, 14, 7); ctx.fill();
       ctx.fillStyle = '#43d95e'; ctx.beginPath(); ctx.roundRect(pxx, pyy, pw * Math.min(1, aj.progress), 14, 7); ctx.fill();
       ctx.fillStyle = '#fff'; ctx.font = `800 ${Math.max(9, u * 0.2)}px system-ui, sans-serif`; ctx.textBaseline = 'middle';
       ctx.fillText(`${aj.def.name} · Fuhre ${Math.min(aj.trips, Math.round(aj.progress * aj.trips) + 1)}/${aj.trips}`, midX, pyy + 7); ctx.textBaseline = 'alphabetic';
-      if (hg.msgT > 0 && hg.msg) { ctx.fillStyle = '#ffd0a0'; ctx.font = `800 ${Math.max(10, u * 0.24)}px system-ui, sans-serif`; ctx.fillText(hg.msg, midX, a0.y + rh - u * 1.0); }
+      if (hg.msgT > 0 && hg.msg) { ctx.fillStyle = '#ffd0a0'; ctx.font = `800 ${Math.max(10, u * 0.22)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.fillText(hg.msg, midX, a0.y + rh - u * 1.1); }
+      // Ablenk-Button (unten-links) — nur mit Ladungen
+      if (hg.distract > 0 || (aj && UNDERGROUND_JOBS.findIndex(j => j.id === aj.def.id) >= 1)) {
+        const dbw = rw * 0.3, dbx = a0.x + 6, dby = a0.y + rh - u * 1.9, dbh = u * 0.7, ready = hg.distract > 0 && hg.distractCd <= 0;
+        ctx.fillStyle = ready ? 'rgba(60,50,80,0.95)' : 'rgba(34,30,40,0.8)'; ctx.beginPath(); ctx.roundRect(dbx, dby, dbw, dbh, 9); ctx.fill();
+        ctx.strokeStyle = ready ? '#b98aff' : '#443b52'; ctx.lineWidth = 2; ctx.stroke();
+        ctx.fillStyle = ready ? '#fff' : '#8a7f96'; ctx.font = `800 ${Math.max(9, u * 0.2)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(hg.distractCd > 0 ? `🔊 ${Math.ceil(hg.distractCd)}s` : `🔊 Ablenken ×${hg.distract}`, dbx + dbw / 2, dby + dbh / 2); ctx.textBaseline = 'alphabetic';
+        if (ready) hinterHits.push({ rectX: dbx, rectY: dby, rectW: dbw, rectH: dbh, fn: 'distract' });
+      }
+      // Joystick
+      if (hg.joy) {
+        ctx.save(); ctx.globalAlpha = 0.5;
+        ctx.strokeStyle = '#cfe0ff'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(hg.joy.ox, hg.joy.oy, 42, 0, 7); ctx.stroke();
+        ctx.fillStyle = 'rgba(160,190,255,0.5)'; ctx.beginPath(); ctx.arc(hg.joy.ox + Math.cos(hg.joy.ang) * hg.joy.mag * 34, hg.joy.oy + Math.sin(hg.joy.ang) * hg.joy.mag * 34, 18, 0, 7); ctx.fill();
+        ctx.restore();
+      }
       // Overlays
       if (hg.caught) drawHgCaught(midX, a0, rw, rh, u);
       else if (hg.disposing) drawHgDispose(u);

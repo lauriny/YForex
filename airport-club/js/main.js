@@ -2,6 +2,7 @@
 //  AIRPORT – Club Simulator · Einstiegspunkt
 // ============================================================
 import * as G from './game.js';
+import * as R from './render.js';
 import { initCanvas, renderFrame, setTapFeedback } from './render.js';
 import { initUI, updateHUD, offlinePopup, canvasFeedback, maybeOpenDaily } from './ui.js';
 import { startMusic, pauseAudio } from './sfx.js';
@@ -49,3 +50,4 @@ window.addEventListener('pagehide', () => G.save());
 
 // Für Debugging & Tests in der Konsole
 window.AirportGame = G;
+window.AirportRender = R;
