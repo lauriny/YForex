@@ -9,7 +9,8 @@ import {
   eventDef, eventGuestMult, incomePerSec,
   marketingGuestBonus, marketingSpawnBonus, activeDjDef,
   currentDrink, activeTheme, goldenBottleReward, nightReport,
-  activeJob, startJob, workJob, jobStake, jobFailChance,
+  activeJob, startJob, jobStake, jobFailChance,
+  deliverGoods, surrenderJob, doTakedown, disposeBody, takedownAvailable, takedownLeft,
   raidActive, raidLeft, ugDangerFrac,
 } from './game.js';
 import { fmt, CASH_STATIONS, DRINKS, drinkTier, UNDERGROUND_JOBS, HEAT_MAX } from './data.js';
@@ -212,6 +213,7 @@ function setupCamera() {
 export function enterRoom(id) {
   if (!roomUnlocked(id) || !RM[id]) return false;
   focusRoom = id; frameRoom(id, false);   // genau diesen Raum bildschirmfüllend zeigen
+  if (id === 'hinter') hgReset();
   return true;
 }
 // freigeschaltete Räume der Reihe nach (für ◀ ▶ Raumwechsel)
@@ -265,23 +267,29 @@ function handleTap(e) {
     }
   }
   const roomV = inRoomView();
-  // Hinterzimmer: Aufträge wählen / aktiv arbeiten (Tap-Zonen)
+  // Hinterzimmer: Buttons/Karten/Orte, sonst den Schmuggler steuern
   if (roomV && framedRoom === 'hinter') {
+    if (!hg) hgReset();
+    const aj = activeJob();
     for (const h of hinterHits) {
       const hit = h.r != null ? Math.hypot(mx - h.x, my - h.y) < h.r
         : (mx >= h.rectX && mx <= h.rectX + h.rectW && my >= h.rectY && my <= h.rectY + h.rectH);
       if (!hit) continue;
-      if (h.fn === 'work') {
-        const caught = ugDangerNow().danger;
-        const res = workJob(caught);
-        if (!caught) hinterFx.push({ x: h.x, y: h.y, life: 1 });
-        if (onTapFeedback) onTapFeedback({ type: res && res.busted ? 'ugbust' : (res && res.done ? 'ugdone' : 'work'), x: e.clientX, y: e.clientY });
-      } else if (h.fn === 'start') {
-        if (startJob(h.job) && onTapFeedback) onTapFeedback({ type: 'ugstart', x: e.clientX, y: e.clientY });
-      }
-      return;
+      if (h.fn === 'start') { if (startJob(h.job)) { hgReset(); if (onTapFeedback) onTapFeedback({ type: 'ugstart', x: e.clientX, y: e.clientY }); } return; }
+      if (h.fn === 'surrender') { surrenderJob(); hgReset(); if (onTapFeedback) onTapFeedback({ type: 'ugbust', x: e.clientX, y: e.clientY }); return; }
+      if (h.fn === 'takedown') { if (doTakedown()) { hg.caught = false; hg.disposing = true; hg.body = hgCop(); hg.cop.gone = true; hgMakeSpots(); if (onTapFeedback) onTapFeedback({ type: 'ugkill', x: e.clientX, y: e.clientY }); } return; }
+      if (h.fn === 'dispose') { const res = disposeBody(h.risk); hg.disposing = false; hg.body = null; hg.cop.respawnAt = performance.now() + 4500;
+        hgMsg(res.found ? '😱 Die Leiche wird wohl gefunden…' : '😮‍💨 Sauber entsorgt.');
+        if (onTapFeedback) onTapFeedback({ type: res.found ? 'ugbodyfound' : 'ugbodyhid', x: e.clientX, y: e.clientY }); return; }
     }
-    return;   // im Hinterzimmer keine anderen Tap-Aktionen
+    // sonst: im Transport-Modus Schmuggler zum getippten Punkt steuern (mit Schnapp aufs Ziel)
+    if (aj && !hg.caught && !hg.disposing) {
+      const w = detailUnproj(mx, my), r = RM.hinter;
+      const goal = hg.smug.carrying ? hgDrop() : hgPickup();
+      if (Math.hypot(w.x - goal.x, w.y - goal.y) < 1.6) { hg.smug.tx = goal.x; hg.smug.ty = goal.y; }   // in Zielnähe getippt → exakt hinlaufen
+      else { hg.smug.tx = Math.max(r.x + 0.6, Math.min(r.x + r.w - 0.6, w.x)); hg.smug.ty = Math.max(r.y + 1.4, Math.min(r.y + r.d - 0.4, w.y)); }
+    }
+    return;
   }
   // Goldene Flasche antippen → Bonus
   if (goldBottle && roomV && goldBottle.room === framedRoom) {
@@ -337,8 +345,95 @@ let taxis = [];        // vorbeifahrende Taxen, die vor dem Eingang Gäste abset
 let taxiTimer = 5;
 let passers = [];      // Passanten, die über den Bürgersteig laufen (Street-Life)
 let passerTimer = 2;
-let hinterHits = [];   // antippbare Zonen im Hinterzimmer (Aufträge wählen / aktiv arbeiten)
-let hinterFx = [];     // kleine Arbeits-Partikel beim Tippen
+let hinterHits = [];   // antippbare Zonen im Hinterzimmer (Aufträge wählen / Buttons / Orte)
+let hinterFx = [];     // kleine Arbeits-Partikel
+// ---- Hinterzimmer-Schmuggelspiel: Charakter steuern, Ware an der Polizei vorbeitragen ----
+let hg = null;
+function hgReset() {
+  const r = RM.hinter;
+  hg = { smug: { x: r.x + r.w - 1.2, y: r.y + 5.0, tx: r.x + r.w - 1.2, ty: r.y + 5.0, carrying: false },
+    cop: { gone: false, respawnAt: 0 }, caught: false, disposing: false, grace: 0, body: null, spots: [], msg: null, msgT: 0 };
+}
+function hgPickup() { const r = RM.hinter; return { x: r.x + 1.15, y: r.y + 5.0 }; }
+function hgDrop()   { const r = RM.hinter; return { x: r.x + r.w - 1.15, y: r.y + 5.0 }; }
+function hgCop()    { const r = RM.hinter; return { x: r.x + r.w / 2, y: r.y + 2.6 }; }
+function hgConeDir() { return Math.PI / 2 + Math.sin(performance.now() / 1000 * 1.05) * 1.25; }   // schwenkt nach vorn ±
+function hgConeHalf() { return 0.4 + ugDangerFrac() * 0.45; }                                      // Risiko/Heat → wachsamer
+function hgMakeSpots() {
+  const r = RM.hinter;
+  hg.spots = [
+    { x: r.x + 0.9, y: r.y + 0.9, label: '🗑️ Müllpresse', risk: 0.14 },
+    { x: r.x + r.w / 2, y: r.y + 0.7, label: '🕳️ Kanal', risk: 0.34 },
+    { x: r.x + r.w - 0.9, y: r.y + 0.9, label: '🚪 Hinterhof', risk: 0.55 },
+  ];
+}
+function detailUnproj(mx, my) {
+  return { x: detailCam.x + (mx - W / 2) / detailScale, y: detailCam.y + (my - detailViewCy() - detailBiasY) / detailScale };
+}
+function hgMsg(txt) { hg.msg = txt; hg.msgT = 2.5; }
+function updateHinterGame(dt) {
+  if (!hg) hgReset();
+  if (hg.msgT > 0) hg.msgT -= dt;
+  const aj = activeJob();
+  if (!aj || hg.caught || hg.disposing) return;
+  const r = RM.hinter, s = hg.smug;
+  const dx = s.tx - s.x, dy = s.ty - s.y, d = Math.hypot(dx, dy), step = 3.4 * dt;
+  if (d > step) { s.x += dx / d * step; s.y += dy / d * step; } else { s.x = s.tx; s.y = s.ty; }
+  if (hg.grace > 0) hg.grace -= dt;
+  const pk = hgPickup(), dr = hgDrop();
+  if (!s.carrying && Math.hypot(s.x - pk.x, s.y - pk.y) < 0.95) { s.carrying = true; hg.grace = 0.7; }
+  if (s.carrying && Math.hypot(s.x - dr.x, s.y - dr.y) < 0.95) {
+    s.carrying = false;
+    const res = deliverGoods();
+    if (onTapFeedback) onTapFeedback({ type: res && res.done ? 'ugdone' : 'ugtrip' });
+  }
+  if (hg.cop.gone && performance.now() >= hg.cop.respawnAt) hg.cop.gone = false;
+  if (s.carrying && hg.grace <= 0 && !hg.cop.gone) {
+    const c = hgCop(), vx = s.x - c.x, vy = s.y - c.y, dist = Math.hypot(vx, vy);
+    if (dist < 2.8) {
+      let a = Math.atan2(vy, vx) - hgConeDir();
+      while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI;
+      if (Math.abs(a) < hgConeHalf()) { hg.caught = true; if (onTapFeedback) onTapFeedback({ type: 'ugcaught' }); }
+    }
+  }
+}
+// Overlay „erwischt": Stellen ODER Ausschalten (Ausschalten nur mit geladener Abklingzeit)
+function drawHgCaught(midX, a0, rw, rh, u) {
+  ctx.fillStyle = 'rgba(6,4,8,0.74)'; ctx.fillRect(a0.x - 4, a0.y - u * 1.1, rw + 8, rh + u * 1.1);
+  ctx.fillStyle = '#ff6b6b'; ctx.font = `900 ${Math.max(15, u * 0.42)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.fillText('🚨 ERWISCHT!', midX, a0.y + rh * 0.3);
+  const by = a0.y + rh * 0.4, bw = rw * 0.42, bh = u * 1.05;
+  const sx = midX - bw - 6;
+  ctx.fillStyle = '#7a2f2f'; ctx.beginPath(); ctx.roundRect(sx, by, bw, bh, 10); ctx.fill(); ctx.strokeStyle = '#ff9a9a'; ctx.lineWidth = 2; ctx.stroke();
+  ctx.fillStyle = '#fff'; ctx.font = `800 ${Math.max(11, u * 0.26)}px system-ui, sans-serif`; ctx.textBaseline = 'middle'; ctx.fillText('🙌 Stellen', sx + bw / 2, by + bh * 0.42);
+  ctx.font = `600 ${Math.max(8, u * 0.15)}px system-ui, sans-serif`; ctx.fillStyle = '#ffd0d0'; ctx.fillText('Einsatz weg + Razzia', sx + bw / 2, by + bh * 0.74);
+  hinterHits.push({ rectX: sx, rectY: by, rectW: bw, rectH: bh, fn: 'surrender' });
+  const kx = midX + 6, avail = takedownAvailable();
+  ctx.fillStyle = avail ? '#4a2f6a' : '#2a2530'; ctx.beginPath(); ctx.roundRect(kx, by, bw, bh, 10); ctx.fill(); ctx.strokeStyle = avail ? '#b98aff' : '#443b52'; ctx.lineWidth = 2; ctx.stroke();
+  ctx.fillStyle = avail ? '#fff' : '#8a7f96'; ctx.font = `800 ${Math.max(11, u * 0.26)}px system-ui, sans-serif`; ctx.fillText('🔫 Ausschalten', kx + bw / 2, by + bh * 0.42);
+  ctx.font = `600 ${Math.max(8, u * 0.15)}px system-ui, sans-serif`; ctx.fillStyle = avail ? '#e0c1ff' : '#8a7f96';
+  ctx.fillText(avail ? 'riskant — Leiche entsorgen!' : `bereit in ${Math.ceil(takedownLeft())}s`, kx + bw / 2, by + bh * 0.74);
+  if (avail) hinterHits.push({ rectX: kx, rectY: by, rectW: bw, rectH: bh, fn: 'takedown' });
+  ctx.textBaseline = 'alphabetic';
+}
+// Overlay „Leiche entsorgen": Ort mit Fund-Risiko wählen
+function drawHgDispose(u) {
+  const r = RM.hinter, a0 = detailProj(r.x, r.y), c0 = detailProj(r.x + r.w, r.y + r.d), rw = c0.x - a0.x, rh = c0.y - a0.y, midX = a0.x + rw / 2;
+  ctx.fillStyle = 'rgba(6,4,8,0.55)'; ctx.fillRect(a0.x - 4, a0.y - u * 1.1, rw + 8, rh + u * 1.1);
+  ctx.fillStyle = '#ffcf6a'; ctx.font = `900 ${Math.max(12, u * 0.3)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.fillText('🩸 Leiche entsorgen — wähle einen Ort', midX, a0.y + u * 0.9);
+  if (hg.body) { const bp = detailProj(hg.body.x, hg.body.y); ctx.font = `${u * 0.6}px sans-serif`; ctx.textBaseline = 'middle'; ctx.fillText('💀', bp.x, bp.y - u * 0.2); }
+  for (const sp of hg.spots) {
+    const p = detailProj(sp.x, sp.y);
+    ctx.fillStyle = 'rgba(28,24,28,0.95)'; ctx.beginPath(); ctx.roundRect(p.x - u * 0.95, p.y - u * 0.55, u * 1.9, u * 0.92, 8); ctx.fill();
+    ctx.strokeStyle = sp.risk < 0.2 ? '#43d95e' : sp.risk < 0.4 ? '#ffd93c' : '#ff6b6b'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.font = `800 ${Math.max(9, u * 0.2)}px system-ui, sans-serif`; ctx.textBaseline = 'middle'; ctx.fillText(sp.label, p.x, p.y - u * 0.12);
+    ctx.fillStyle = sp.risk < 0.2 ? '#9ff0b5' : sp.risk < 0.4 ? '#ffe89a' : '#ffb0b0'; ctx.font = `700 ${Math.max(7, u * 0.15)}px system-ui, sans-serif`;
+    ctx.fillText(`Fund-Risiko ${Math.round(sp.risk * 100)} %`, p.x, p.y + u * 0.2);
+    hinterHits.push({ rectX: p.x - u * 0.95, rectY: p.y - u * 0.55, rectW: u * 1.9, rectH: u * 0.92, fn: 'dispose', risk: sp.risk });
+  }
+  ctx.textBaseline = 'alphabetic';
+}
 let goldBottle = null; // Goldene Flasche: spawnt zufällig im gezeigten Raum, Antippen = Bonus
 let gbTimer = 25;
 function updateGoldBottle(dt) {
@@ -1336,12 +1431,6 @@ function detailProj(wx, wy) {
 }
 function dTileW() { return detailScale; }
 function dPersonScale() { return dTileW() / 34; }
-// Polizei-Streife im Hinterzimmer: Scheinwerfer-Sweep + Gefahrenfenster (Risiko/Heat machen es enger)
-function ugDangerNow() {
-  const off = Math.sin(performance.now() / 1000 * 1.25);   // -1..1 Sweep-Position
-  const thr = ugDangerFrac();                              // |off| < thr → Scheinwerfer auf der Ware
-  return { off, danger: Math.abs(off) < thr };
-}
 // Optik-Stufe einer Station (0..3) für „krasser werdende" Möbel
 function lvlTier(lvl) { return lvl >= 75 ? 3 : lvl >= 40 ? 2 : lvl >= 15 ? 1 : 0; }
 // Verwahrlosungs-Grad: 1 = am Anfang alt & runtergekommen, 0 = renoviert (steigt mit Ausbau)
@@ -2197,9 +2286,9 @@ function drawRoomDetail(id, t, beat) {
       const sp = detailProj(r.x + r.w - 1.2, r.y + 1.3); ctx.strokeStyle = '#8a929c'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(sp.x, sp.y - u * 0.55, u * 0.16, t, t + 5); ctx.stroke();
       ctx.fillStyle = '#c9a24a'; ctx.beginPath(); ctx.arc(sp.x, sp.y - u * 0.55, u * 0.05, 0, 7); ctx.fill(); }
     for (let k = 0; k < 3; k++) dBox(r.x + 0.5 + (k % 2) * 0.45, r.y + 0.8 + k * 0.32, 0.9, 0.7, u * 0.46, '#5a4530', '#33260f', '#6e5638');
-    // „Kontakt" hinter dem Tisch (Sonnenbrille, düster)
-    dShadow(r.x + r.w / 2 - 0.4, r.y + 1.9, 0.9, 0.7);
-    dPerson(r.x + r.w / 2, r.y + 2.2, { s: 1.15, color: '#20222b', pants: '#14141a', skin: '#8c5a33', hair: '#141018', shades: true, bob: Math.sin(t * 1.4) * 1.0, groundZ: u * 0.42 });
+    // „Kontakt" hinter dem Tisch (nur im Brett-Modus; beim Transport steht dort der Polizist)
+    if (!activeJob()) { dShadow(r.x + r.w / 2 - 0.4, r.y + 1.9, 0.9, 0.7);
+      dPerson(r.x + r.w / 2, r.y + 2.2, { s: 1.15, color: '#20222b', pants: '#14141a', skin: '#8c5a33', hair: '#141018', shades: true, bob: Math.sin(t * 1.4) * 1.0, groundZ: u * 0.42 }); }
     // Deal-Tisch
     dShadow(r.x + r.w / 2 - 1.35, r.y + 3.0, 2.7, 1.5); dBox(r.x + r.w / 2 - 1.35, r.y + 3.0, 2.7, 1.5, u * 0.5, '#3a2a1c', '#20160e', '#4a3626');
     // Heat-Balken an der Rückwand
@@ -2212,34 +2301,42 @@ function drawRoomDetail(id, t, beat) {
     for (const f of hinterFx) { ctx.globalAlpha = Math.max(0, f.life); ctx.fillStyle = '#43d95e'; ctx.font = `800 ${12 + (1 - f.life) * 6}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.fillText('＋', f.x, f.y - (1 - f.life) * 26); ctx.globalAlpha = 1; }
     const aj = activeJob();
     if (aj) {
-      // === Polizei-Schmuggel: nur tippen, wenn der Streifen-Scheinwerfer NICHT auf der Ware liegt ===
-      const dg = ugDangerNow();
-      const op = detailProj(r.x + r.w / 2, r.y + 3.5);
-      const oy = op.y - u * 0.7;
-      // Polizist links, der patrouilliert
-      dPerson(r.x + 1.1, r.y + 3.2, { s: 1.1, color: '#1c3f6e', pants: '#101d33', skin: '#e9b98c', hair: '#20242c', cap: '#132a4d', bob: Math.sin(t * 1.6) * 1.0, groundZ: u * 0.4 });
-      // Suchscheinwerfer, der über den Tisch schwenkt
-      const lx = midX + dg.off * rw * 0.34;
-      ctx.save(); ctx.globalCompositeOperation = 'lighter';
-      ctx.fillStyle = dg.danger ? 'rgba(255,80,80,0.20)' : 'rgba(120,200,255,0.14)';
-      ctx.beginPath(); ctx.moveTo(lx - 6, a0.y + u * 0.2); ctx.lineTo(lx + 6, a0.y + u * 0.2); ctx.lineTo(lx + u * 1.1, oy + u * 0.4); ctx.lineTo(lx - u * 1.1, oy + u * 0.4); ctx.closePath(); ctx.fill();
-      ctx.restore();
-      // Ware auf dem Tisch (grün = sicher, rot = Gefahr)
-      const pulse = 1 + Math.sin(t * 5) * 0.06;
-      ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = dg.danger ? 'rgba(255,70,70,0.28)' : 'rgba(90,230,120,0.20)';
-      ctx.beginPath(); ctx.arc(op.x, oy, u * 1.0, 0, 7); ctx.fill(); ctx.restore();
-      ctx.font = `${u * 0.95 * pulse}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(aj.def.icon, op.x, oy);
-      hinterHits.push({ x: op.x, y: oy, r: Math.max(40, u * 1.05), fn: 'work' });
-      // Status-Banner
-      ctx.textBaseline = 'alphabetic';
-      if (dg.danger) { ctx.fillStyle = '#ff5e5e'; ctx.font = `900 ${Math.max(11, u * 0.32)}px system-ui, sans-serif`; ctx.fillText('🚨 POLIZEI SCHAUT — NICHT TIPPEN!', midX, oy - u * 1.15); }
-      else { ctx.fillStyle = `rgba(90,230,120,${0.7 + 0.3 * Math.sin(t * 8)})`; ctx.font = `900 ${Math.max(11, u * 0.32)}px system-ui, sans-serif`; ctx.fillText('✅ SICHER — schmuggeln!', midX, oy - u * 1.15); }
-      // Fortschrittsbalken
-      const pw = rw * 0.64, pxx = midX - pw / 2, pyy = a0.y + rh - u * 0.55;
-      ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.beginPath(); ctx.roundRect(pxx, pyy, pw, 15, 7); ctx.fill();
-      ctx.fillStyle = '#43d95e'; ctx.beginPath(); ctx.roundRect(pxx, pyy, pw * Math.min(1, aj.progress), 15, 7); ctx.fill();
-      ctx.fillStyle = '#fff'; ctx.font = `800 ${Math.max(9, u * 0.22)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(`${aj.def.name} · ${Math.round(aj.progress * 100)} %`, midX, pyy + 8); ctx.textBaseline = 'alphabetic';
+      // === Schmuggel-Transport: Figur steuern, Ware an der Polizei vorbeitragen ===
+      if (!hg) hgReset();
+      const carrying = hg.smug.carrying;
+      const pk = hgPickup(), dr = hgDrop(), cop = hgCop();
+      const glow = (wx, wy, on, col, ic, icS) => { const p = detailProj(wx, wy);
+        ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = on ? col : 'rgba(255,255,255,0.05)';
+        ctx.beginPath(); ctx.ellipse(p.x, p.y, u * 0.75, u * 0.34, 0, 0, 7); ctx.fill(); ctx.restore();
+        if (ic) { ctx.font = `${u * icS}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(ic, p.x, p.y - u * 0.42); } };
+      glow(pk.x, pk.y, !carrying, 'rgba(90,230,120,0.32)', carrying ? null : aj.def.icon, 0.5);   // Ware links
+      glow(dr.x, dr.y, carrying, 'rgba(90,180,255,0.32)', '📥', 0.42);                             // Übergabe rechts
+      // Polizist mit rotierendem Sichtkegel
+      if (!hg.cop.gone) {
+        const dir = hgConeDir(), half = hgConeHalf(), cp = detailProj(cop.x, cop.y), coneLen = 2.8;
+        const vx = hg.smug.x - cop.x, vy = hg.smug.y - cop.y; let da = Math.atan2(vy, vx) - dir; while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI;
+        const inView = carrying && hg.grace <= 0 && Math.hypot(vx, vy) < 2.8 && Math.abs(da) < half;
+        const e1 = detailProj(cop.x + Math.cos(dir - half) * coneLen, cop.y + Math.sin(dir - half) * coneLen);
+        const e2 = detailProj(cop.x + Math.cos(dir + half) * coneLen, cop.y + Math.sin(dir + half) * coneLen);
+        ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = inView ? 'rgba(255,70,70,0.24)' : 'rgba(120,200,255,0.13)';
+        ctx.beginPath(); ctx.moveTo(cp.x, cp.y - u * 0.4); ctx.lineTo(e1.x, e1.y); ctx.lineTo(e2.x, e2.y); ctx.closePath(); ctx.fill(); ctx.restore();
+        dPerson(cop.x, cop.y, { s: 1.15, color: '#1c3f6e', pants: '#101d33', skin: '#e9b98c', hair: '#20242c', cap: '#132a4d', bob: Math.sin(t * 1.6), groundZ: u * 0.4 });
+      }
+      // Schmuggler
+      dPerson(hg.smug.x, hg.smug.y, { s: 1.1, color: '#2e6b3a', pants: '#1a1a22', skin: '#f0b98c', hair: '#241810', drink: carrying ? aj.def.icon : null, groundZ: u * 0.35 });
+      // HUD
+      ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      ctx.fillStyle = 'rgba(255,220,120,0.92)'; ctx.font = `800 ${Math.max(10, u * 0.24)}px system-ui, sans-serif`;
+      ctx.fillText(carrying ? '➡️ Ware zur Übergabe bringen — Blick meiden!' : '⬅️ Tippe zur Ware, um sie zu holen', midX, a0.y + u * 0.5);
+      const pw = rw * 0.64, pxx = midX - pw / 2, pyy = a0.y + rh - u * 0.5;
+      ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.beginPath(); ctx.roundRect(pxx, pyy, pw, 14, 7); ctx.fill();
+      ctx.fillStyle = '#43d95e'; ctx.beginPath(); ctx.roundRect(pxx, pyy, pw * Math.min(1, aj.progress), 14, 7); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.font = `800 ${Math.max(9, u * 0.2)}px system-ui, sans-serif`; ctx.textBaseline = 'middle';
+      ctx.fillText(`${aj.def.name} · Fuhre ${Math.min(aj.trips, Math.round(aj.progress * aj.trips) + 1)}/${aj.trips}`, midX, pyy + 7); ctx.textBaseline = 'alphabetic';
+      if (hg.msgT > 0 && hg.msg) { ctx.fillStyle = '#ffd0a0'; ctx.font = `800 ${Math.max(10, u * 0.24)}px system-ui, sans-serif`; ctx.fillText(hg.msg, midX, a0.y + rh - u * 1.0); }
+      // Overlays
+      if (hg.caught) drawHgCaught(midX, a0, rw, rh, u);
+      else if (hg.disposing) drawHgDispose(u);
     } else {
       // Auftragsbrett: 4 antippbare Karten (Auftrag wählen)
       if (state.underground?.lastResult) { const rr = state.underground.lastResult;
@@ -2626,6 +2723,7 @@ export function renderFrame(now) {
 
   updateGuests(dt);
   updateParticles(dt);
+  if (framedRoom === 'hinter' && inRoomView()) updateHinterGame(dt);
   incomeTimer += dt; if (incomeTimer > 0.25) { incomeTimer = 0; incomeCache = incomePerSec(); }
 
   // Iso-Übersicht NUR zeichnen, wenn sie sichtbar ist (in der Raumansicht deckt drawFocusRoom

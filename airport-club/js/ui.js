@@ -1087,8 +1087,10 @@ export function initUI() {
     toast(`🌍 Rivale überholt: ${name}${count > 1 ? ` +${count - 1}` : ''} · +${gems} 💎`); updateHUD(); });
   G.on('ugDone', r => { ugUnseen = true; playSfx(r.ok ? 'chest' : 'click');
     toast(r.ok ? `🕶️ Job durchgezogen: +${fmt(r.gain)} €` : `🚨 Erwischt: −${fmt(r.lost)} €`); updateHUD(); });
-  G.on('raid', ({ left }) => { playSfx('milestone'); confetti(0);
-    toast(`🚨 RAZZIA! Der Club ist ${left}s fast geschlossen — die Gäste sind weg.`); updateHUD(); });
+  G.on('raid', ({ left, reason }) => { playSfx('milestone');
+    toast(reason === 'body'
+      ? `🚨 Die Leiche wurde gefunden — RAZZIA! Club ${left}s dicht.`
+      : `🚨 RAZZIA! Der Club ist ${left}s fast geschlossen — die Gäste sind weg.`); updateHUD(); });
   G.on('combo', ({ n, mult }) => { if (n === 2 || n % 3 === 0) { playSfx('tap'); toast(`🔥 COMBO ×${n} — ${Math.round((mult - 1) * 100)} % Bonus!`); } });
   G.on('nightReport', r => nightReportPopup(r));
   G.on('boost', () => {});
@@ -1137,8 +1139,22 @@ export function canvasFeedback(fb) {
     playSfx('tap');
   } else if (fb.type === 'ugstart') {
     playSfx('buy');
+  } else if (fb.type === 'ugtrip') {
+    floatText({ x: fb.x, y: fb.y - 10 }, '📦 Fuhre geschafft', 'float-money');
+    playSfx('buy');
   } else if (fb.type === 'ugdone') {
     playSfx('chest'); confetti(14);
+  } else if (fb.type === 'ugcaught') {
+    playSfx('milestone');
+  } else if (fb.type === 'ugkill') {
+    floatText({ x: fb.x, y: fb.y - 10 }, '🔫 Ausgeschaltet', 'float-celeb');
+    playSfx('milestone');
+  } else if (fb.type === 'ugbodyfound') {
+    floatText({ x: fb.x, y: fb.y - 10 }, '😱 gefunden…', 'float-celeb');
+    playSfx('click');
+  } else if (fb.type === 'ugbodyhid') {
+    floatText({ x: fb.x, y: fb.y - 10 }, '😮‍💨 entsorgt', 'float-money');
+    playSfx('buy');
   } else if (fb.type === 'ugbust') {
     floatText({ x: fb.x, y: fb.y - 10 }, '🚨 ERWISCHT!', 'float-celeb');
     playSfx('milestone');

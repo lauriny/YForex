@@ -94,6 +94,8 @@ export const RIVALS = [
 export const UNDERGROUND_REQ = { level: 8 };          // ab Level 8 spielbar
 export const HEAT_MAX = 100;
 export const RAID_DUR = 90;                           // Sek.: Club-Razzia (fast geschlossen), wenn man erwischt wird
+export const TAKEDOWN_CD = 240;                       // Sek. Abklingzeit: den Polizisten ausschalten geht nur selten
+export const BODY_RAID_DELAY = [35, 75];              // Sek.-Spanne, bis eine gefundene Leiche zur Razzia führt
 export const HEAT_DECAY = 100 / (12 * 60);            // volle Abkühlung in ~12 Min
 export const UNDERGROUND_JOBS = [
   { id: 'schmuggel', name: 'Zigaretten-Schmuggel', short: 'Schmuggel', icon: '📦', dur: 45,  stakeSec: 20,  reward: 3.0, risk: 0.10, heat: 12, txt: 'Ein paar Stangen über die Grenze.' },

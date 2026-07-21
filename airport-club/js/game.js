@@ -8,7 +8,7 @@ import {
   BOOST, DROP, OFFLINE, CELEB, PRESTIGE,
   EVENTS, EVENT_GAP, WHEEL, DAILY_MIN_GAP_H, DAILY_STREAK_MAX, ACHIEVEMENTS,
   getPhase, chestReward, costOf, bulkCost, maxAffordable, milestoneMult,
-  RIVALS, RIVAL_OVERTAKE_MULT, UNDERGROUND_JOBS, UNDERGROUND_REQ, HEAT_MAX, HEAT_DECAY, BOOT_REQ, RAID_DUR,
+  RIVALS, RIVAL_OVERTAKE_MULT, UNDERGROUND_JOBS, UNDERGROUND_REQ, HEAT_MAX, HEAT_DECAY, BOOT_REQ, RAID_DUR, TAKEDOWN_CD, BODY_RAID_DELAY,
 } from './data.js';
 
 const SAVE_KEY = 'airportClub.save.v1';
@@ -63,7 +63,7 @@ export const state = {
   devMode: false,          // Dev-Modus (per Code in den Einstellungen)
   nightStreak: 0,          // wie viele Club-Nächte in Folge durchgezogen
   rivals: { beaten: [], seeded: false },  // ids überholter Rivalen (dauerhafter Einkommens-Bonus)
-  underground: { unlocked: false, job: null, heat: 0, done: 0, lastResult: null },
+  underground: { unlocked: false, job: null, heat: 0, done: 0, lastResult: null, takedownCdUntil: 0, pendingRaidAt: 0 },
   raidUntil: 0,            // bis dahin ist der Club nach einer Razzia fast dicht
   bootTeased: false,       // „Das Boot"-Endgame schon einmal angekündigt?
   createdAt: Date.now(),
@@ -189,13 +189,13 @@ export function undergroundUnlocked() {
 export function jobStake(job) { return Math.max(50, incomePerSec() * job.stakeSec); }
 export function jobReward(job) { return jobStake(job) * job.reward; }
 export function jobFailChance(job) { return Math.min(0.85, job.risk + (state.underground.heat / HEAT_MAX) * 0.4); }
-// Aktive Arbeit: so viele Taps braucht ein Auftrag (größere Jobs = mehr Handarbeit)
-export function jobWorkTaps(job) { return Math.round(7 + (job.dur / 300) * 21); }
+// Wie oft muss man die Ware durch den Raum tragen (größere Jobs = mehr Fuhren)
+export function jobTrips(job) { return Math.max(2, Math.min(6, Math.round(job.dur / 60) + 1)); }
 export function activeJob() {
   const u = state.underground;
   if (!u.job) return null;
   const def = UNDERGROUND_JOBS.find(j => j.id === u.job.id);
-  return def ? { def, stake: u.job.stake, progress: u.job.progress || 0, taps: jobWorkTaps(def) } : null;
+  return def ? { def, stake: u.job.stake, progress: u.job.progress || 0, trips: jobTrips(def) } : null;
 }
 export function startJob(id) {
   const u = state.underground;
@@ -205,36 +205,57 @@ export function startJob(id) {
   const stake = jobStake(job);
   if (state.money < stake) return false;
   state.money -= stake;
-  u.job = { id, stake, progress: 0 };   // wird NUR durch aktives Arbeiten (Tippen) erfüllt
+  u.job = { id, stake, progress: 0 };   // wird durch aktives Durch-den-Raum-Tragen erfüllt
   u.lastResult = null;
   save();
   return true;
 }
-// ein „Arbeitsschritt" im Hinterzimmer (Tap auf das Job-Objekt).
-// caught=true → man hat getippt, während die Polizei geschaut hat → auffliegen.
-export function workJob(caught) {
+// eine Fuhre erfolgreich an der Polizei vorbei ans andere Raumende gebracht
+export function deliverGoods() {
   const u = state.underground;
   if (!u.job) return null;
   const def = UNDERGROUND_JOBS.find(j => j.id === u.job.id);
-  if (caught) { bustJob(def); return { busted: true }; }
-  const taps = jobWorkTaps(def);
-  u.job.progress = (u.job.progress || 0) + 1 / taps;
+  u.job.progress = (u.job.progress || 0) + 1 / jobTrips(def);
   if (u.job.progress >= 1) { resolveJob(); return { done: true }; }
+  save();
   return { done: false, progress: u.job.progress };
 }
-// Erwischt: Einsatz weg, viel Heat, Club-Razzia (fast geschlossen)
-function bustJob(def) {
+// erwischt & gestellt: Einsatz weg + sofortige Club-Razzia
+export function surrenderJob() {
   const u = state.underground;
+  if (!u.job) return false;
+  const def = UNDERGROUND_JOBS.find(j => j.id === u.job.id);
   const stake = u.job.stake;
   u.job = null;
-  u.heat = Math.min(HEAT_MAX, u.heat + def.heat * 1.6);
+  u.heat = Math.min(HEAT_MAX, u.heat + def.heat * 1.4);
   state.raidUntil = Date.now() + RAID_DUR * 1000;
   u.lastResult = { ok: false, busted: true, name: def.name, lost: stake };
   emit('ugDone', u.lastResult);
-  emit('raid', { left: RAID_DUR });
+  emit('raid', { left: RAID_DUR, reason: 'busted' });
   save();
+  return true;
 }
-// Auftrag komplett durchgeschmuggelt (ohne erwischt zu werden) → immer Erfolg
+// den Polizisten ausschalten — geht nur selten (lange Abklingzeit)
+export function takedownAvailable() { return Date.now() >= (state.underground.takedownCdUntil || 0); }
+export function takedownLeft() { return Math.max(0, ((state.underground.takedownCdUntil || 0) - Date.now()) / 1000); }
+export function doTakedown() {
+  if (!takedownAvailable()) return false;
+  state.underground.takedownCdUntil = Date.now() + TAKEDOWN_CD * 1000;
+  state.underground.heat = Math.min(HEAT_MAX, state.underground.heat + 15);
+  save();
+  return true;
+}
+// Leiche an einem Ort entsorgen — je nach Ort wird sie evtl. gefunden (→ verzögerte Razzia)
+export function disposeBody(spotRisk) {
+  const found = Math.random() < spotRisk;
+  if (found) {
+    const [a, b] = BODY_RAID_DELAY;
+    state.underground.pendingRaidAt = Date.now() + (a + Math.random() * (b - a)) * 1000;
+  }
+  save();
+  return { found };
+}
+// Auftrag komplett durchgeschmuggelt → Erfolg
 function resolveJob() {
   const u = state.underground;
   const def = UNDERGROUND_JOBS.find(j => j.id === u.job.id);
@@ -803,8 +824,13 @@ export function tick(now) {
   if (state.event && nowMs > state.event.expires) { state.event = null; emit('eventEnd'); }
   if (!state.event && nowMs > state.nextEventAt) startRandomEvent();
 
-  // Untergrund: Jobs werden aktiv im Hinterzimmer erledigt (Tippen), Heat kühlt ab
+  // Untergrund: Jobs werden aktiv im Hinterzimmer erledigt, Heat kühlt ab
   if (state.underground.heat > 0) state.underground.heat = Math.max(0, state.underground.heat - HEAT_DECAY * dt);
+  // gefundene Leiche → verzögerte Razzia schlägt jetzt zu
+  if (state.underground.pendingRaidAt && nowMs >= state.underground.pendingRaidAt) {
+    state.underground.pendingRaidAt = 0;
+    if (!raidActive()) { state.raidUntil = nowMs + RAID_DUR * 1000; emit('raid', { left: RAID_DUR, reason: 'body' }); }
+  }
 
   questTimer += dt;
   if (questTimer > 0.5) { questTimer = 0; checkQuests(); checkRivals(); }
