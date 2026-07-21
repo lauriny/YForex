@@ -1073,7 +1073,9 @@ export function initUI() {
   G.on('rivalBeaten', ({ name, gems, count }) => { rivalUnseen = true; playSfx('chest'); confetti(24);
     toast(`🌍 Rivale überholt: ${name}${count > 1 ? ` +${count - 1}` : ''} · +${gems} 💎`); updateHUD(); });
   G.on('ugDone', r => { ugUnseen = true; playSfx(r.ok ? 'chest' : 'click');
-    toast(r.ok ? `🕶️ Job erledigt: +${fmt(r.gain)} €` : `🚨 Job aufgeflogen: −${fmt(r.lost)} €`); updateHUD(); });
+    toast(r.ok ? `🕶️ Job durchgezogen: +${fmt(r.gain)} €` : `🚨 Erwischt: −${fmt(r.lost)} €`); updateHUD(); });
+  G.on('raid', ({ left }) => { playSfx('milestone'); confetti(0);
+    toast(`🚨 RAZZIA! Der Club ist ${left}s fast geschlossen — die Gäste sind weg.`); updateHUD(); });
   G.on('combo', ({ n, mult }) => { if (n === 2 || n % 3 === 0) { playSfx('tap'); toast(`🔥 COMBO ×${n} — ${Math.round((mult - 1) * 100)} % Bonus!`); } });
   G.on('nightReport', r => nightReportPopup(r));
   G.on('boost', () => {});
@@ -1124,6 +1126,9 @@ export function canvasFeedback(fb) {
     playSfx('buy');
   } else if (fb.type === 'ugdone') {
     playSfx('chest'); confetti(14);
+  } else if (fb.type === 'ugbust') {
+    floatText({ x: fb.x, y: fb.y - 10 }, '🚨 ERWISCHT!', 'float-celeb');
+    playSfx('milestone');
   } else if (fb.type === 'locked') {
     // Tap auf den gesperrten Nachbarraum → Freischalt-Dialog
     playSfx('click');

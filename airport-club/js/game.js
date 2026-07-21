@@ -8,7 +8,7 @@ import {
   BOOST, DROP, OFFLINE, CELEB, PRESTIGE,
   EVENTS, EVENT_GAP, WHEEL, DAILY_MIN_GAP_H, DAILY_STREAK_MAX, ACHIEVEMENTS,
   getPhase, chestReward, costOf, bulkCost, maxAffordable, milestoneMult,
-  RIVALS, RIVAL_OVERTAKE_MULT, UNDERGROUND_JOBS, UNDERGROUND_REQ, HEAT_MAX, HEAT_DECAY, BOOT_REQ,
+  RIVALS, RIVAL_OVERTAKE_MULT, UNDERGROUND_JOBS, UNDERGROUND_REQ, HEAT_MAX, HEAT_DECAY, BOOT_REQ, RAID_DUR,
 } from './data.js';
 
 const SAVE_KEY = 'airportClub.save.v1';
@@ -64,6 +64,7 @@ export const state = {
   nightStreak: 0,          // wie viele Club-Nächte in Folge durchgezogen
   rivals: { beaten: [], seeded: false },  // ids überholter Rivalen (dauerhafter Einkommens-Bonus)
   underground: { unlocked: false, job: null, heat: 0, done: 0, lastResult: null },
+  raidUntil: 0,            // bis dahin ist der Club nach einer Razzia fast dicht
   bootTeased: false,       // „Das Boot"-Endgame schon einmal angekündigt?
   createdAt: Date.now(),
 };
@@ -126,11 +127,15 @@ export function eventDef() { return eventActive() ? EVENTS.find(e => e.id === st
 export function eventMult() { const d = eventDef(); return d ? d.mult : 1; }
 export function eventGuestMult() { const d = eventDef(); return d ? d.guests : 1; }
 
+export function raidActive() { return Date.now() < (state.raidUntil || 0); }
+export function raidLeft() { return Math.max(0, ((state.raidUntil || 0) - Date.now()) / 1000); }
+
 export function globalMult() {
   let m = staffGlobalMult() * fameMult() * djMult() * rivalMult();
   if (boostActive()) m *= BOOST.mult;
   if (dropActive()) m *= DROP.mult;
   if (eventActive()) m *= eventMult();
+  if (raidActive()) m *= 0.05;                 // Razzia: Laden fast geschlossen
   return m;
 }
 
@@ -205,35 +210,49 @@ export function startJob(id) {
   save();
   return true;
 }
-// ein „Arbeitsschritt" im Hinterzimmer (Tap auf das Job-Objekt)
-export function workJob() {
+// ein „Arbeitsschritt" im Hinterzimmer (Tap auf das Job-Objekt).
+// caught=true → man hat getippt, während die Polizei geschaut hat → auffliegen.
+export function workJob(caught) {
   const u = state.underground;
   if (!u.job) return null;
   const def = UNDERGROUND_JOBS.find(j => j.id === u.job.id);
+  if (caught) { bustJob(def); return { busted: true }; }
   const taps = jobWorkTaps(def);
   u.job.progress = (u.job.progress || 0) + 1 / taps;
   if (u.job.progress >= 1) { resolveJob(); return { done: true }; }
   return { done: false, progress: u.job.progress };
 }
+// Erwischt: Einsatz weg, viel Heat, Club-Razzia (fast geschlossen)
+function bustJob(def) {
+  const u = state.underground;
+  const stake = u.job.stake;
+  u.job = null;
+  u.heat = Math.min(HEAT_MAX, u.heat + def.heat * 1.6);
+  state.raidUntil = Date.now() + RAID_DUR * 1000;
+  u.lastResult = { ok: false, busted: true, name: def.name, lost: stake };
+  emit('ugDone', u.lastResult);
+  emit('raid', { left: RAID_DUR });
+  save();
+}
+// Auftrag komplett durchgeschmuggelt (ohne erwischt zu werden) → immer Erfolg
 function resolveJob() {
   const u = state.underground;
   const def = UNDERGROUND_JOBS.find(j => j.id === u.job.id);
   const stake = u.job.stake;
-  const fail = Math.random() < jobFailChance(def);
   u.job = null;
-  u.heat = Math.min(HEAT_MAX, u.heat + def.heat * (fail ? 1.3 : 1));
+  u.heat = Math.min(HEAT_MAX, u.heat + def.heat);
   u.done = (u.done || 0) + 1;
-  let res;
-  if (fail) {
-    res = { ok: false, name: def.name, lost: stake };
-  } else {
-    const gain = stake * def.reward;
-    addMoney(gain, 'underground');
-    res = { ok: true, name: def.name, gain };
-  }
-  u.lastResult = res;
-  emit('ugDone', res);
+  const gain = stake * def.reward;
+  addMoney(gain, 'underground');
+  u.lastResult = { ok: true, name: def.name, gain };
+  emit('ugDone', u.lastResult);
   save();
+}
+// Anteil des Polizei-Zyklus, in dem geschaut wird (Risiko + Heat machen es enger/gefährlicher)
+export function ugDangerFrac() {
+  const aj = state.underground.job;
+  const risk = aj ? (UNDERGROUND_JOBS.find(j => j.id === aj.id)?.risk || 0.15) : 0.15;
+  return Math.min(0.6, 0.16 + risk + (state.underground.heat / HEAT_MAX) * 0.25);
 }
 
 // ---- Endgame „Das Boot" (Teaser-Gate) ------------------------------

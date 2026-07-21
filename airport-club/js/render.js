@@ -10,6 +10,7 @@ import {
   marketingGuestBonus, marketingSpawnBonus, activeDjDef,
   currentDrink, activeTheme, goldenBottleReward, nightReport,
   activeJob, startJob, workJob, jobStake, jobFailChance,
+  raidActive, raidLeft, ugDangerFrac,
 } from './game.js';
 import { fmt, CASH_STATIONS, DRINKS, drinkTier, UNDERGROUND_JOBS, HEAT_MAX } from './data.js';
 import { musicBpm } from './sfx.js';
@@ -271,9 +272,10 @@ function handleTap(e) {
         : (mx >= h.rectX && mx <= h.rectX + h.rectW && my >= h.rectY && my <= h.rectY + h.rectH);
       if (!hit) continue;
       if (h.fn === 'work') {
-        const res = workJob();
-        hinterFx.push({ x: h.x, y: h.y, life: 1 });
-        if (onTapFeedback) onTapFeedback({ type: res && res.done ? 'ugdone' : 'work', x: e.clientX, y: e.clientY });
+        const caught = ugDangerNow().danger;
+        const res = workJob(caught);
+        if (!caught) hinterFx.push({ x: h.x, y: h.y, life: 1 });
+        if (onTapFeedback) onTapFeedback({ type: res && res.busted ? 'ugbust' : (res && res.done ? 'ugdone' : 'work'), x: e.clientX, y: e.clientY });
       } else if (h.fn === 'start') {
         if (startJob(h.job) && onTapFeedback) onTapFeedback({ type: 'ugstart', x: e.clientX, y: e.clientY });
       }
@@ -414,6 +416,7 @@ function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 function inRoom(r, mx = 0.6) { return { x: rnd(r.x + mx, r.x + r.w - mx), y: rnd(r.y + mx, r.y + r.d - mx) }; }
 
 function targetGuestCount() {
+  if (raidActive()) return 0;          // Razzia: der Laden ist dicht, alle gehen
   let base = 6 + Math.floor(totalLevels() / 7);
   if (state.roofUnlocked) base += 6; else if (state.t2Unlocked) base += 3;
   base += (state.clubSize || 0) * 6;   // größerer Club → mehr Gäste
@@ -730,9 +733,26 @@ function emo(ch, px, py, size) {
 }
 
 // ---------------- Figuren (Billboard, detailliert) ----------------
+let suppressPeople = false;   // in der Iso-Übersicht keine Figuren zeichnen (nur Gebäude + Oktagon)
 function drawPerson(wx, wy, o = {}) {
+  if (suppressPeople) return;
   const p = iso(wx, wy, 0);
   drawPersonAt(p.x, p.y - (o.lift || 0), (o.s || 1) * cam.s, o);
+}
+// blaues „Reingehen"-Oktagon über der Gebäudemitte (Übersicht) — antippen führt in den Raum
+function drawEnterOctagon(r, t) {
+  const p = iso(r.x + r.w / 2, r.y + r.d / 2, 0.9);
+  const rr = Math.max(15, 21 * cam.s) * (1 + Math.sin(t * 3) * 0.06);
+  const oct = (rad) => { ctx.beginPath(); for (let i = 0; i < 8; i++) { const a = Math.PI / 8 + i * Math.PI / 4, x = p.x + Math.cos(a) * rad, y = p.y + Math.sin(a) * rad * 0.92; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); } ctx.closePath(); };
+  ctx.save();
+  ctx.shadowColor = '#39a9ff'; ctx.shadowBlur = 16;
+  const g = ctx.createLinearGradient(p.x, p.y - rr, p.x, p.y + rr); g.addColorStop(0, '#54b8ff'); g.addColorStop(1, '#2f7fe0');
+  oct(rr); ctx.fillStyle = g; ctx.fill(); ctx.shadowBlur = 0;
+  oct(rr); ctx.strokeStyle = '#cfe9ff'; ctx.lineWidth = 2; ctx.stroke();
+  oct(rr * 0.64); ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 1.4; ctx.stroke();
+  ctx.fillStyle = '#fff'; ctx.font = `800 ${rr * 0.95}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('→', p.x, p.y + 1);
+  ctx.restore(); ctx.textBaseline = 'alphabetic';
 }
 function drawPersonAt(px, py, s, o = {}) {
   ctx.save();
@@ -1315,6 +1335,12 @@ function detailProj(wx, wy) {
 }
 function dTileW() { return detailScale; }
 function dPersonScale() { return dTileW() / 34; }
+// Polizei-Streife im Hinterzimmer: Scheinwerfer-Sweep + Gefahrenfenster (Risiko/Heat machen es enger)
+function ugDangerNow() {
+  const off = Math.sin(performance.now() / 1000 * 1.25);   // -1..1 Sweep-Position
+  const thr = ugDangerFrac();                              // |off| < thr → Scheinwerfer auf der Ware
+  return { off, danger: Math.abs(off) < thr };
+}
 // Optik-Stufe einer Station (0..3) für „krasser werdende" Möbel
 function lvlTier(lvl) { return lvl >= 75 ? 3 : lvl >= 40 ? 2 : lvl >= 15 ? 1 : 0; }
 // Verwahrlosungs-Grad: 1 = am Anfang alt & runtergekommen, 0 = renoviert (steigt mit Ausbau)
@@ -2185,14 +2211,29 @@ function drawRoomDetail(id, t, beat) {
     for (const f of hinterFx) { ctx.globalAlpha = Math.max(0, f.life); ctx.fillStyle = '#43d95e'; ctx.font = `800 ${12 + (1 - f.life) * 6}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.fillText('＋', f.x, f.y - (1 - f.life) * 26); ctx.globalAlpha = 1; }
     const aj = activeJob();
     if (aj) {
-      // großes Job-Objekt auf dem Tisch → antippen zum Arbeiten
+      // === Polizei-Schmuggel: nur tippen, wenn der Streifen-Scheinwerfer NICHT auf der Ware liegt ===
+      const dg = ugDangerNow();
       const op = detailProj(r.x + r.w / 2, r.y + 3.5);
-      const oy = op.y - u * 0.75 - Math.abs(Math.sin(t * 3)) * 4, pulse = 1 + Math.sin(t * 5) * 0.06;
-      ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = 'rgba(255,210,120,0.16)'; ctx.beginPath(); ctx.arc(op.x, oy, u * 1.05, 0, 7); ctx.fill(); ctx.restore();
+      const oy = op.y - u * 0.7;
+      // Polizist links, der patrouilliert
+      dPerson(r.x + 1.1, r.y + 3.2, { s: 1.1, color: '#1c3f6e', pants: '#101d33', skin: '#e9b98c', hair: '#20242c', cap: '#132a4d', bob: Math.sin(t * 1.6) * 1.0, groundZ: u * 0.4 });
+      // Suchscheinwerfer, der über den Tisch schwenkt
+      const lx = midX + dg.off * rw * 0.34;
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = dg.danger ? 'rgba(255,80,80,0.20)' : 'rgba(120,200,255,0.14)';
+      ctx.beginPath(); ctx.moveTo(lx - 6, a0.y + u * 0.2); ctx.lineTo(lx + 6, a0.y + u * 0.2); ctx.lineTo(lx + u * 1.1, oy + u * 0.4); ctx.lineTo(lx - u * 1.1, oy + u * 0.4); ctx.closePath(); ctx.fill();
+      ctx.restore();
+      // Ware auf dem Tisch (grün = sicher, rot = Gefahr)
+      const pulse = 1 + Math.sin(t * 5) * 0.06;
+      ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = dg.danger ? 'rgba(255,70,70,0.28)' : 'rgba(90,230,120,0.20)';
+      ctx.beginPath(); ctx.arc(op.x, oy, u * 1.0, 0, 7); ctx.fill(); ctx.restore();
       ctx.font = `${u * 0.95 * pulse}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(aj.def.icon, op.x, oy);
-      hinterHits.push({ x: op.x, y: oy, r: Math.max(38, u * 1.0), fn: 'work' });
-      ctx.fillStyle = `rgba(255,220,120,${0.55 + 0.45 * Math.sin(t * 6)})`; ctx.font = `800 ${Math.max(10, u * 0.3)}px system-ui, sans-serif`; ctx.textBaseline = 'alphabetic';
-      ctx.fillText('👆 TIPPEN zum Arbeiten!', midX, oy - u * 1.15);
+      hinterHits.push({ x: op.x, y: oy, r: Math.max(40, u * 1.05), fn: 'work' });
+      // Status-Banner
+      ctx.textBaseline = 'alphabetic';
+      if (dg.danger) { ctx.fillStyle = '#ff5e5e'; ctx.font = `900 ${Math.max(11, u * 0.32)}px system-ui, sans-serif`; ctx.fillText('🚨 POLIZEI SCHAUT — NICHT TIPPEN!', midX, oy - u * 1.15); }
+      else { ctx.fillStyle = `rgba(90,230,120,${0.7 + 0.3 * Math.sin(t * 8)})`; ctx.font = `900 ${Math.max(11, u * 0.32)}px system-ui, sans-serif`; ctx.fillText('✅ SICHER — schmuggeln!', midX, oy - u * 1.15); }
+      // Fortschrittsbalken
       const pw = rw * 0.64, pxx = midX - pw / 2, pyy = a0.y + rh - u * 0.55;
       ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.beginPath(); ctx.roundRect(pxx, pyy, pw, 15, 7); ctx.fill();
       ctx.fillStyle = '#43d95e'; ctx.beginPath(); ctx.roundRect(pxx, pyy, pw * Math.min(1, aj.progress), 15, 7); ctx.fill();
@@ -2499,6 +2540,19 @@ function drawFocusRoom(t, beat) {
     }
   }
 
+  // Razzia: Club fast geschlossen — roter Schleier + Banner in den Club-Räumen
+  if (raidActive() && id !== 'hinter') {
+    const p = dPad(), top = p.top, bh = H - p.top - p.bot;
+    ctx.fillStyle = `rgba(120,10,10,${0.16 + 0.06 * Math.sin(t * 4)})`; ctx.fillRect(0, top, W, bh);
+    const by = top + bh * 0.42, bw = W * 0.8;
+    ctx.fillStyle = 'rgba(12,6,8,0.85)'; ctx.beginPath(); ctx.roundRect(W / 2 - bw / 2, by, bw, 52, 12); ctx.fill();
+    ctx.strokeStyle = '#ff4a4a'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = '#ff6b6b'; ctx.font = '900 18px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('🚨 RAZZIA — CLUB GESCHLOSSEN', W / 2, by + 20);
+    ctx.fillStyle = '#ffd0d0'; ctx.font = '700 13px system-ui, sans-serif';
+    ctx.fillText(`wieder offen in ${Math.ceil(raidLeft())}s`, W / 2, by + 39);
+    ctx.textBaseline = 'alphabetic';
+  }
   // kurzer weicher Überblend beim Raumwechsel
   if (roomFade > 0) { const p = dPad(); ctx.fillStyle = `rgba(10,7,20,${roomFade * 0.5})`; ctx.fillRect(0, p.top, W, H - p.top - p.bot); }
 }
@@ -2595,9 +2649,13 @@ export function renderFrame(now) {
         drink: gg.mode === 'act' ? gg.drink : null, alpha: gg.alpha, glow: gg.celeb, star: gg.celeb, bobPhase: gg.bobPhase }) });
     }
     drawables.sort((a, b) => a.d - b.d);
+    suppressPeople = true;               // Übersicht: Gebäude/Möbel ja, Männchen nein
     for (const it of drawables) it.fn();
+    suppressPeople = false;
     if (!state.t2Unlocked) drawLockOverlay(RM.t2, 'Terminal 2', 'Antippen zum Freischalten');
     if (!state.roofUnlocked) drawLockOverlay(RM.roof, 'Rooftop · VIP', state.t2Unlocked ? 'Antippen zum Freischalten' : 'Erst Terminal 2');
+    // Blaues „Rein"-Oktagon auf jedem freigeschalteten Gebäude (statt der Männchen)
+    for (const id of ['t1', 't2', 'roof']) if (roomUnlocked(id)) drawEnterOctagon(RM[id], t);
     drawCashPins(t);
   }
 
