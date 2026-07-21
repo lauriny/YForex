@@ -10,6 +10,7 @@ import {
   getPhase, chestReward, costOf, bulkCost, maxAffordable, milestoneMult,
   RIVALS, RIVAL_OVERTAKE_MULT, UNDERGROUND_JOBS, UNDERGROUND_REQ, HEAT_MAX, HEAT_DECAY, BOOT_REQ, RAID_DUR, TAKEDOWN_CD, BODY_RAID_DELAY, BRIBE_MULT,
   DEAL_CATS, DEAL_GOODS, DEAL_GOODS_FLAT, goodById, CUSTOMER_ARCHETYPES, DEAL_CFG, SOURCING,
+  SHOOTER, BUST_PENALTY,
 } from './data.js';
 
 const SAVE_KEY = 'airportClub.save.v1';
@@ -65,7 +66,7 @@ export const state = {
   nightStreak: 0,          // wie viele Club-Nächte in Folge durchgezogen
   rivals: { beaten: [], seeded: false },  // ids überholter Rivalen (dauerhafter Einkommens-Bonus)
   underground: { unlocked: false, job: null, heat: 0, done: 0, lastResult: null, takedownCdUntil: 0, pendingRaidAt: 0 },
-  dealer: { rep: 0, stock: [], served: 0, lastDeal: null, run: null, customer: null },   // Schwarzmarkt: Lager, Reputation, aktiver Deal/Run
+  dealer: { rep: 0, stock: [], served: 0, lastDeal: null, run: null, customer: null, jailUntil: 0, lastBust: null },   // Schwarzmarkt: Lager, Reputation, aktiver Deal/Run, Festnahme
   raidUntil: 0,            // bis dahin ist der Club nach einer Razzia fast dicht
   bootTeased: false,       // „Das Boot"-Endgame schon einmal angekündigt?
   createdAt: Date.now(),
@@ -75,7 +76,7 @@ export const state = {
 export function roomUnlocked(roomId) {
   if (roomId === 't2') return state.t2Unlocked;
   if (roomId === 'roof') return state.roofUnlocked;
-  if (roomId === 'hinter') return undergroundUnlocked();
+  if (roomId === 'hinter') return undergroundUnlocked() && !dealerJailed();
   return true; // t1
 }
 
@@ -379,6 +380,30 @@ export function abortRun(busted) {
   emit('runAbort', { busted: !!busted });
   save();
   return true;
+}
+
+// ---- Festnahme / harte Strafe (Ego-Shooter-Run) ----------------
+export function dealerJailed() { return Date.now() < (state.dealer.jailUntil || 0); }
+export function jailLeft() { return Math.max(0, ((state.dealer.jailUntil || 0) - Date.now()) / 1000); }
+// Erwischt/erschossen → alle vier Strafen: Kaution, Lager-Beschlagnahme, Heat-Explosion, Festnahme+Razzia
+export function bustPenalty(cat) {
+  const P = BUST_PENALTY, m = P.catMult[cat] || 1;
+  const bail = Math.min(state.money, Math.max(P.bailMin, Math.round(state.money * P.bailFrac * m)));
+  state.money = Math.max(0, state.money - bail);
+  const stock = state.dealer.stock || [], lose = Math.min(stock.length, Math.round(stock.length * P.stockLossFrac * m));
+  let seized = 0;
+  for (let i = 0; i < lose && stock.length; i++) { stock.splice(Math.floor(Math.random() * stock.length), 1); seized++; }
+  state.underground.heat = Math.min(HEAT_MAX, Math.max(state.underground.heat, P.heatTo));
+  const raid = Math.round(RAID_DUR * P.raidMult), jail = Math.round(P.jailSec * m);
+  state.raidUntil = Date.now() + raid * 1000;
+  state.dealer.jailUntil = Date.now() + jail * 1000;
+  state.dealer.run = null;
+  const res = { cat, bail, seized, jail, raid, heat: Math.round(P.heatTo) };
+  state.dealer.lastBust = res;
+  emit('runBust', res);
+  emit('raid', { left: raid, reason: 'busted' });
+  save();
+  return res;
 }
 
 // ---- Feilsch-Engine (Theke) ------------------------------------

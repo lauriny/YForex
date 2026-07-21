@@ -210,6 +210,40 @@ export const SOURCING = {
   heatGuardBonus: 1,          // +1 Wache je Segment bei hohem Heat
 };
 
+// ---- Ego-Shooter-Raycaster (Beschaffungs-Run in 3D) ------------
+export const SHOOTER = {
+  fov: Math.PI / 3,          // 60° Sichtfeld
+  moveSpeed: 2.9,            // Tiles/s
+  turnSpeed: 2.7,            // rad/s (Joystick-Drehung)
+  playerHp: 100,
+  gunDamage: 42,
+  fireCd: 0.32,              // s zwischen Schüssen
+  aimAssist: 0.36,           // rad: Frontkegel fürs Auto-Aim
+  guardHp: 55,
+  guardDmg: 10,
+  guardFireCd: 1.15,         // s zwischen Wach-Schüssen
+  guardRange: 9,             // Sicht-/Feuerreichweite (Tiles)
+  guardViewHalf: 0.62,       // Sicht-Halbwinkel im Patrouillenzustand (rad)
+  hitBaseChance: 0.85,       // Wach-Trefferchance auf kurze Distanz
+  wallH: 1.0,
+  cats: {   // Map-Größe (Räume im Raster) + Wachenzahl je Sparte
+    drugs:   { rooms: 3, guards: 3 },
+    fenced:  { rooms: 4, guards: 4 },
+    weapons: { rooms: 5, guards: 6 },
+  },
+  heatGuardBonus: 2,         // +Wachen bei hohem Heat (>55 %)
+};
+// Harte Strafe fürs Erwischt-/Erschossenwerden — alle vier Bausteine
+export const BUST_PENALTY = {
+  bailFrac: 0.25,            // Anteil des Barvermögens als Kaution
+  bailMin: 500,
+  stockLossFrac: 0.4,        // Anteil des Lagers wird beschlagnahmt
+  jailSec: 90,               // Hinterzimmer so lange gesperrt (Knast)
+  heatTo: 92,                // Heat schnellt auf diesen Wert
+  raidMult: 1.5,             // Club-Razzia dauert länger
+  catMult: { drugs: 0.8, fenced: 1.0, weapons: 1.3 },   // Waffen am härtesten
+};
+
 // ---- Endgame-Ziel: Franchise „Das Boot" (Teaser/Gate) ----------
 export const BOOT_REQ = { fame: 3, lifetime: 5e12 };  // erst mit Prestige-Sternen + Vermögen
 
