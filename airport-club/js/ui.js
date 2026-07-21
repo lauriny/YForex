@@ -17,7 +17,7 @@ const ROOM_META = {
   klo:  { icon: '🚻', name: 'WC',                sub: 'Waschräume' },
   t2:   { icon: '🪩', name: 'Terminal 2',        sub: 'Zweiter Floor' },
   roof: { icon: '🌃', name: 'Rooftop · VIP',     sub: 'VIP Sky Lounge' },
-  hinter: { icon: '🕶️', name: 'Hinterzimmer',    sub: 'Untergrund · aktive Aufträge' },
+  hinter: { icon: '🕶️', name: 'Hinterzimmer',    sub: 'Schwarzmarkt · Ware beschaffen & dealen' },
 };
 
 const $ = sel => document.querySelector(sel);
@@ -606,9 +606,9 @@ function openRoomsModal() {
       if (G.undergroundUnlocked()) {
         const m = ROOM_META.hinter;
         const hc = el('div', 'room-card unlocked clickable');
-        const aj = G.activeJob();
+        const n = G.stockCount ? G.stockCount() : 0;
         hc.innerHTML = `<div class="room-emoji">${m.icon}</div>
-          <div class="room-info"><b>${m.name}</b><span>${aj ? '⏳ Auftrag läuft · ' + Math.round(aj.progress * 100) + ' %' : m.sub}</span></div>
+          <div class="room-info"><b>${m.name}</b><span>${n > 0 ? '📦 ' + n + ' Ware im Lager' : m.sub}</span></div>
           <div class="room-emoji enter-arrow">→</div>`;
         hc.addEventListener('click', () => { closeModal(); openRoomView('hinter'); });
         list.appendChild(hc);
