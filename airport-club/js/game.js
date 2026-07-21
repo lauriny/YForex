@@ -9,6 +9,7 @@ import {
   EVENTS, EVENT_GAP, WHEEL, DAILY_MIN_GAP_H, DAILY_STREAK_MAX, ACHIEVEMENTS,
   getPhase, chestReward, costOf, bulkCost, maxAffordable, milestoneMult,
   RIVALS, RIVAL_OVERTAKE_MULT, UNDERGROUND_JOBS, UNDERGROUND_REQ, HEAT_MAX, HEAT_DECAY, BOOT_REQ, RAID_DUR, TAKEDOWN_CD, BODY_RAID_DELAY, BRIBE_MULT,
+  DEAL_CATS, DEAL_GOODS, DEAL_GOODS_FLAT, goodById, CUSTOMER_ARCHETYPES, DEAL_CFG, SOURCING,
 } from './data.js';
 
 const SAVE_KEY = 'airportClub.save.v1';
@@ -64,6 +65,7 @@ export const state = {
   nightStreak: 0,          // wie viele Club-Nächte in Folge durchgezogen
   rivals: { beaten: [], seeded: false },  // ids überholter Rivalen (dauerhafter Einkommens-Bonus)
   underground: { unlocked: false, job: null, heat: 0, done: 0, lastResult: null, takedownCdUntil: 0, pendingRaidAt: 0 },
+  dealer: { rep: 0, stock: [], served: 0, lastDeal: null, run: null, customer: null },   // Schwarzmarkt: Lager, Reputation, aktiver Deal/Run
   raidUntil: 0,            // bis dahin ist der Club nach einer Razzia fast dicht
   bootTeased: false,       // „Das Boot"-Endgame schon einmal angekündigt?
   createdAt: Date.now(),
@@ -299,6 +301,172 @@ export function ugDangerFrac() {
   const aj = state.underground.job;
   const risk = aj ? (UNDERGROUND_JOBS.find(j => j.id === aj.id)?.risk || 0.15) : 0.15;
   return Math.min(0.6, 0.16 + risk + (state.underground.heat / HEAT_MAX) * 0.25);
+}
+
+// ================================================================
+//  Schwarzmarkt-Business: Lager, Beschaffungs-Run, Feilsch-Engine
+// ================================================================
+let _uid = 1;
+export function dealerRep() { return state.dealer.rep || 0; }
+export function calcValue(item) {   // item: { goodId, cond }
+  const g = goodById(item.goodId); if (!g) return 0;
+  return Math.round(g.baseValue * item.cond * g.rarityMult);
+}
+export function stockList() { return state.dealer.stock || []; }
+export function stockCount() { return (state.dealer.stock || []).length; }
+export function stockByCat() {
+  const o = { weapons: 0, drugs: 0, fenced: 0 };
+  for (const it of state.dealer.stock || []) { const g = goodById(it.goodId); if (g) o[g.cat] = (o[g.cat] || 0) + 1; }
+  return o;
+}
+function addStock(goodId, cond) { const it = { uid: _uid++, goodId, cond }; state.dealer.stock.push(it); return it; }
+
+// ---- Beschaffungs-Run (Stealth-Gauntlet) -----------------------
+export function runStakeFor(cat) { const c = SOURCING.cats[cat]; return c ? Math.max(80, Math.round(incomePerSec() * c.stakeSec)) : 0; }
+export function activeRun() { return state.dealer.run; }
+export function startRun(cat) {
+  if (state.dealer.run || !SOURCING.cats[cat] || !undergroundUnlocked()) return false;
+  const stake = runStakeFor(cat);
+  if (state.money < stake) return false;
+  state.money -= stake;
+  state.dealer.run = { cat, stake, stage: 'infil', loot: 0 };   // stage: infil → (Stash) haul → done
+  emit('runStart', { cat });
+  save();
+  return true;
+}
+// Ware am Stash aufgenommen (Rückweg beginnt)
+export function grabLoot() { const r = state.dealer.run; if (r) { r.stage = 'haul'; save(); } }
+// Extraktion erreicht → Beute ins Lager, Erfolg
+export function finishRun() {
+  const r = state.dealer.run; if (!r) return null;
+  const c = SOURCING.cats[r.cat], pool = DEAL_GOODS[c.lootFrom];
+  const [a, b] = c.lootQty, qty = a + Math.floor(Math.random() * (b - a + 1));
+  const got = [];
+  for (let i = 0; i < qty; i++) {
+    const g = pool[Math.floor(Math.random() * pool.length)];
+    const cond = 0.7 + Math.random() * 0.3;
+    got.push(addStock(g.id, cond));
+  }
+  state.underground.heat = Math.min(HEAT_MAX, state.underground.heat + c.heat);
+  state.dealer.run = null;
+  state.dealer.lastRun = { cat: r.cat, qty };
+  emit('runDone', { cat: r.cat, qty });
+  save();
+  return { qty, got };
+}
+export function runBribeCost() { const r = state.dealer.run; return r ? Math.max(150, Math.round(r.stake * BRIBE_MULT)) : 0; }
+export function runBribe() {   // Wache bestechen → Run läuft weiter, +Heat, keine Razzia
+  const r = state.dealer.run; if (!r) return false;
+  const cost = runBribeCost();
+  if (state.money < cost) return false;
+  state.money -= cost;
+  state.underground.heat = Math.min(HEAT_MAX, state.underground.heat + 10);
+  save();
+  return true;
+}
+// Run abbrechen (erwischt/fliehen): Einsatz weg, keine Beute
+export function abortRun(busted) {
+  const r = state.dealer.run; if (!r) return false;
+  const c = SOURCING.cats[r.cat];
+  state.dealer.run = null;
+  if (busted) {
+    state.underground.heat = Math.min(HEAT_MAX, state.underground.heat + c.heat * 1.2);
+    state.raidUntil = Date.now() + RAID_DUR * 1000;
+    emit('raid', { left: RAID_DUR, reason: 'busted' });
+  } else {
+    state.underground.heat = Math.min(HEAT_MAX, state.underground.heat + c.heat * 0.5);
+  }
+  emit('runAbort', { busted: !!busted });
+  save();
+  return true;
+}
+
+// ---- Feilsch-Engine (Theke) ------------------------------------
+export function offerPrice(item, kind) { return Math.max(1, Math.round(calcValue(item) * (DEAL_CFG.offers[kind] || 1))); }
+// nächsten Kunden würfeln (nur wenn Lager nicht leer) → Payload für den Renderer
+export function rollCustomer() {
+  const stock = state.dealer.stock || [];
+  if (!stock.length) return null;
+  const item = stock[Math.floor(Math.random() * stock.length)];
+  const g = goodById(item.goodId);
+  // Archetyp gewichten: passende Sparte bevorzugt, Reputation zieht bessere Kundschaft an
+  const repF = 1 + dealerRep() / DEAL_CFG.repMax;   // 1..2
+  const pool = [];
+  for (const a of CUSTOMER_ARCHETYPES) {
+    let w = a.weight;
+    if (a.wants) { if (a.wants.includes(g.cat)) w *= 2.2; else w *= 0.15; }
+    if (a.budgetMult > 1.6) w *= repF;   // Sammler/Neureich häufiger bei hoher Reputation
+    pool.push({ a, w });
+  }
+  let tot = pool.reduce((s, p) => s + p.w, 0), r = Math.random() * tot, pick = pool[0].a;
+  for (const p of pool) { r -= p.w; if (r <= 0) { pick = p.a; break; } }
+  return { archId: pick.id, uid: item.uid, goodId: item.goodId, cond: item.cond };
+}
+// Verhandlung starten: maxWillingToPay + Geduld berechnen, Startangebot = fair
+export function beginNegotiation(payload) {
+  const arch = CUSTOMER_ARCHETYPES.find(a => a.id === payload.archId);
+  const item = (state.dealer.stock || []).find(s => s.uid === payload.uid);
+  if (!arch || !item) return null;
+  const cv = calcValue(item);
+  const [lo, hi] = DEAL_CFG.variance, variance = lo + Math.random() * (hi - lo);
+  const budgetCap = Math.round(cv * arch.budgetMult);
+  const maxPay = Math.min(budgetCap, Math.round(cv * arch.priceTolerance * variance));
+  state.dealer.customer = {
+    archId: arch.id, uid: item.uid, goodId: item.goodId, cond: item.cond,
+    cv, maxPay, budget: budgetCap, patience: arch.patience, patience0: arch.patience,
+    offer: offerPrice(item, 'fair'), phase: 'active', counter: 0, tries: 0,
+  };
+  return state.dealer.customer;
+}
+export function currentCustomer() { return state.dealer.customer; }
+export function setOffer(kind) { const c = state.dealer.customer; if (c) { const it = { goodId: c.goodId, cond: c.cond }; c.offer = offerPrice(it, kind); } return c && c.offer; }
+export function nudgeOffer() {   // „Nachbessern": Angebot senken
+  const c = state.dealer.customer; if (!c) return 0;
+  c.offer = Math.max(1, Math.round(c.offer - c.cv * DEAL_CFG.nudge));
+  return c.offer;
+}
+// Angebot bewerten → Szenario A–D der Spec
+export function submitOffer() {
+  const c = state.dealer.customer; if (!c) return { result: 'none' };
+  const offer = c.offer;
+  if (offer <= c.cv * DEAL_CFG.instantThresh) { finalizeDeal(offer, true); return { result: 'instant', price: offer }; }
+  if (offer <= c.maxPay) { finalizeDeal(offer, false); return { result: 'deal', price: offer }; }
+  // zu teuer
+  const wucher = offer > c.maxPay * DEAL_CFG.wucherThresh;
+  c.tries++;
+  c.patience -= wucher ? 2 : 1;
+  if (wucher && Math.random() < DEAL_CFG.walkoutOnWucher) { walkoutCustomer(); return { result: 'walkout', wucher: true }; }
+  if (c.patience <= 0) { walkoutCustomer(); return { result: 'walkout', wucher }; }
+  const [lo, hi] = DEAL_CFG.counterRange;
+  c.counter = Math.round(c.maxPay * (lo + Math.random() * (hi - lo)));
+  c.phase = 'counter';
+  return { result: 'counter', counter: c.counter, patience: c.patience, wucher };
+}
+export function acceptCounter() { const c = state.dealer.customer; if (!c || !c.counter) return false; finalizeDeal(c.counter, false); return true; }
+function finalizeDeal(price, instant) {
+  const c = state.dealer.customer; if (!c) return;
+  state.dealer.stock = (state.dealer.stock || []).filter(s => s.uid !== c.uid);
+  addMoney(price, 'dealer');
+  state.dealer.rep = Math.min(DEAL_CFG.repMax, state.dealer.rep + (instant ? DEAL_CFG.repGainInstant : DEAL_CFG.repGainDeal));
+  state.dealer.served = (state.dealer.served || 0) + 1;
+  state.underground.heat = Math.min(HEAT_MAX, state.underground.heat + 2);
+  state.dealer.lastDeal = { goodId: c.goodId, price, instant };
+  state.dealer.customer = null;
+  emit('dealDone', { ok: true, price, instant });
+  save();
+}
+function walkoutCustomer() {
+  const c = state.dealer.customer; if (!c) return;
+  state.dealer.rep = Math.max(0, state.dealer.rep - DEAL_CFG.repLossWalkout);
+  state.dealer.customer = null;
+  emit('dealDone', { ok: false, walkout: true });
+  save();
+}
+export function dismissCustomer() { state.dealer.customer = null; save(); }   // Kunde weggeschickt (kein Rep-Verlust)
+export function custSpawnInterval() {
+  const repF = 1 - DEAL_CFG.spawnRepFactor * (dealerRep() / DEAL_CFG.repMax);   // 1..0.5
+  const mkt = 1 - Math.min(0.35, (state.marketing || 0) * 0.05);
+  return Math.max(3, DEAL_CFG.spawnBase * repF * mkt);
 }
 
 // ---- Endgame „Das Boot" (Teaser-Gate) ------------------------------
@@ -956,6 +1124,7 @@ export function load() {
     state.level = Math.max(state.level, levelFor(state.lifetime));
     state.celeb = null;
     state.event = null;
+    if (state.dealer) { state.dealer.customer = null; state.dealer.run = null; if (!Array.isArray(state.dealer.stock)) state.dealer.stock = []; }
     // Offline-Einnahmen
     const away = (Date.now() - ts) / 1000;
     if (away > 60) {

@@ -123,6 +123,93 @@ export const UG_STEALTH = {
 };
 export const BRIBE_MULT = 1.6;   // Bestechung kostet 1.6× Einsatz (dafür keine Razzia, weiter schmuggeln)
 
+// ================================================================
+//  Schwarzmarkt-Business: Ware beschaffen (Stealth-Run) + an der
+//  Theke verkaufen (Feilschen mit Kunden-Archetypen).
+// ================================================================
+
+// ---- Warensparten & Item-Vorlagen ------------------------------
+// calculatedValue = baseValue * condition(0.7..1.0) * rarityMult
+export const DEAL_CATS = [
+  { id: 'weapons', name: 'Waffen',     icon: '🔫', color: '#c0392b', accent: '#ff9a9a' },
+  { id: 'drugs',   name: 'Drogen',     icon: '💊', color: '#8e44ad', accent: '#d9a6ff' },
+  { id: 'fenced',  name: 'Hehlerware', icon: '💎', color: '#c79a2b', accent: '#ffe08a' },
+];
+export const DEAL_GOODS = {
+  weapons: [
+    { id: 'pistole',   name: 'Pistole',            icon: '🔫', cat: 'weapons', baseValue: 420,  rarityMult: 1.0, type: 'firearm' },
+    { id: 'schrot',    name: 'Schrotflinte',       icon: '🔫', cat: 'weapons', baseValue: 820,  rarityMult: 1.3, type: 'firearm' },
+    { id: 'sturm',     name: 'Sturmgewehr',        icon: '🔫', cat: 'weapons', baseValue: 1900, rarityMult: 1.8, type: 'firearm' },
+    { id: 'sniper',    name: 'Scharfschützengewehr', icon: '🎯', cat: 'weapons', baseValue: 3600, rarityMult: 2.4, type: 'firearm' },
+    { id: 'granate',   name: 'Handgranaten',       icon: '💣', cat: 'weapons', baseValue: 1250, rarityMult: 1.5, type: 'explosive' },
+  ],
+  drugs: [
+    { id: 'gras',      name: 'Gras',               icon: '🌿', cat: 'drugs',   baseValue: 210,  rarityMult: 1.0, type: 'soft' },
+    { id: 'pillen',    name: 'Pillen',             icon: '💊', cat: 'drugs',   baseValue: 360,  rarityMult: 1.2, type: 'party' },
+    { id: 'koks',      name: 'Koks',               icon: '❄️', cat: 'drugs',   baseValue: 950,  rarityMult: 1.6, type: 'hard' },
+    { id: 'heroin',    name: 'Heroin',             icon: '🩸', cat: 'drugs',   baseValue: 1600, rarityMult: 2.0, type: 'hard' },
+  ],
+  fenced: [
+    { id: 'uhr',       name: 'Luxusuhr',           icon: '⌚', cat: 'fenced',  baseValue: 640,  rarityMult: 1.4, type: 'luxury' },
+    { id: 'schmuck',   name: 'Diamantschmuck',     icon: '💍', cat: 'fenced',  baseValue: 1450, rarityMult: 2.0, type: 'luxury' },
+    { id: 'vase',      name: 'Antik-Vase',         icon: '🏺', cat: 'fenced',  baseValue: 980,  rarityMult: 1.7, type: 'art' },
+    { id: 'gemaelde',  name: 'Gemälde',            icon: '🖼️', cat: 'fenced',  baseValue: 2600, rarityMult: 2.6, type: 'art' },
+  ],
+};
+export const DEAL_GOODS_FLAT = [...DEAL_GOODS.weapons, ...DEAL_GOODS.drugs, ...DEAL_GOODS.fenced];
+export function goodById(id) { return DEAL_GOODS_FLAT.find(g => g.id === id) || null; }
+
+// ---- Kunden-Archetypen -----------------------------------------
+// priceTolerance: Faktor auf den wahren Wert → wie viel er max. zu zahlen bereit ist.
+// budgetMult: Deckel = calcValue * budgetMult (begrenzt maxWillingToPay zusätzlich).
+// patience: Fehlversuche, bevor er geht. wants: bevorzugte Sparten (spawn-Gewichtung).
+export const CUSTOMER_ARCHETYPES = [
+  { id: 'geizig',   name: 'Geizhals',      icon: '🤏', color: '#5a6570', priceTolerance: 0.85, budgetMult: 1.05, patience: 3, wants: null,        weight: 3,
+    quips: { greet: 'Zeig her — aber mach mir keinen Fantasiepreis.', accept: 'Na gut, meinetwegen.', reject: 'Wucher! Runter mit dem Preis.', walkout: 'Vergiss es. Ich bin weg.' } },
+  { id: 'ahnungslos', name: 'Ahnungsloser', icon: '🤷', color: '#4a8fbf', priceTolerance: 1.15, budgetMult: 1.4,  patience: 4, wants: null,        weight: 2,
+    quips: { greet: 'Sieht gut aus… was kostet das?', accept: 'Klingt fair, nehm ich!', reject: 'Oha, so viel?', walkout: 'Ich denk nochmal drüber nach…' } },
+  { id: 'sammler',  name: 'Sammler',       icon: '🎩', color: '#7a5cbf', priceTolerance: 1.9,  budgetMult: 2.6,  patience: 5, wants: null,        weight: 1,
+    quips: { greet: 'Ein besonderes Stück? Dafür zahle ich gut.', accept: 'Exquisit. Es gehört mir.', reject: 'Selbst mir ist das zu teuer.', walkout: 'Schade um das schöne Stück.' } },
+  { id: 'soeldner', name: 'Söldner',       icon: '🪖', color: '#4a5d3a', priceTolerance: 1.1,  budgetMult: 1.6,  patience: 4, wants: ['weapons'], weight: 2,
+    quips: { greet: 'Brauch was Zuverlässiges. Zeig die Ware.', accept: 'Guter Deal. Bis zum nächsten Auftrag.', reject: 'Für den Preis nehm ich woanders.', walkout: 'Zeitverschwendung.' } },
+  { id: 'junkie',   name: 'Junkie',        icon: '😰', color: '#6b7a4a', priceTolerance: 1.35, budgetMult: 0.75, patience: 2, wants: ['drugs'],   weight: 2,
+    quips: { greet: 'Haste was für mich? Schnell, Mann…', accept: 'Endlich! Danke, danke.', reject: 'So viel hab ich nicht…', walkout: 'Ich such wen anders.' } },
+  { id: 'dealer',   name: 'Straßendealer', icon: '🧢', color: '#3a4a5d', priceTolerance: 0.92, budgetMult: 1.9,  patience: 4, wants: ['drugs'],   weight: 2,
+    quips: { greet: 'Ich kauf im Großen. Was geht am Preis?', accept: 'Läuft. Ich meld mich wieder.', reject: 'Zu teuer für Wiederverkauf.', walkout: 'Dann eben nicht.' } },
+  { id: 'faelscher', name: 'Fälscher',     icon: '🕵️', color: '#5d4a3a', priceTolerance: 0.98, budgetMult: 1.5,  patience: 3, wants: ['fenced'],  weight: 2,
+    quips: { greet: 'Sauber, ohne Papiere? Interessant.', accept: 'Diskret und günstig. Perfekt.', reject: 'Der Aufschlag ist mir zu heiß.', walkout: 'Zu riskant zu dem Kurs.' } },
+  { id: 'neureich', name: 'Neureicher',    icon: '🤵', color: '#8a6d3a', priceTolerance: 1.45, budgetMult: 2.3,  patience: 4, wants: ['fenced', 'weapons'], weight: 1,
+    quips: { greet: 'Ich will das Beste — Geld ist Nebensache.', accept: 'Vorzüglich. Aufrunden bitte.', reject: 'Selbst mir zu unverschämt.', walkout: 'Enttäuschend.' } },
+];
+
+// ---- Feilsch-Konfiguration -------------------------------------
+export const DEAL_CFG = {
+  offers: { lowball: 0.7, fair: 1.0, wucher: 1.4 },   // Multiplikator auf calcValue = Startangebot
+  nudge: 0.12,                 // „Nachbessern" senkt das Angebot um 12 % des calcValue
+  instantThresh: 0.9,          // Angebot ≤ calcValue*0.9 → Sofort-Deal (+Reputation)
+  wucherThresh: 1.5,           // Angebot > maxWillingToPay*1.5 → patience −2 (Wucher)
+  variance: [0.9, 1.1],        // Zufalls-Schwankung auf maxWillingToPay
+  counterRange: [0.7, 0.9],    // Gegenangebot = maxWillingToPay * random(…)
+  walkoutOnWucher: 0.35,       // Chance auf Sofort-Abbruch bei Wucher
+  repGainInstant: 2.5, repGainDeal: 1.2, repLossWalkout: 2.0, repMax: 100,
+  spawnBase: 11,               // Sek. bis der nächste Kunde kommt
+  spawnRepFactor: 0.5,         // volle Reputation halbiert die Wartezeit
+};
+
+// ---- Beschaffungs-Run (Stealth-Gauntlet) -----------------------
+// Baut auf UG_STEALTH (Kegel/Speed/Verdacht) auf; hier Map-Größe & Ausbeute.
+export const SOURCING = {
+  segLen: 9.5,                 // Länge eines Map-Segments (world units)
+  segWide: 6.5,                // Breite des Gauntlets
+  cats: {
+    drugs:   { name: 'Drogen-Run',   icon: '💊', segments: 3, guards: 1, cover: 3, stakeSec: 60,  heat: 18, lootQty: [3, 4], lootFrom: 'drugs' },
+    fenced:  { name: 'Hehler-Run',   icon: '💎', segments: 3, guards: 2, cover: 3, stakeSec: 110, heat: 24, lootQty: [2, 3], lootFrom: 'fenced' },
+    weapons: { name: 'Waffen-Run',   icon: '🔫', segments: 4, guards: 2, cover: 4, stakeSec: 200, heat: 32, lootQty: [2, 3], lootFrom: 'weapons' },
+  },
+  heatSegBonus: 1,             // +1 Segment bei hohem Heat (>55 %)
+  heatGuardBonus: 1,          // +1 Wache je Segment bei hohem Heat
+};
+
 // ---- Endgame-Ziel: Franchise „Das Boot" (Teaser/Gate) ----------
 export const BOOT_REQ = { fame: 3, lifetime: 5e12 };  // erst mit Prestige-Sternen + Vermögen
 
