@@ -10,7 +10,7 @@ import {
   getPhase, chestReward, costOf, bulkCost, maxAffordable, milestoneMult,
   RIVALS, RIVAL_OVERTAKE_MULT, UNDERGROUND_JOBS, UNDERGROUND_REQ, HEAT_MAX, HEAT_DECAY, BOOT_REQ, RAID_DUR, TAKEDOWN_CD, BODY_RAID_DELAY, BRIBE_MULT,
   DEAL_CATS, DEAL_GOODS, DEAL_GOODS_FLAT, goodById, CUSTOMER_ARCHETYPES, DEAL_CFG, SOURCING,
-  SHOOTER, BUST_PENALTY,
+  SHOOTER, BUST_PENALTY, NEMESIS, UNDERWORLD_PHASES, getUgPhase, STORY,
 } from './data.js';
 
 const SAVE_KEY = 'airportClub.save.v1';
@@ -66,7 +66,9 @@ export const state = {
   nightStreak: 0,          // wie viele Club-Nächte in Folge durchgezogen
   rivals: { beaten: [], seeded: false },  // ids überholter Rivalen (dauerhafter Einkommens-Bonus)
   underground: { unlocked: false, job: null, heat: 0, done: 0, lastResult: null, takedownCdUntil: 0, pendingRaidAt: 0 },
-  dealer: { rep: 0, stock: [], served: 0, lastDeal: null, run: null, customer: null, jailUntil: 0, lastBust: null },   // Schwarzmarkt: Lager, Reputation, aktiver Deal/Run, Festnahme
+  dealer: { rep: 0, stock: [], served: 0, runsDone: 0, catsRun: {}, lastDeal: null, run: null, customer: null, jailUntil: 0, lastBust: null },   // Schwarzmarkt
+  ugPhase: 0,              // Unterwelt-Kapitel (Story-Strang)
+  storySeen: {},          // gesehene Story-Beats (id -> true)
   raidUntil: 0,            // bis dahin ist der Club nach einer Razzia fast dicht
   bootTeased: false,       // „Das Boot"-Endgame schon einmal angekündigt?
   createdAt: Date.now(),
@@ -177,10 +179,12 @@ export function checkRivals() {
     state.rivals.seeded = true;
     return;
   }
-  if (!newly.length) return;
+  if (!newly.length) { if (rivalRank() <= 3) storyFire('nemesisIntro'); return; }
   state.gems += gems;
   const top = newly.reduce((a, b) => (b.worth > a.worth ? b : a));
   emit('rivalBeaten', { name: top.name, gems, count: newly.length, rank: rivalRank() });
+  if (newly.some(r => r.id === NEMESIS.id)) storyFire('nemesisBeaten');
+  else if (rivalRank() <= 3) storyFire('nemesisIntro');
 }
 
 // ---- Untergrund-Wirtschaft („Das Hinterzimmer") --------------------
@@ -331,6 +335,7 @@ export function startRun(cat) {
   if (state.money < stake) return false;
   state.money -= stake;
   state.dealer.run = { cat, stake, stage: 'infil', loot: 0 };   // stage: infil → (Stash) haul → done
+  storyFire('firstRun');
   emit('runStart', { cat });
   save();
   return true;
@@ -351,7 +356,10 @@ export function finishRun() {
   state.underground.heat = Math.min(HEAT_MAX, state.underground.heat + c.heat);
   state.dealer.run = null;
   state.dealer.lastRun = { cat: r.cat, qty };
+  state.dealer.runsDone = (state.dealer.runsDone || 0) + 1;
+  (state.dealer.catsRun || (state.dealer.catsRun = {}))[r.cat] = true;
   emit('runDone', { cat: r.cat, qty });
+  checkUgPhase();
   save();
   return { qty, got };
 }
@@ -400,10 +408,55 @@ export function bustPenalty(cat) {
   state.dealer.run = null;
   const res = { cat, bail, seized, jail, raid, heat: Math.round(P.heatTo) };
   state.dealer.lastBust = res;
+  storyFire('firstBust');
   emit('runBust', res);
   emit('raid', { left: raid, reason: 'busted' });
   save();
   return res;
+}
+
+// ---- Story-Beats & Zwei-Wege-Ziele (Nordstern) -----------------
+export function storyFire(id) {
+  if (!STORY[id] || (state.storySeen && state.storySeen[id])) return false;
+  (state.storySeen || (state.storySeen = {}))[id] = true;
+  emit('story', { id, ...STORY[id] });
+  save();
+  return true;
+}
+function ugQuestVal(q) {
+  const d = state.dealer;
+  if (q.t === 'runs') return d.runsDone || 0;
+  if (q.t === 'sold') return d.served || 0;
+  if (q.t === 'rep') return Math.round(d.rep || 0);
+  if (q.t === 'cat') return (d.catsRun && d.catsRun[q.v]) ? 1 : 0;
+  return 0;
+}
+function ugQuestDone(q) { return q.t === 'cat' ? ugQuestVal(q) >= 1 : ugQuestVal(q) >= q.v; }
+export function ugPhaseInfo() {
+  const ph = getUgPhase(state.ugPhase), done = ph.quests.filter(ugQuestDone).length;
+  return { idx: state.ugPhase, name: ph.name, quests: ph.quests.map(q => ({ ...q, val: ugQuestVal(q), done: ugQuestDone(q) })),
+    done, total: ph.quests.length, frac: ph.quests.length ? done / ph.quests.length : 0 };
+}
+export function checkUgPhase() {
+  let guard = 0;
+  while (guard++ < 20) {
+    const ph = getUgPhase(state.ugPhase);
+    if (ph.quests.every(ugQuestDone)) { state.ugPhase++; emit('ugPhase', { idx: state.ugPhase, name: getUgPhase(state.ugPhase).name }); }
+    else break;
+  }
+  if (state.ugPhase >= 2) storyFire('bootTease');
+  save();
+}
+// Nordstern: beide Endgame-Wege mit Fortschritt (0..1)
+export function northStar() {
+  const rank = rivalRank(), total = RIVALS.length + 1, nx = nextRival(), bp = bootProgress();
+  const legalFrac = 1 - (rank - 1) / total;
+  const crimeFrac = Math.min(1, 0.5 * Math.min(1, state.lifetime / bp.ltReq) + 0.5 * Math.min(1, state.fame / bp.fameReq));
+  return {
+    legal: { label: rank <= 1 ? '👑 Weltrangliste #1!' : `🏆 Rang #${rank}${nx ? ' → ' + nx.name : ''}`, frac: legalFrac, rank },
+    crime: { label: bp.ready ? '🚢 „Das Boot" bereit!' : `🚢 Das Boot ${Math.round(crimeFrac * 100)} %`, frac: crimeFrac, ready: bp.ready },
+    nemesis: NEMESIS,
+  };
 }
 
 // ---- Feilsch-Engine (Theke) ------------------------------------
@@ -477,7 +530,9 @@ function finalizeDeal(price, instant) {
   state.underground.heat = Math.min(HEAT_MAX, state.underground.heat + 2);
   state.dealer.lastDeal = { goodId: c.goodId, price, instant };
   state.dealer.customer = null;
+  storyFire('firstDeal');
   emit('dealDone', { ok: true, price, instant });
+  checkUgPhase();
   save();
 }
 function walkoutCustomer() {

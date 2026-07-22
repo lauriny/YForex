@@ -247,6 +247,62 @@ export const BUST_PENALTY = {
 // ---- Endgame-Ziel: Franchise „Das Boot" (Teaser/Gate) ----------
 export const BOOT_REQ = { fame: 3, lifetime: 5e12 };  // erst mit Prestige-Sternen + Vermögen
 
+// ================================================================
+//  Story & Ziele: zwei gleichwertige Wege mit eigenem Endgame
+//  Legal: „Club-Imperium → Weltrangliste #1 (König der Nacht stürzen)"
+//  Unterwelt: „Das Boot → Kingpin des Hafens"
+// ================================================================
+export const NEMESIS = { id: 'r13', name: 'König der Nacht', icon: '👑',
+  taunts: [
+    'Süß, dein kleiner Laden. Ruf mich, wenn du echte Gäste willst.',
+    'Noch #%r%? Ich hab Nächte, die mehr wert sind als dein Leben.',
+    'Du kommst näher. Niedlich. Aber der Thron gehört mir.',
+    'Du atmest mir in den Nacken… das gefällt mir nicht.',
+  ],
+  beaten: 'Der König ist tot. Die Nacht gehört jetzt DIR. 👑' };
+
+// Unterwelt-Kapitel (paralleler Story-Strang zum legalen PHASES)
+export const UNDERWORLD_PHASES = [
+  { name: 'Erste Ware', quests: [
+    { t: 'runs', v: 1,  txt: 'Zieh deinen ersten Beschaffungs-Run durch' },
+    { t: 'sold', v: 3,  txt: 'Verkaufe 3 Stück an der Theke' },
+  ]},
+  { name: 'Das Geschäft läuft', quests: [
+    { t: 'sold', v: 12, txt: 'Verkaufe 12 Stück' },
+    { t: 'rep',  v: 25, txt: 'Erreiche Ruf 25' },
+    { t: 'runs', v: 4,  txt: 'Überstehe 4 Runs' },
+  ]},
+  { name: 'Heiße Ware', quests: [
+    { t: 'sold', v: 30, txt: 'Verkaufe 30 Stück' },
+    { t: 'rep',  v: 50, txt: 'Erreiche Ruf 50' },
+    { t: 'cat',  v: 'weapons', txt: 'Zieh einen Waffen-Run durch' },
+  ]},
+  { name: 'Der Hafen ruft', quests: [
+    { t: 'sold', v: 60, txt: 'Verkaufe 60 Stück' },
+    { t: 'rep',  v: 80, txt: 'Erreiche Ruf 80' },
+    { t: 'runs', v: 12, txt: 'Überstehe 12 Runs' },
+  ]},
+];
+export function getUgPhase(i) {
+  if (i < UNDERWORLD_PHASES.length) return UNDERWORLD_PHASES[i];
+  const k = i - UNDERWORLD_PHASES.length + 1;
+  return { name: `Imperium ${k}`, quests: [
+    { t: 'sold', v: 60 + k * 40, txt: `Verkaufe ${60 + k * 40} Stück` },
+    { t: 'rep',  v: Math.min(100, 80 + k * 5), txt: `Ruf ${Math.min(100, 80 + k * 5)}` },
+  ]};
+}
+
+// Story-Beats: einmalige erzählte Karten bei Erstereignissen/Kapiteln
+export const STORY = {
+  intro:        { icon: '✈️', title: 'Willkommen im AIRPORT', text: 'Ein leeres Terminal, ein Traum und 25 €. Bau den heißesten Club der Stadt — und wer weiß, was im Hinterzimmer noch geht.' },
+  firstDeal:    { icon: '🤝', title: 'Erster Deal', text: 'Sauberes Geld ist langsam. DAS hier geht schneller. Aber jeder Kunde ist ein Risiko — und der Ruf zählt.' },
+  firstRun:     { icon: '🗺️', title: 'Ware besorgen', text: 'Kein Lager, kein Geschäft. Schlag dich durch, hol die Ware, komm lebend raus. Willkommen im Untergrund.' },
+  firstBust:    { icon: '🚨', title: 'Hochgenommen', text: 'Kaution, beschlagnahmte Ware, Knast. Das Geschäft vergisst nicht. Nächstes Mal: leiser oder tödlicher.' },
+  bootTease:    { icon: '🚢', title: '„Das Boot"', text: 'Man munkelt vom Hafen — wer dort das Sagen hat, ist unantastbar. Prestige-Sterne und ein Vermögen öffnen die Tür.' },
+  nemesisIntro: { icon: '👑', title: 'König der Nacht', text: 'Ganz oben thront einer. Er kennt deinen Namen noch nicht. Das wird sich ändern.' },
+  nemesisBeaten:{ icon: '🏆', title: 'Der Thron ist deiner', text: 'Du hast den König gestürzt. Die Weltrangliste führt jetzt EIN Name: deiner.' },
+};
+
 // ---- Live-Events (Happy Hour / Rush) ---------------------------
 export const EVENT_GAP = { min: 210, max: 420 };          // Sekunden zwischen Events
 export const EVENTS = [
