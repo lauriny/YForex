@@ -25,6 +25,15 @@ import { musicBpm } from './sfx.js';
 let canvas, ctx, W = 0, H = 0, DPR = 1;
 let particles = [];
 let startTime = performance.now();
+let shakeAmt = 0;   // aktueller Screenshake (px), klingt jedes Frame ab
+export function addShake(m) { shakeAmt = Math.min(26, shakeAmt + m); }   // Juice-Hook für fette Ereignisse
+// Münz-Burst beim Einsammeln (Juice): Partikel fliegen auseinander und fallen mit Schwerkraft
+export function coinBurst(sx, sy, n) {
+  const rect = canvas ? canvas.getBoundingClientRect() : { left: 0, top: 0 };
+  const x = sx - rect.left, y = sy - rect.top;
+  for (let i = 0; i < n; i++) { const a = -Math.PI / 2 + (Math.random() - 0.5) * 1.9, sp = rnd(90, 240);
+    particles.push({ screen: true, x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, g: 620, life: rnd(0.6, 1.0), txt: pick(['💵', '🪙', '💶', '✨']), size: rnd(12, 20) }); }
+}
 
 // ---------------- Iso-Projektion & Kamera ----------------
 // Welt in Tiles: x → rechts-unten, y → links-unten, z → hoch.
@@ -158,32 +167,43 @@ export function initCanvas(el) {
 // Pointer/Wisch: unterscheidet Tippen (Aktion) von Ziehen (Raum verschieben)
 let ptr = null;
 const JOY_R = 42;   // Radius des virtuellen Joysticks (px)
+const LOOK_SENS = 0.006;   // rad pro px beim Umsehen (rechte Bildhälfte)
 function runJoyActive() { return runView && rg && !rg.dead; }
+function relXY(e) { const r = canvas.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+function onRunTapButton(x, y) { for (const h of runHits) if (x >= h.rectX && x <= h.rectX + h.rectW && y >= h.rectY && y <= h.rectY + h.rectH) return h; return null; }
 function onPointerDown(e) {
+  // Beschaffungs-Run: linke Hälfte = laufen, rechte = umsehen/zielen (Multi-Touch)
+  if (runJoyActive()) {
+    const p = relXY(e), btn = onRunTapButton(p.x, p.y);
+    if (btn) { rg._btn = { id: e.pointerId, x: p.x, y: p.y, moved: false }; return; }
+    if (p.x < W / 2 && !rg.move) rg.move = { id: e.pointerId, ox: p.x, oy: p.y, ang: 0, mag: 0 };
+    else if (!rg.look) rg.look = { id: e.pointerId, lastX: p.x, drag: 0 };
+    return;
+  }
   ptr = { x0: e.clientX, y0: e.clientY, lx: e.clientX, ly: e.clientY, moved: false };
   try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
-  // Virtueller Joystick: nur während eines Beschaffungs-Runs
-  if (runJoyActive()) {
-    const rect = canvas.getBoundingClientRect();
-    rg.joy = { ox: e.clientX - rect.left, oy: e.clientY - rect.top, ang: 0, mag: 0 };
-  }
 }
 function onPointerMove(e) {
+  if (runView && rg) {
+    const p = relXY(e);
+    if (rg.move && rg.move.id === e.pointerId) { const dx = p.x - rg.move.ox, dy = p.y - rg.move.oy; rg.move.ang = Math.atan2(dy, dx); rg.move.mag = Math.min(1, Math.hypot(dx, dy) / JOY_R); }
+    else if (rg.look && rg.look.id === e.pointerId) { const dx = p.x - rg.look.lastX; rg.look.lastX = p.x; rg.look.drag += Math.abs(dx); rg.dir += dx * LOOK_SENS; }
+    else if (rg._btn && rg._btn.id === e.pointerId) { if (Math.abs(p.x - rg._btn.x) + Math.abs(p.y - rg._btn.y) > 10) rg._btn.moved = true; }
+    return;
+  }
   if (!ptr) return;
   ptr.lx = e.clientX; ptr.ly = e.clientY;
   if (Math.abs(e.clientX - ptr.x0) + Math.abs(e.clientY - ptr.y0) > 8) ptr.moved = true;
-  if (rg && rg.joy) {
-    const rect = canvas.getBoundingClientRect();
-    const dx = (e.clientX - rect.left) - rg.joy.ox, dy = (e.clientY - rect.top) - rg.joy.oy, d = Math.hypot(dx, dy);
-    rg.joy.ang = Math.atan2(dy, dx);
-    rg.joy.mag = Math.min(1, d / JOY_R);
-  }
-  // kein Kamera-Pan mehr: Räume werden per ◀ ▶ gewechselt, nicht durch Wischen
 }
 function onPointerUp(e) {
+  if (runView && rg) {
+    if (rg._btn && rg._btn.id === e.pointerId) { if (!rg._btn.moved) { const h = onRunTapButton(rg._btn.x, rg._btn.y); if (h) runDoButton(h); } rg._btn = null; return; }
+    if (rg.move && rg.move.id === e.pointerId) { rg.move = null; return; }
+    if (rg.look && rg.look.id === e.pointerId) { if (rg.look.drag < 10) rgFire(); rg.look = null; return; }
+    return;
+  }
   if (!ptr) return;
   const moved = ptr.moved; ptr = null;
-  if (rg && rg.joy) rg.joy = null;
   if (!moved) handleTap(e);
 }
 
@@ -275,7 +295,7 @@ function handleTap(e) {
   const mx = e.clientX - rect.left, my = e.clientY - rect.top;
 
   // Beschaffungs-Run: nur die Run-Buttons; Bewegung läuft über den Joystick
-  if (runView) { handleRunTap(mx, my, e); return; }
+  if (runView) return;   // Run läuft über eigene Pointer-Handler (Multi-Touch)
 
   // Promi zuerst (große Trefferfläche)
   if (state.celeb) {
@@ -433,7 +453,7 @@ function rgBuild(cat) {
     hp: SHOOTER.playerHp, maxHp: SHOOTER.playerHp, fireCd: 0, muzzle: 0, hitFlash: 0,
     guards, stash: { x: stash.x, y: stash.y, taken: false }, exit: { x: entry.x, y: entry.y },
     carrying: false, alarm: 0, fx: [], joy: null, kills: 0,
-    dead: false, bust: null, msg: null, msgT: 0 };
+    dead: false, bust: null, msg: null, msgT: 0, fovKick: 0, bob: 0, stepT: 1, tHint: 4, move: null, look: null };
 }
 export function enterRun(cat) { if (startRun(cat)) { rgBuild(cat); runView = true; if (onTapFeedback) onTapFeedback({ type: 'runStart' }); return true; } return false; }
 function rgFlee() { abortRun(false); runView = false; rg = null; if (onTapFeedback) onTapFeedback({ type: 'runFled' }); }
@@ -442,7 +462,7 @@ function rgDie() { if (!rg || rg.dead) return; rg.dead = true; rg.bust = bustPen
 function rgExitBust() { runView = false; rg = null; if (onTapFeedback) onTapFeedback({ type: 'runExit' }); }
 function rgFire() {
   if (!rg || rg.dead || rg.fireCd > 0) return;
-  rg.fireCd = SHOOTER.fireCd; rg.muzzle = 0.09; rg.alarm = Math.min(1, rg.alarm + 0.5);
+  rg.fireCd = SHOOTER.fireCd; rg.muzzle = 0.09; rg.alarm = Math.min(1, rg.alarm + 0.5); rg.fovKick = 1; addShake(3);
   let best = null, bestScore = 1e9;
   for (const g of rg.guards) {
     const dx = g.x - rg.px, dy = g.y - rg.py, dist = Math.hypot(dx, dy);
@@ -458,7 +478,7 @@ function rgFire() {
     best.hp -= SHOOTER.gunDamage; rg.fx.push({ x: best.x, y: best.y, life: 1, kind: 'spark' });
     best.state = 'alert';
     if (onTapFeedback) onTapFeedback({ type: 'hitGuard' });
-    if (best.hp <= 0) { rg.guards.splice(rg.guards.indexOf(best), 1); rg.kills++; rg.fx.push({ x: best.x, y: best.y, life: 1, kind: 'down' }); if (onTapFeedback) onTapFeedback({ type: 'guardDown' }); }
+    if (best.hp <= 0) { rg.guards.splice(rg.guards.indexOf(best), 1); rg.kills++; rg.fx.push({ x: best.x, y: best.y, life: 1, kind: 'down' }); addShake(9); if (onTapFeedback) onTapFeedback({ type: 'guardDown' }); }
   } else if (onTapFeedback) onTapFeedback({ type: 'shoot' });
 }
 function rgGuardStep(g, dt) {
@@ -475,7 +495,7 @@ function rgGuardStep(g, dt) {
     if (g.fireCd <= 0 && Math.abs(diff) < 0.4) {
       g.fireCd = SHOOTER.guardFireCd; g.muzzle = 0.08;
       const chance = SHOOTER.hitBaseChance * Math.max(0.25, 1 - dist / SHOOTER.guardRange);
-      if (Math.random() < chance) { rg.hp -= SHOOTER.guardDmg; rg.hitFlash = 0.35; if (onTapFeedback) onTapFeedback({ type: 'playerHit' }); }
+      if (Math.random() < chance) { rg.hp -= SHOOTER.guardDmg; rg.hitFlash = 0.35; addShake(7); if (onTapFeedback) onTapFeedback({ type: 'playerHit' }); }
     }
   } else {
     g.wanderT -= dt;
@@ -494,11 +514,16 @@ function rgUpdate(dt) {
   if (rg.fireCd > 0) rg.fireCd -= dt;
   for (let i = rg.fx.length - 1; i >= 0; i--) { rg.fx[i].life -= dt * 2; if (rg.fx[i].life <= 0) rg.fx.splice(i, 1); }
   if (rg.dead) return;
-  if (rg.joy && rg.joy.mag > 0.08) {
-    const fwd = -Math.sin(rg.joy.ang) * rg.joy.mag, turn = Math.cos(rg.joy.ang) * rg.joy.mag;
-    rg.dir += turn * SHOOTER.turnSpeed * dt;
-    const spd = fwd * SHOOTER.moveSpeed * dt;
-    rgMoveEntity(rg, rg.px + Math.cos(rg.dir) * spd, rg.py + Math.sin(rg.dir) * spd, 0.2);
+  if (rg.fovKick > 0) rg.fovKick -= dt * 3;
+  if (rg.tHint > 0) rg.tHint -= dt;
+  // Laufen: linker Stick = vor/zurück (hoch/runter) + strafe (seitlich). Drehen läuft über den Blick (rechts).
+  if (rg.move && rg.move.mag > 0.08) {
+    const fwd = -Math.sin(rg.move.ang) * rg.move.mag, strafe = Math.cos(rg.move.ang) * rg.move.mag, spd = SHOOTER.moveSpeed * dt;
+    const nx = rg.px + (Math.cos(rg.dir) * fwd - Math.sin(rg.dir) * strafe) * spd;
+    const ny = rg.py + (Math.sin(rg.dir) * fwd + Math.cos(rg.dir) * strafe) * spd;
+    rgMoveEntity(rg, nx, ny, 0.2);
+    rg.bob = (rg.bob || 0) + dt * 9 * rg.move.mag;
+    rg.stepT = (rg.stepT || 0) - dt * rg.move.mag * 2.6; if (rg.stepT <= 0) { rg.stepT = 1; if (onTapFeedback) onTapFeedback({ type: 'step' }); }
   }
   if (!rg.carrying && Math.hypot(rg.px - rg.stash.x, rg.py - rg.stash.y) < 0.9) {
     rg.carrying = true; rg.stash.taken = true; grabLoot(); rgMsg('📦 Ware! Zurück zum Ausgang!'); if (onTapFeedback) onTapFeedback({ type: 'runGrab' });
@@ -538,7 +563,7 @@ function rgDrawSprite(s, sx, size, horizon) {
   }
 }
 function rgDrawGun() {
-  const w = W, h = H, gx = w * 0.5, gy = h, bob = rg.joy && rg.joy.mag > 0.1 ? Math.sin(performance.now() / 120) * 4 : 0;
+  const w = W, h = H, gx = w * 0.5, gy = h, bob = rg.move && rg.move.mag > 0.1 ? Math.sin((rg.bob || 0)) * 4 : 0;
   ctx.fillStyle = '#20222a'; ctx.beginPath(); ctx.roundRect(gx + 10, gy - 70 + bob, 28, 74, 5); ctx.fill();
   ctx.fillStyle = '#2a2d38'; ctx.beginPath(); ctx.roundRect(gx + 2, gy - 98 + bob, 22, 62, 4); ctx.fill();
   ctx.fillStyle = '#15161c'; ctx.beginPath(); ctx.roundRect(gx + 6, gy - 100 + bob, 14, 10, 3); ctx.fill();
@@ -565,7 +590,9 @@ function rgDrawHud() {
   ctx.fillStyle = 'rgba(60,50,70,0.92)'; ctx.beginPath(); ctx.roundRect(8, 34, 92, 30, 8); ctx.fill(); ctx.fillStyle = '#e6d6e6'; ctx.font = '800 13px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('‹ Fliehen', 54, 49); runHits.push({ rectX: 8, rectY: 34, rectW: 92, rectH: 30, fn: 'flee' });
   ctx.fillStyle = 'rgba(90,44,52,0.9)'; ctx.beginPath(); ctx.roundRect(w - 100, 34, 92, 30, 8); ctx.fill(); ctx.fillStyle = '#ffd0d0'; ctx.fillText('🏳️ Stellen', w - 54, 49); runHits.push({ rectX: w - 100, rectY: 34, rectW: 92, rectH: 30, fn: 'surrender' });
   const fb = 66, fx = w - fb - 16, fy = h - fb - 22; ctx.fillStyle = 'rgba(120,40,40,0.92)'; ctx.beginPath(); ctx.arc(fx + fb / 2, fy + fb / 2, fb / 2, 0, 7); ctx.fill(); ctx.strokeStyle = '#ff8a8a'; ctx.lineWidth = 3; ctx.stroke(); ctx.fillStyle = '#fff'; ctx.font = '26px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('🔫', fx + fb / 2, fy + fb / 2); runHits.push({ rectX: fx, rectY: fy, rectW: fb, rectH: fb, fn: 'fire' });
-  if (rg.joy) { ctx.save(); ctx.globalAlpha = 0.5; ctx.strokeStyle = '#cfe0ff'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(rg.joy.ox, rg.joy.oy, JOY_R, 0, 7); ctx.stroke(); ctx.fillStyle = 'rgba(160,190,255,0.5)'; ctx.beginPath(); ctx.arc(rg.joy.ox + Math.cos(rg.joy.ang) * rg.joy.mag * 34, rg.joy.oy + Math.sin(rg.joy.ang) * rg.joy.mag * 34, 18, 0, 7); ctx.fill(); ctx.restore(); }
+  if (rg.move) { const j = rg.move; ctx.save(); ctx.globalAlpha = 0.5; ctx.strokeStyle = '#cfe0ff'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(j.ox, j.oy, JOY_R, 0, 7); ctx.stroke(); ctx.fillStyle = 'rgba(160,190,255,0.5)'; ctx.beginPath(); ctx.arc(j.ox + Math.cos(j.ang) * j.mag * 34, j.oy + Math.sin(j.ang) * j.mag * 34, 18, 0, 7); ctx.fill(); ctx.restore(); }
+  // Steuerungs-Hinweis (kurz zu Beginn)
+  if (rg.tHint > 0) { ctx.fillStyle = `rgba(255,255,255,${Math.min(0.85, rg.tHint)})`; ctx.font = '800 13px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.fillText('◀ Links laufen · Rechts umsehen · Gegner antippen = feuern ▶', W / 2, H - 100); }
   if (rg.msgT > 0 && rg.msg) { ctx.fillStyle = '#ffd0a0'; ctx.font = '800 15px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(rg.msg, w / 2, h - 60); }
 }
 function rgDrawBust() {
@@ -578,7 +605,7 @@ function rgDrawBust() {
 }
 function rgDraw(t) {
   runHits = [];
-  const w = W, h = H, fov = SHOOTER.fov, horizon = h * 0.5;
+  const w = W, h = H, fov = SHOOTER.fov * (1 + (rg.fovKick > 0 ? rg.fovKick * 0.07 : 0)), horizon = h * 0.5;
   const dirX = Math.cos(rg.dir), dirY = Math.sin(rg.dir), planeLen = Math.tan(fov / 2), planeX = -dirY * planeLen, planeY = dirX * planeLen;
   let g = ctx.createLinearGradient(0, 0, 0, horizon); g.addColorStop(0, '#0a0a12'); g.addColorStop(1, '#1a1826'); ctx.fillStyle = g; ctx.fillRect(0, 0, w, horizon);
   g = ctx.createLinearGradient(0, horizon, 0, h); g.addColorStop(0, '#26201f'); g.addColorStop(1, '#0c0a0c'); ctx.fillStyle = g; ctx.fillRect(0, horizon, w, h - horizon);
@@ -657,17 +684,12 @@ function updateHinterCounter(dt) {
   }
 }
 // Tap im Run: Buttons abarbeiten (Fliehen/Ablenken/Erwischt-Menü/Entsorgen)
-function handleRunTap(mx, my, e) {
-  if (!rg) return;
-  for (const h of runHits) {
-    if (!(mx >= h.rectX && mx <= h.rectX + h.rectW && my >= h.rectY && my <= h.rectY + h.rectH)) continue;
-    if (h.fn === 'flee') { rgFlee(); return; }
-    if (h.fn === 'surrender') { rgSurrender(); return; }
-    if (h.fn === 'fire') { rgFire(); return; }
-    if (h.fn === 'continue') { rgExitBust(); return; }
-    return;
-  }
-  if (!rg.dead) rgFire();   // Tap ins Bild = Auto-Aim-Schuss
+function runDoButton(h) {
+  if (!rg || !h) return;
+  if (h.fn === 'flee') return rgFlee();
+  if (h.fn === 'surrender') return rgSurrender();
+  if (h.fn === 'fire') return rgFire();
+  if (h.fn === 'continue') return rgExitBust();
 }
 // Tap an der Theke: Run starten (Sparten-Picker) oder Feilsch-Buttons
 function handleCounterTap(mx, my, e) {
@@ -1708,6 +1730,8 @@ function updateParticles(dt) {
   if (dropActive() && Math.random() < dt * 10) spawnScreenParticle(rnd(0, W), -10, pick(['🎉','✨','💜','🎊']), 12 + Math.random() * 8, 2.2, null), particles[particles.length-1].vy = rnd(40, 90);
   for (let i = particles.length - 1; i >= 0; i--) {
     const p = particles[i];
+    if (p.vx) p.x += p.vx * dt;
+    if (p.g) p.vy += p.g * dt;
     p.y += p.vy * dt; p.life -= dt;
     if (p.life <= 0) particles.splice(i, 1);
   }
@@ -3032,7 +3056,9 @@ export function renderFrame(now) {
   if (focusRoom) lastFocusRoom = focusRoom;
   if (roomFade > 0) roomFade = Math.max(0, roomFade - dt * 4.5);   // kurzer Überblend beim Raumwechsel
 
-  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  // Screenshake: kurzer Kamera-Ruck bei fetten Ereignissen (Juice)
+  if (shakeAmt > 0.15) { shakeAmt *= Math.pow(0.0008, dt); const a = Math.random() * 6.28; ctx.setTransform(DPR, 0, 0, DPR, Math.cos(a) * shakeAmt * DPR, Math.sin(a) * shakeAmt * DPR); }
+  else { shakeAmt = 0; ctx.setTransform(DPR, 0, 0, DPR, 0, 0); }
 
   // Beschaffungs-Run: eigener Vollbild-View (überlagert den Club)
   if (runView) { rgUpdate(dt); if (runView) { rgDraw(t); return; } }

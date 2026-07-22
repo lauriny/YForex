@@ -400,6 +400,13 @@ button { font-family: inherit; border: none; background: none; cursor: pointer; 
 .float-money { color: #7cfc8e; }
 .float-celeb { color: var(--gold); font-size: 17px; }
 .float-buy { color: var(--gold); }
+.float-crit { color: #ffe14d; font-size: 22px; text-shadow: 0 0 10px rgba(255,210,60,.8), 0 2px 3px rgba(0,0,0,.6); animation: floatcrit 1.4s ease-out forwards; }
+@keyframes floatcrit {
+  0% { opacity: 0; transform: translate(-50%, 10px) scale(0.6) rotate(-4deg); }
+  18% { opacity: 1; transform: translate(-50%, 0) scale(1.35) rotate(2deg); }
+  35% { transform: translate(-50%, -6px) scale(1.05) rotate(0deg); }
+  100% { opacity: 0; transform: translate(-50%, -70px) scale(1); }
+}
 @keyframes floatup {
   0% { opacity: 0; transform: translate(-50%, 8px) scale(0.7); }
   15% { opacity: 1; transform: translate(-50%, 0) scale(1.1); }
@@ -1235,12 +1242,12 @@ button { font-family: inherit; border: none; background: none; cursor: pointer; 
 .rival-list { display: flex; flex-direction: column; gap: 5px; margin-top: 6px; }
 .rival-row {
   display: grid; grid-template-columns: 40px 1fr auto; align-items: center; gap: 8px;
-  padding: 9px 12px; border-radius: 12px; background: rgba(255,255,255,0.05);
-  border: 2px solid rgba(0,0,0,0.12); color: var(--cream);
+  padding: 9px 12px; border-radius: 12px; background: rgba(0,0,0,0.05);
+  border: 2px solid rgba(0,0,0,0.12); color: #2a2230;
 }
-.rival-row .rr-rank { font-weight: 800; color: var(--brown-2); opacity: .8; }
-.rival-row .rr-name { font-weight: 700; }
-.rival-row .rr-worth { font-weight: 800; font-variant-numeric: tabular-nums; opacity: .9; }
+.rival-row .rr-rank { font-weight: 800; color: var(--brown-2); opacity: .9; }
+.rival-row .rr-name { font-weight: 700; color: #2a2230; }
+.rival-row .rr-worth { font-weight: 800; font-variant-numeric: tabular-nums; color: #4a3f2e; opacity: .95; }
 .rival-row.beaten { opacity: .62; }
 .rival-row.beaten .rr-tick { color: var(--green); }
 .rival-row.me {

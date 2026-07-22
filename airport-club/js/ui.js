@@ -10,7 +10,7 @@ import {
   autoCollectInterval, MILESTONE_STEP, fmt, fmtTime, costOf, milestoneMult, nextMilestone,
 } from './data.js';
 import { playSfx, setMusic, cycleMusicStyle, currentMusicStyleName, setMusicStyle } from './sfx.js';
-import { enterRoom, exitRoom, detailBack, nextRoom, prevRoom, currentRoom, devSetClock } from './render.js';
+import { enterRoom, exitRoom, detailBack, nextRoom, prevRoom, currentRoom, devSetClock, addShake, coinBurst } from './render.js';
 
 const ROOM_META = {
   t1:   { icon: '🪩', name: 'Terminal 1',        sub: 'Mainfloor' },
@@ -1061,13 +1061,13 @@ export function initUI() {
   // Spiel-Events
   G.on('levelup', ({ level, gems }) => {
     playSfx('level');
-    confetti(24);
+    confetti(24); addShake(6);
     toast(`⭐ Level ${level}!` + (gems ? ` +${gems} 💎` : ''));
   });
   G.on('milestone', ({ id, level }) => {
     const st = STATION_MAP[id];
     playSfx('milestone');
-    confetti(20);
+    confetti(20); addShake(8);
     toast(`🚀 ${st.icon} ${st.name} Stufe ${level}: Einkommen x2!`);
   });
   G.on('quest', ({ txt }) => {
@@ -1076,7 +1076,7 @@ export function initUI() {
   });
   G.on('chest', ({ kind, gems, money }) => chestPopup(kind, gems, money));
   G.on('phase', ({ idx, name }) => toast(`🏁 Phase ${idx + 1} erreicht: „${name}“`));
-  G.on('drop', () => { playSfx('drop'); toast('🔊 DROP! Alle rasten aus — x3 Einkommen!'); });
+  G.on('drop', () => { playSfx('drop'); addShake(12); toast('🔊 DROP! Alle rasten aus — x3 Einkommen!'); });
   G.on('celebSpawn', () => toast('🌟 Ein Promi ist im Club! Tipp ihn an!'));
   G.on('t2unlocked', () => {});
   G.on('roofunlocked', () => { playSfx('chest'); confetti(50); toast('🌃 Rooftop eröffnet — Sky Lounge über den Dächern!'); });
@@ -1101,7 +1101,7 @@ export function initUI() {
     toast(reason === 'body'
       ? `🚨 Die Leiche wurde gefunden — RAZZIA! Club ${left}s dicht.`
       : `🚨 RAZZIA! Der Club ist ${left}s fast geschlossen — die Gäste sind weg.`); updateHUD(); });
-  G.on('combo', ({ n, mult }) => { if (n === 2 || n % 3 === 0) { playSfx('tap'); toast(`🔥 COMBO ×${n} — ${Math.round((mult - 1) * 100)} % Bonus!`); } });
+  G.on('combo', ({ n, mult }) => { playSfx('coin', 1 + Math.min(12, n) * 0.06); if (n === 2 || n % 3 === 0) { addShake(2); toast(`🔥 COMBO ×${n} — ${Math.round((mult - 1) * 100)} % Bonus!`); } });
   G.on('nightReport', r => nightReportPopup(r));
   G.on('boost', () => {});
 
@@ -1134,8 +1134,14 @@ export function canvasFeedback(fb) {
     floatText({ x: fb.x, y: fb.y - 10 }, '+🔥 Hype', 'float-buy');
     playSfx('tap');
   } else if (fb.type === 'collect') {
-    floatText({ x: fb.x, y: fb.y - 10 }, '+' + fmt(fb.amount) + ' €', 'float-money');
+    const combo = G.comboInfo ? G.comboInfo() : { n: 0 };
+    const big = combo.n >= 3;
+    floatText({ x: fb.x, y: fb.y - 10 }, '+' + fmt(fb.amount) + ' €' + (combo.n >= 2 ? '  ×' + combo.n : ''), big ? 'float-crit' : 'float-money');
+    coinBurst(fb.x, fb.y, Math.min(14, 5 + (combo.n || 1)));
+    addShake(big ? 3.5 : 1.6);
     playSfx('buy');
+  } else if (fb.type === 'step') {
+    playSfx('step');
   } else if (fb.type === 'gold') {
     floatText({ x: fb.x, y: fb.y - 10 }, '🍾 +' + fmt(fb.money) + ' €' + (fb.gems ? ' +' + fb.gems + '💎' : ''), 'float-celeb');
     playSfx('chest');
@@ -1188,15 +1194,15 @@ export function canvasFeedback(fb) {
     floatText({ x: fb.x, y: fb.y - 10 }, '❌ Zu wenig Geld', 'float-celeb');
     playSfx('click');
   } else if (fb.type === 'shoot') {
-    playSfx('tap');
+    playSfx('shot');
   } else if (fb.type === 'hitGuard') {
-    playSfx('tap');
+    playSfx('shot');
   } else if (fb.type === 'guardDown') {
-    playSfx('buy');
+    playSfx('buy'); playSfx('coin', 1.3);
   } else if (fb.type === 'playerHit') {
-    playSfx('click');
+    playSfx('hurt');
   } else if (fb.type === 'runDead' || fb.type === 'runSurrender') {
-    playSfx('milestone');
+    playSfx('alarm');
   } else if (fb.type === 'runExit' || fb.type === 'runFled') {
     document.body.classList.remove('run-mode'); updateHUD();
   } else if (fb.type === 'dealInstant') {

@@ -39,6 +39,12 @@ const SFX = {
   milestone: () => { [392, 523, 659, 784].forEach((f, i) => tone(f, 0.1, 'square', 0.06, i * 0.07)); },
   chest:     () => { [523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, 0.14, 'triangle', 0.07, i * 0.08)); },
   boost:     () => { tone(300, 0.25, 'sawtooth', 0.05); tone(600, 0.25, 'sawtooth', 0.05, 0.15); },
+  coin:      (p = 1) => { tone(880 * p, 0.05, 'triangle', 0.06); tone(1320 * p, 0.05, 'triangle', 0.05, 0.03); },
+  shot:      () => { const a = ctx(); if (!a) return; const t = a.currentTime; const o = a.createOscillator(), g = a.createGain(); o.type = 'sawtooth'; o.frequency.setValueAtTime(320, t); o.frequency.exponentialRampToValueAtTime(70, t + 0.09); g.gain.setValueAtTime(0.12, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.11); o.connect(g).connect(a.destination); o.start(t); o.stop(t + 0.12); },
+  hurt:      () => { tone(180, 0.16, 'sawtooth', 0.1); tone(90, 0.2, 'square', 0.07, 0.02); },
+  whoosh:    () => { const a = ctx(); if (!a) return; const t = a.currentTime; const o = a.createOscillator(), g = a.createGain(); o.type = 'sine'; o.frequency.setValueAtTime(200, t); o.frequency.exponentialRampToValueAtTime(700, t + 0.18); g.gain.setValueAtTime(0.05, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.2); o.connect(g).connect(a.destination); o.start(t); o.stop(t + 0.22); },
+  step:      () => { tone(120, 0.05, 'square', 0.03); },
+  alarm:     () => { [660, 520, 660, 520].forEach((f, i) => tone(f, 0.12, 'square', 0.06, i * 0.12)); },
   drop:      () => {
     const a = ctx(); if (!a) return;
     const t = a.currentTime;
@@ -53,10 +59,10 @@ const SFX = {
   },
 };
 
-export function playSfx(name) {
+export function playSfx(name, ...args) {
   if (!state.settings.sound) return;
   const fn = SFX[name];
-  if (fn) { try { fn(); } catch (e) {} }
+  if (fn) { try { fn(...args); } catch (e) {} }
 }
 
 // ============================================================
