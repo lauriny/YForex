@@ -1282,3 +1282,56 @@ body.run-mode #hype-meter,
 body.run-mode #tap-hint,
 body.run-mode #event-banner,
 body.run-mode #bottomnav { display: none !important; }
+
+/* ---------------- Nordstern (sichtbares Doppel-Ziel) ---------------- */
+#northstar {
+  position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
+  z-index: 4; display: flex; flex-direction: column; gap: 3px;
+  background: rgba(23,27,51,0.82); border: 2px solid rgba(255,255,255,0.14);
+  border-radius: 12px; padding: 6px 10px 5px; min-width: 190px; max-width: 74%;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.35); text-align: left;
+}
+#northstar:active { transform: translateX(-50%) scale(0.97); }
+#northstar.hidden { display: none; }
+.ns-row { display: flex; align-items: center; gap: 6px; }
+.ns-ic { font-size: 12px; width: 14px; text-align: center; }
+.ns-bar { flex: 1; height: 6px; border-radius: 999px; background: rgba(0,0,0,0.4); overflow: hidden; }
+.ns-fill { display: block; height: 100%; width: 0%; border-radius: 999px;
+  background: linear-gradient(90deg, #ffd93c, #ff9f43); transition: width .5s ease; }
+.ns-fill.ns-crime { background: linear-gradient(90deg, #c56cf0, #8b5cf6); }
+.ns-label { color: #fff; font-size: 10px; font-weight: 800; text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+
+/* ---------------- Story-Beat-Karte ---------------- */
+.modal-overlay.story-pop { display: grid; place-items: center; }
+.story-box {
+  background: linear-gradient(180deg, #221c3a, #171b33);
+  border: 3px solid var(--purple-b); border-radius: 20px;
+  padding: 22px 20px 18px; max-width: 320px; margin: 0 20px; text-align: center;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.6); transform: scale(0.8); transition: transform .25s;
+}
+.modal-overlay.story-pop.open .story-box { transform: scale(1); }
+.story-emoji { font-size: 46px; filter: drop-shadow(0 3px 0 rgba(0,0,0,0.4)); }
+.story-title { color: var(--gold); font-size: 19px; font-weight: 900; margin: 8px 0 6px; }
+.story-text { color: #e6def5; font-size: 14px; line-height: 1.45; margin-bottom: 16px; }
+.story-box .btn-big {
+  background: linear-gradient(180deg, var(--purple-2), var(--purple-d));
+  color: #fff; font-weight: 800; font-size: 15px; border-radius: 12px;
+  padding: 11px 26px; box-shadow: 0 4px 0 var(--purple-b);
+}
+.story-box .btn-big:active { transform: translateY(2px); box-shadow: 0 2px 0 var(--purple-b); }
+
+/* ---------------- Zwei-Wege-Nordstern im Ziele-Modal ---------------- */
+.twopath { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0 4px; }
+.tp-card { background: var(--cream); border: 3px solid var(--cream-b); border-radius: 14px; padding: 9px 10px; }
+.tp-card.crime { background: #241f2e; border-color: #4a3f5e; }
+.tp-h { font-size: 11px; font-weight: 800; color: var(--brown); }
+.tp-card.crime .tp-h { color: #d9a6ff; }
+.tp-goal { font-size: 13px; font-weight: 900; color: #2a2230; margin: 2px 0 5px; }
+.tp-card.crime .tp-goal { color: #fff; }
+.tp-card .goal-bar { height: 8px; border-radius: 999px; background: rgba(0,0,0,0.18); overflow: hidden; }
+.tp-card.crime .goal-bar { background: rgba(255,255,255,0.12); }
+.tp-card .goal-bar i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #ffd93c, #ff9f43); }
+.tp-card .goal-bar i.crime { background: linear-gradient(90deg, #c56cf0, #8b5cf6); }
+.tp-sub { font-size: 10px; font-weight: 700; color: var(--brown-2); margin-top: 5px; line-height: 1.3; }
+.tp-card.crime .tp-sub { color: #b6a6cc; }

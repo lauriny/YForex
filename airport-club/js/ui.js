@@ -41,6 +41,15 @@ export function updateHUD() {
   $('#hud-cash .pill-val').textContent = fmt(G.state.money);
   $('#income-rate').textContent = fmt(G.incomePerSec()) + ' €/s';
 
+  // Nordstern: sichtbares Doppel-Ziel (legal + Unterwelt)
+  if (G.northStar) {
+    const ns = G.northStar();
+    const lf = $('#ns-legal-fill'), cf = $('#ns-crime-fill'), nl = $('#ns-label');
+    if (lf) lf.style.width = Math.round(ns.legal.frac * 100) + '%';
+    if (cf) cf.style.width = Math.round(ns.crime.frac * 100) + '%';
+    if (nl) nl.textContent = ns.legal.label;
+  }
+
   // Phasen-Fortschritt (jetzt im Seiten-Button 📋)
   const p = G.phaseInfo();
   const rp = $('#rail-prog'); if (rp) rp.textContent = `${p.doneCount}/${p.total}`;
@@ -415,6 +424,25 @@ function openGoalsModal() {
       const head = el('div', 'goals-head');
       head.innerHTML = `<span>Bisher verdient</span><b>${fmt(G.state.lifetime)} €</b>`;
       wrap.appendChild(head);
+      // Zwei-Wege-Nordstern
+      if (G.northStar) {
+        const ns = G.northStar(), ug = G.ugPhaseInfo ? G.ugPhaseInfo() : null;
+        const two = el('div', 'twopath');
+        two.innerHTML = `
+          <div class="tp-card legal">
+            <div class="tp-h">🏆 Club-Imperium</div>
+            <div class="tp-goal">${ns.legal.label}</div>
+            <div class="goal-bar"><i style="width:${Math.round(ns.legal.frac * 100)}%"></i></div>
+            <div class="tp-sub">Ziel: ${ns.nemesis.icon} ${ns.nemesis.name} vom Thron stoßen</div>
+          </div>
+          <div class="tp-card crime">
+            <div class="tp-h">🕶️ Unterwelt</div>
+            <div class="tp-goal">${ns.crime.label}</div>
+            <div class="goal-bar"><i class="crime" style="width:${Math.round(ns.crime.frac * 100)}%"></i></div>
+            <div class="tp-sub">${ug ? 'Kapitel: „' + ug.name + '" · ' + ug.done + '/' + ug.total : 'Ziel: Kingpin am Hafen'}</div>
+          </div>`;
+        wrap.appendChild(two);
+      }
       wrap.appendChild(el('div', 'list-caption', '🚀 Nächste große Freischaltungen'));
       const road = el('div', 'goal-list');
       for (const g of buildGoals()) {
@@ -972,6 +1000,25 @@ function chestPopup(kind, gems, money) {
   confetti(30);
 }
 
+// ---- Story-Beat: kurze erzählte Karte (Kapitel/Erstereignis) -----------------------
+function storyPopup(beat) {
+  const root = $('#modal-root');
+  const overlay = el('div', 'modal-overlay story-pop');
+  overlay.innerHTML = `
+    <div class="story-box">
+      <div class="story-emoji">${beat.icon || '📖'}</div>
+      <div class="story-title">${beat.title || ''}</div>
+      <div class="story-text">${beat.text || ''}</div>
+      <button class="btn-big">Weiter ›</button>
+    </div>`;
+  root.appendChild(overlay);
+  requestAnimationFrame(() => overlay.classList.add('open'));
+  const close = () => overlay.remove();
+  overlay.querySelector('.btn-big').addEventListener('click', close);
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+  playSfx('quest');
+}
+
 // ---- Nacht-Report (02:00 — Club-Nacht geschafft) -----------------------------------
 function nightReportPopup({ night, earned, bonus, gems }) {
   const root = $('#modal-root');
@@ -1047,6 +1094,7 @@ export function initUI() {
   });
   // Schwebende Seiten-Buttons
   $('#btn-goals').addEventListener('click', openGoalsModal);
+  $('#northstar').addEventListener('click', openGoalsModal);
   $('#btn-daily').addEventListener('click', openDailyModal);
   $('#btn-ach').addEventListener('click', openAchievementsModal);
   $('#btn-rivals').addEventListener('click', () => { rivalUnseen = false; openRivalsModal(); });
@@ -1080,6 +1128,8 @@ export function initUI() {
   G.on('celebSpawn', () => toast('🌟 Ein Promi ist im Club! Tipp ihn an!'));
   G.on('t2unlocked', () => {});
   G.on('roofunlocked', () => { playSfx('chest'); confetti(50); toast('🌃 Rooftop eröffnet — Sky Lounge über den Dächern!'); });
+  G.on('story', beat => storyPopup(beat));
+  G.on('ugPhase', ({ name }) => { playSfx('quest'); toast(`🕶️ Unterwelt-Kapitel: „${name}"`); updateHUD(); });
   G.on('performer', () => {});
   G.on('autocollect', () => {});
   G.on('event', def => { playSfx('boost'); toast(`${def.icon} ${def.name}! ${def.txt}`); });

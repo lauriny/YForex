@@ -25,6 +25,7 @@ function startGame() {
   setTimeout(() => splash.remove(), 400);
   if (offline && offline.money > 1) offlinePopup(offline.away, offline.money);
   else maybeOpenDaily();
+  setTimeout(() => G.storyFire('intro'), 600);   // erzählter Einstieg (nur einmal)
 }
 splash.addEventListener('click', startGame);
 splash.addEventListener('touchstart', startGame, { passive: true });
