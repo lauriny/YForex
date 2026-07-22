@@ -518,10 +518,11 @@ function rgUpdate(dt) {
   if (rg.tHint > 0) rg.tHint -= dt;
   // Laufen: linker Stick = vor/zurück (hoch/runter) + strafe (seitlich). Drehen läuft über den Blick (rechts).
   if (rg.move && rg.move.mag > 0.08) {
-    const fwd = -Math.sin(rg.move.ang) * rg.move.mag, strafe = Math.cos(rg.move.ang) * rg.move.mag, spd = SHOOTER.moveSpeed * dt;
+    const fwd = -Math.sin(rg.move.ang) * rg.move.mag, strafe = Math.cos(rg.move.ang) * rg.move.mag, spd = SHOOTER.moveSpeed * dt, rad = 0.2;
     const nx = rg.px + (Math.cos(rg.dir) * fwd - Math.sin(rg.dir) * strafe) * spd;
     const ny = rg.py + (Math.sin(rg.dir) * fwd + Math.cos(rg.dir) * strafe) * spd;
-    rgMoveEntity(rg, nx, ny, 0.2);
+    if (!rgWall(nx + Math.sign(nx - rg.px) * rad, rg.py)) rg.px = nx;
+    if (!rgWall(rg.px, ny + Math.sign(ny - rg.py) * rad)) rg.py = ny;
     rg.bob = (rg.bob || 0) + dt * 9 * rg.move.mag;
     rg.stepT = (rg.stepT || 0) - dt * rg.move.mag * 2.6; if (rg.stepT <= 0) { rg.stepT = 1; if (onTapFeedback) onTapFeedback({ type: 'step' }); }
   }
