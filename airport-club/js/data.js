@@ -393,6 +393,11 @@ export const ACHIEVEMENTS = [
   { id: 'roofa',  icon: '🌃', name: 'Über den Dächern',  t: 'roof',   v: 1,        txt: 'Rooftop freigeschaltet',         gems: 15 },
   { id: 'levels1',icon: '🏗️', name: 'Dauerbaustelle',    t: 'levels', v: 300,      txt: '300 Stationsstufen insgesamt',   gems: 10 },
   { id: 'fame1',  icon: '♻️', name: 'Neuanfang',         t: 'fame',   v: 1,        txt: 'Einmal neu eröffnet',            gems: 15 },
+  // ---- Lategame-Tiers (für Spieler jenseits von Rooftop & erstem Prestige) ----
+  { id: 'earn5',  icon: '👑', name: 'Nachtclub-Dynastie', t: 'earn',   v: 1e15,     txt: '1 Billiarde € insgesamt verdient', gems: 35 },
+  { id: 'lvl3',   icon: '🏆', name: 'Legende der Szene',  t: 'level',  v: 50,       txt: 'Level 50 erreicht',              gems: 20 },
+  { id: 'levels2',icon: '🧱', name: 'Mega-Ausbau',        t: 'levels', v: 800,      txt: '800 Stationsstufen insgesamt',   gems: 18 },
+  { id: 'fame3',  icon: '♻️', name: 'Serien-Gründer',     t: 'fame',   v: 3,        txt: '3× neu eröffnet',                gems: 25 },
 ];
 
 // ---- Phasen & Quests --------------------------------------------

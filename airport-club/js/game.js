@@ -1179,10 +1179,23 @@ export function devAction(kind) {
 }
 
 // ---- Speichern & Laden ------------------------------------------------------------
-export function save() {
+function writeSave() {
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify({ ...state, ts: Date.now() }));
   } catch (e) { /* Speicher voll/blockiert – Spiel läuft weiter */ }
+}
+let savePending = null;
+// Häufige Käufe/Level-Ups würden sonst bei jedem Klick synchron JSON.stringify + localStorage
+// auslösen; hier gebündelt auf max. 1 Schreibzugriff alle 400ms.
+export function save() {
+  if (savePending) return;
+  savePending = setTimeout(() => { savePending = null; writeSave(); }, 400);
+}
+// Sofort-Speicherung für Fälle, in denen die Seite direkt danach beendet werden könnte
+// (Tab-Wechsel/Hintergrund) oder ein Test/Reset unmittelbar danach den Spielstand liest.
+export function saveNow() {
+  if (savePending) { clearTimeout(savePending); savePending = null; }
+  writeSave();
 }
 
 export function load() {
@@ -1228,6 +1241,7 @@ export function claimOffline(money, doubled) {
 }
 
 export function resetSave() {
+  if (savePending) { clearTimeout(savePending); savePending = null; }   // sonst könnte ein noch ausstehendes save() den Reset überschreiben
   try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
   location.reload();
 }

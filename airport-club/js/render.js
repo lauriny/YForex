@@ -53,6 +53,23 @@ function iso(x, y, z = 0) {
   const p = projRaw(x, y, z);
   return { x: cam.ox + p.x * cam.s, y: cam.oy + p.y * cam.s };
 }
+// Bei vielen Gästen im aktuellen Blickfeld sanft rauszoomen, damit es nicht überfüllt wirkt
+function guestsNear(roomId) {
+  if (!roomId) return guests.filter(g => !g.celeb).length;
+  const r = RM[roomId];
+  if (!r) return 0;
+  return guests.filter(g => !g.celeb && g.x >= r.x - 1 && g.x <= r.x + r.w + 1 && g.y >= r.y - 1 && g.y <= r.y + r.d + 1).length;
+}
+function densityZoom(roomId) {
+  const n = guestsNear(roomId);
+  const thresh = roomId ? 10 : 24, rate = roomId ? 0.012 : 0.006;
+  return 1 - Math.min(0.1, Math.max(0, n - thresh) * rate);
+}
+// Ziel-Transform um einen Bildschirm-Punkt herum skalieren (für die Dichte-Zoom-Anpassung)
+function zoomAround(t, dz, px, py) {
+  if (dz === 1) return t;
+  return { s: t.s * dz, ox: px * (1 - dz) + dz * t.ox, oy: py * (1 - dz) + dz * t.oy };
+}
 
 // Transform, die eine Punktwolke ins View einpasst
 function fitTransform(pts, padX, padY, zoom = 1, biasY = 0) {
@@ -3047,8 +3064,9 @@ export function renderFrame(now) {
   const beat = t * (bpm / 60) * Math.PI;
   tickerX -= dt * 40 * cam.s;
 
-  // Kamera zum Ziel animieren (Übersicht ↔ Raum-Detail)
-  const target = focusRoom ? (camRooms[focusRoom] || camOver) : camOver;
+  // Kamera zum Ziel animieren (Übersicht ↔ Raum-Detail), bei viel Gästeandrang leicht rausgezoomt
+  const rawTarget = focusRoom ? (camRooms[focusRoom] || camOver) : camOver;
+  const target = zoomAround(rawTarget, densityZoom(focusRoom), W / 2, H / 2);
   const k = 1 - Math.pow(0.0015, dt);
   cam.s += (target.s - cam.s) * k;
   cam.ox += (target.ox - cam.ox) * k;

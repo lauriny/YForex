@@ -44,10 +44,10 @@ requestAnimationFrame(loop);
 // Speichern & Audio pausieren, wenn die App in den Hintergrund geht
 document.addEventListener('visibilitychange', () => {
   const hidden = document.visibilityState === 'hidden';
-  if (hidden) G.save();
+  if (hidden) G.saveNow();
   pauseAudio(hidden);
 });
-window.addEventListener('pagehide', () => G.save());
+window.addEventListener('pagehide', () => G.saveNow());
 
 // Für Debugging & Tests in der Konsole
 window.AirportGame = G;
