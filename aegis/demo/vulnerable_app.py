@@ -32,6 +32,8 @@ ORDERS = {
 
 # session token -> username
 SESSIONS: dict = {}
+# CSRF tokens the login page has issued (simulates Shopware's _csrf_token)
+CSRF_TOKENS: set = set()
 
 
 def _order_json(oid: str) -> bytes:
@@ -79,6 +81,21 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/":
             html = (b"<!doctype html><html><body><h1>Demo Shop</h1>"
                     b"<a href='/dashboard'>My Dashboard</a></body></html>")
+            return self._send(200, html, "text/html")
+
+        if path == "/login":
+            # Serve a login form carrying a CSRF token (like Shopware's storefront).
+            token = secrets.token_hex(8)
+            CSRF_TOKENS.add(token)
+            html = (
+                "<!doctype html><html><body><h1>Login</h1>"
+                "<form action='/login' method='post'>"
+                f"<input type='hidden' name='_csrf_token' value='{token}'>"
+                "<input type='text' name='username'>"
+                "<input type='password' name='password'>"
+                "<button type='submit'>Login</button>"
+                "</form></body></html>"
+            ).encode()
             return self._send(200, html, "text/html")
 
         if path == "/dashboard":
@@ -137,6 +154,11 @@ class Handler(BaseHTTPRequestHandler):
         form = {k: v[0] for k, v in parse_qs(raw).items()}
 
         if path == "/login":
+            # Enforce the CSRF token that the GET /login form issued.
+            token = form.get("_csrf_token", "")
+            if token not in CSRF_TOKENS:
+                return self._send(403, b'{"error":"invalid csrf token"}')
+            CSRF_TOKENS.discard(token)  # single-use
             u, p = form.get("username", ""), form.get("password", "")
             if USERS.get(u) == p:
                 token = secrets.token_hex(16)

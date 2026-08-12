@@ -79,9 +79,14 @@ class HttpClient:
         data: Optional[Dict[str, str]] = None,
         headers: Optional[Dict[str, str]] = None,
         raw_body: Optional[str] = None,
+        mutating: Optional[bool] = None,
     ) -> Response:
         method = method.upper()
-        mutating = method in _MUTATING_METHODS
+        # By default the method decides; callers may override (e.g. an authentication
+        # POST with authorized test credentials is not the "active mutating test" the
+        # active_testing flag guards, so SessionManager passes mutating=False).
+        if mutating is None:
+            mutating = method in _MUTATING_METHODS
         # THE GATE — refuses before anything leaves the process.
         self.guard.authorize(url, mutating=mutating)
 

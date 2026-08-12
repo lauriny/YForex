@@ -2,12 +2,68 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from html.parser import HTMLParser
+from typing import Dict, List, Optional, Tuple
+from urllib.parse import urljoin
 
 from ..config.scope import Account, Scope
 from .evidence import EvidenceLog
 from .guard import ScopeGuard
 from .http import HttpClient
+
+
+class _LoginFormParser(HTMLParser):
+    """Extract the login <form>'s action and its hidden fields (e.g. CSRF tokens).
+
+    Prefers a form that contains a password field so we target the login form and
+    not some unrelated form on the page (search, newsletter, …).
+    """
+
+    def __init__(self, password_field: str):
+        super().__init__(convert_charrefs=True)
+        self._password_field = password_field
+        self._forms: List[dict] = []
+        self._cur: Optional[dict] = None
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        if tag == "form":
+            self._cur = {"action": a.get("action", ""), "hidden": {}, "has_password": False}
+        elif tag == "input" and self._cur is not None:
+            itype = (a.get("type") or "text").lower()
+            name = a.get("name")
+            if not name:
+                return
+            if itype == "hidden":
+                self._cur["hidden"][name] = a.get("value", "")
+            if itype == "password" or name == self._password_field:
+                self._cur["has_password"] = True
+
+    def handle_endtag(self, tag):
+        if tag == "form" and self._cur is not None:
+            self._forms.append(self._cur)
+            self._cur = None
+
+    def best(self) -> Optional[dict]:
+        for f in self._forms:
+            if f["has_password"]:
+                return f
+        return self._forms[0] if self._forms else None
+
+
+def parse_login_form(html: str, base_url: str, password_field: str) -> Tuple[Dict[str, str], Optional[str]]:
+    """Return (hidden_fields, absolute_action_url) for the login form on a page."""
+    parser = _LoginFormParser(password_field)
+    try:
+        parser.feed(html)
+    except Exception:
+        return {}, None
+    form = parser.best()
+    if not form:
+        return {}, None
+    action = form["action"]
+    action_abs = urljoin(base_url, action) if action else None
+    return form["hidden"], action_abs
 
 
 @dataclass
@@ -64,11 +120,23 @@ class SessionManager:
             client.default_headers["Cookie"] = spec.cookie
             authenticated = True
         else:
-            # Form login.
+            # Form login, CSRF-aware:
+            #   1) GET the login page (non-mutating) and lift any hidden fields
+            #      (e.g. Shopware's _csrf_token) and the form action.
+            #   2) POST credentials + hidden fields. Authentication with authorized
+            #      test credentials is not the "active mutating test" the
+            #      active_testing flag guards, so we mark it mutating=False.
             fields = dict(spec.extra_fields)
+            post_url = spec.url
+            if spec.method == "POST":
+                page = client.get(spec.url)
+                hidden, action = parse_login_form(page.body, spec.url, spec.password_field)
+                fields.update(hidden)
+                if action:
+                    post_url = action
             fields[spec.username_field] = acct.username
             fields[spec.password_field] = acct.password
-            resp = client.request(spec.method, spec.url, data=fields)
+            resp = client.request(spec.method, post_url, data=fields, mutating=False)
             # Consider it authenticated if we got a session cookie or a redirect/200.
             got_cookie = len(client.cookie_jar) > 0 or bool(resp.get_set_cookies())
             authenticated = got_cookie or resp.status in (200, 302, 303)

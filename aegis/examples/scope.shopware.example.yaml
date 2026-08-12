@@ -27,19 +27,31 @@ environment:
 # TWO distinct customer test accounts the owner creates in the shop. Cross-user
 # access control needs at least two identities.
 #
-# Login method = pre-authenticated session cookie (most robust for Shopware, avoids
-# the storefront CSRF token). See README recipe below for how to copy each cookie.
+# Login method = email/password form login. Aegis fetches the login page, lifts
+# Shopware's hidden _csrf_token automatically, and posts the credentials — no
+# manual cookie copying needed. (Shopware storefront login field names are
+# 'email' and 'password'.)
 accounts:
-  - username: "testuser_a"
+  - username: "testa@example.com"
+    password: "PASSWORT_A"
     role: "customer"
     login:
-      url: "https://partyleihkiste.de/account"
-      cookie: "PASTE_SESSION_COOKIE_FOR_A_HERE"     # e.g. "session-=abc123...; ..."
-  - username: "testuser_b"
+      url: "https://partyleihkiste.de/account/login"
+      method: "POST"
+      username_field: "email"
+      password_field: "password"
+  - username: "testb@example.com"
+    password: "PASSWORT_B"
     role: "customer"
     login:
-      url: "https://partyleihkiste.de/account"
-      cookie: "PASTE_SESSION_COOKIE_FOR_B_HERE"
+      url: "https://partyleihkiste.de/account/login"
+      method: "POST"
+      username_field: "email"
+      password_field: "password"
+
+# --- Alternative if form login fails (e.g. bot protection on the login page): ---
+# Log in as each user in a browser, copy the Cookie header, and use instead:
+#   login: {url: "https://partyleihkiste.de/account", cookie: "session-=...; ..."}
 
 testing:
   active_testing: false          # read-only: no POST/PUT/DELETE probing
