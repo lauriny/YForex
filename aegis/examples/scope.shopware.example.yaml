@@ -1,0 +1,55 @@
+# Aegis scope — Shopware storefront, SAFE read-only first pass.
+#
+# Use this for an authorized owner-run assessment of a self-hosted Shopware shop.
+# It performs NO state-changing actions: no orders, no deletes, no writes.
+# It authenticates two customer test accounts and checks read access control
+# (can customer A read customer B's orders/addresses?), plus response headers and
+# cookie flags.
+#
+# Authorization: run this only against a shop you own/operate, with the owner's
+# consent, from a network you are allowed to use.
+
+target:
+  # Replace with the real shop host. The bare domain also authorizes www./subdomains.
+  domains: ["partyleihkiste.de"]
+  seeds:
+    - "https://partyleihkiste.de/"
+    - "https://partyleihkiste.de/account"        # customer area entry point
+  include_subdomains: true
+
+environment:
+  production: true
+  # Read-only checks below need NO active-testing opt-in, so we leave the
+  # production interlock ON. Only flip this (and active_testing) later, deliberately,
+  # if you decide to run state-changing probes.
+  allow_production_active_testing: false
+
+# TWO distinct customer test accounts the owner creates in the shop. Cross-user
+# access control needs at least two identities.
+#
+# Login method = pre-authenticated session cookie (most robust for Shopware, avoids
+# the storefront CSRF token). See README recipe below for how to copy each cookie.
+accounts:
+  - username: "testuser_a"
+    role: "customer"
+    login:
+      url: "https://partyleihkiste.de/account"
+      cookie: "PASTE_SESSION_COOKIE_FOR_A_HERE"     # e.g. "session-=abc123...; ..."
+  - username: "testuser_b"
+    role: "customer"
+    login:
+      url: "https://partyleihkiste.de/account"
+      cookie: "PASTE_SESSION_COOKIE_FOR_B_HERE"
+
+testing:
+  active_testing: false          # read-only: no POST/PUT/DELETE probing
+  authenticated_testing: true
+  api_testing: true
+  business_logic_testing: true
+  request_delay_seconds: 1.0     # gentle on a live shop
+  max_pages: 150
+  max_depth: 4
+
+time_window:
+  start: ""
+  end: ""
