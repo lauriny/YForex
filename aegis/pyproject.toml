@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aegis-assess"
+version = "0.1.0"
+description = "Scoped, authorization-first web application security assessment agent"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+# Core + demo run on the standard library only. Optional extras below.
+dependencies = []
+
+[project.optional-dependencies]
+yaml = ["PyYAML>=6"]
+test = ["pytest>=7"]
+
+[project.scripts]
+aegis = "aegis.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["aegis*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

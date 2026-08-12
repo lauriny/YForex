@@ -1,0 +1,62 @@
+# Aegis scope configuration — authorization boundary for an assessment.
+# This example targets the bundled, intentionally-vulnerable demo app ONLY.
+#
+# Everything Aegis is allowed to touch is defined here. Anything not listed is
+# out of scope and will be refused by the ScopeGuard before any request is sent.
+
+target:
+  # Hosts explicitly authorized for testing. host:port entries are matched exactly;
+  # bare domains additionally authorize their subdomains unless include_subdomains
+  # is set to false.
+  domains: []
+  subdomains: []
+  ips:
+    - "127.0.0.1"
+  # Seed URLs the crawler starts from. Their hosts are implicitly authorized.
+  seeds:
+    - "http://127.0.0.1:8099/"
+  include_subdomains: true
+
+environment:
+  production: false
+  staging: true
+  # Hard safety interlock: active testing against production is refused unless this
+  # is explicitly set to true.
+  allow_production_active_testing: false
+
+# Authorized test accounts. Two distinct users are required for cross-user access
+# control testing. Credentials here belong to the local demo app only.
+accounts:
+  - username: "alice"
+    password: "alice-pw"
+    role: "customer"
+    login:
+      url: "http://127.0.0.1:8099/login"
+      method: "POST"
+      username_field: "username"
+      password_field: "password"
+  - username: "bob"
+    password: "bob-pw"
+    role: "customer"
+    login:
+      url: "http://127.0.0.1:8099/login"
+      method: "POST"
+      username_field: "username"
+      password_field: "password"
+
+testing:
+  # Master switch for issuing mutating/active requests. Read-only discovery and
+  # GET-based access-control probing run regardless; POST/PUT/DELETE probing needs
+  # this enabled.
+  active_testing: true
+  authenticated_testing: true
+  api_testing: true
+  business_logic_testing: true
+  # Politeness / safety throttle between requests, in seconds.
+  request_delay_seconds: 0.0
+  max_pages: 100
+  max_depth: 4
+
+time_window:
+  start: ""
+  end: ""
