@@ -10,7 +10,7 @@ import {
   autoCollectInterval, MILESTONE_STEP, fmt, fmtTime, costOf, milestoneMult, nextMilestone,
 } from './data.js';
 import { playSfx, setMusic, cycleMusicStyle, currentMusicStyleName, setMusicStyle } from './sfx.js';
-import { enterRoom, exitRoom, detailBack, nextRoom, prevRoom, currentRoom, devSetClock, addShake, coinBurst } from './render.js';
+import { enterRoom, exitRoom, detailBack, nextRoom, prevRoom, currentRoom, devSetClock, addShake, coinBurst, exportShareImage } from './render.js';
 
 const ROOM_META = {
   t1:   { icon: '🪩', name: 'Terminal 1',        sub: 'Mainfloor' },
@@ -836,6 +836,38 @@ function openAchievementsModal() {
   });
 }
 
+// ---- Foto-Modus (Share-Karte) -----------------------------------------------------
+function downloadCanvas(canvas) {
+  const a = document.createElement('a');
+  a.href = canvas.toDataURL('image/png');
+  a.download = 'airport-club.png';
+  document.body.appendChild(a); a.click(); a.remove();
+}
+function openPhotoModal() {
+  const img = exportShareImage();
+  if (!img) return;
+  playSfx('chest');
+  openModal('📸 Foto-Modus', body => {
+    body.innerHTML = `
+      <img src="${img.toDataURL('image/png')}" style="width:100%;border-radius:16px;display:block;margin:2px 0 12px;box-shadow:0 8px 20px rgba(0,0,0,0.4)" />
+      <button class="btn-big" id="photo-share">📤 Teilen</button>
+      <button class="btn-flat" id="photo-save">⬇️ Als Bild speichern</button>
+      <div class="modal-text small">Zeigt deinen aktuellen Club, Level & Weltrang.</div>`;
+    body.querySelector('#photo-share').addEventListener('click', () => {
+      img.toBlob(async blob => {
+        if (!blob) return;
+        const file = new File([blob], 'airport-club.png', { type: 'image/png' });
+        if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
+          try { await navigator.share({ files: [file], title: 'Airport – Club Simulator' }); return; }
+          catch (e) { /* Nutzer hat Teilen abgebrochen */ return; }
+        }
+        downloadCanvas(img);
+      }, 'image/png');
+    });
+    body.querySelector('#photo-save').addEventListener('click', () => downloadCanvas(img));
+  });
+}
+
 // ---- Weltrangliste (Rivalen) -----------------------------------------------------
 function openRivalsModal() {
   G.state._rivalSeen = (G.state.rivals?.beaten || []).length;   // Badge quittieren
@@ -1098,6 +1130,7 @@ export function initUI() {
   $('#btn-daily').addEventListener('click', openDailyModal);
   $('#btn-ach').addEventListener('click', openAchievementsModal);
   $('#btn-rivals').addEventListener('click', () => { rivalUnseen = false; openRivalsModal(); });
+  $('#btn-photo').addEventListener('click', openPhotoModal);
   $('#btn-underground').addEventListener('click', () => { ugUnseen = false; openRoomView('hinter'); });
   // Zurück aus der Raum-Detailansicht
   $('#room-back').addEventListener('click', closeRoomView);

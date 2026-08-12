@@ -17,6 +17,7 @@ import {
   runStakeFor, activeRun, startRun, grabLoot, finishRun, abortRun, runBribeCost, runBribe,
   bustPenalty, dealerJailed, jailLeft,
   offerPrice, rollCustomer, beginNegotiation, currentCustomer, setOffer, nudgeOffer, submitOffer, acceptCounter, dismissCustomer, custSpawnInterval,
+  rivalRank, playerWorth,
 } from './game.js';
 import { fmt, CASH_STATIONS, DRINKS, drinkTier, UNDERGROUND_JOBS, HEAT_MAX, UG_STEALTH,
   DEAL_CATS, DEAL_GOODS, goodById, CUSTOMER_ARCHETYPES, DEAL_CFG, SOURCING, SHOOTER, BUST_PENALTY } from './data.js';
@@ -33,6 +34,56 @@ export function coinBurst(sx, sy, n) {
   const x = sx - rect.left, y = sy - rect.top;
   for (let i = 0; i < n; i++) { const a = -Math.PI / 2 + (Math.random() - 0.5) * 1.9, sp = rnd(90, 240);
     particles.push({ screen: true, x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, g: 620, life: rnd(0.6, 1.0), txt: pick(['💵', '🪙', '💶', '✨']), size: rnd(12, 20) }); }
+}
+
+// ---- Foto-Modus: aktuelle Club-Szene als hochwertige Share-Karte komponieren ----
+// Zeichnet die live laufende Iso-Szene in einen gebrandeten Rahmen mit Stats-Footer
+// (statt nur ein rohes canvas.toDataURL() rauszureichen).
+export function exportShareImage() {
+  if (!canvas || !canvas.width) return null;
+  const OW = 1080, OH = 1350;
+  const out = document.createElement('canvas');
+  out.width = OW; out.height = OH;
+  const c = out.getContext('2d');
+
+  const bg = c.createRadialGradient(OW / 2, OH * 0.14, 40, OW / 2, OH * 0.14, OH * 0.95);
+  bg.addColorStop(0, '#332a6e'); bg.addColorStop(0.5, '#191c38'); bg.addColorStop(1, '#0a0718');
+  c.fillStyle = bg; c.fillRect(0, 0, OW, OH);
+
+  c.textAlign = 'center';
+  c.fillStyle = '#fff';
+  c.font = '900 58px system-ui, sans-serif';
+  c.shadowColor = '#a26bff'; c.shadowBlur = 26;
+  c.fillText('✈ AIRPORT', OW / 2, 100);
+  c.shadowBlur = 0;
+  c.font = '700 24px system-ui, sans-serif';
+  c.fillStyle = '#c9bbe8';
+  c.fillText('C L U B   S I M U L A T O R', OW / 2, 136);
+
+  const pad = 56, frameY = 176, frameW = OW - pad * 2, frameH = OH - frameY - 300, r = 36;
+  c.save();
+  c.beginPath(); c.roundRect(pad, frameY, frameW, frameH, r); c.clip();
+  const scale = Math.max(frameW / canvas.width, frameH / canvas.height);
+  const dw = canvas.width * scale, dh = canvas.height * scale;
+  c.drawImage(canvas, pad + (frameW - dw) / 2, frameY + (frameH - dh) / 2, dw, dh);
+  c.restore();
+  c.strokeStyle = 'rgba(255,255,255,0.22)'; c.lineWidth = 4;
+  c.beginPath(); c.roundRect(pad, frameY, frameW, frameH, r); c.stroke();
+  c.strokeStyle = 'rgba(162,107,255,0.55)'; c.lineWidth = 10;
+  c.beginPath(); c.roundRect(pad - 3, frameY - 3, frameW + 6, frameH + 6, r + 3); c.stroke();
+
+  const fy = frameY + frameH + 64;
+  c.font = '900 44px system-ui, sans-serif';
+  c.fillStyle = '#ffd93c';
+  c.fillText(`Level ${state.level}`, OW / 2, fy);
+  c.font = '700 28px system-ui, sans-serif';
+  c.fillStyle = '#e6def5';
+  c.fillText(`🏆 Weltrang #${rivalRank()} · 💰 ${fmt(playerWorth())} € Lifetime`, OW / 2, fy + 48);
+  c.font = '600 22px system-ui, sans-serif';
+  c.fillStyle = '#9a8bc2';
+  c.fillText(new Date().toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }), OW / 2, fy + 90);
+
+  return out;
 }
 
 // ---------------- Iso-Projektion & Kamera ----------------
