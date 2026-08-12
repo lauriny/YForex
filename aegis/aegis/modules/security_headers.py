@@ -34,6 +34,32 @@ class SecurityHeadersModule(SecurityModule):
         ev = ctx.evidence.all()[-1] if ctx.evidence.all() else None
         findings: List[Finding] = []
 
+        # A failed/blocked request (status 0 or an error) carries no headers — do
+        # NOT report every header as "missing". Surface the unreachability instead.
+        if resp.status == 0 or (ev is not None and ev.error):
+            ctx.add_finding(Finding(
+                fid=ctx.next_fid("NET"),
+                title=f"Target unreachable: {seeds[0]}",
+                severity=Severity.INFO,
+                confidence=Confidence.INFORMATIONAL,
+                category="connectivity",
+                affected=seeds[0],
+                description=(
+                    "The seed URL could not be fetched (no HTTP response). "
+                    f"{'Error: ' + ev.error if ev and ev.error else 'Empty/blocked response.'} "
+                    "No header/cookie analysis was possible; results are inconclusive, "
+                    "not a clean bill of health."
+                ),
+                expected_behavior="The target responds so it can be assessed.",
+                actual_behavior="No response received (network policy, firewall, DNS, or TLS failure).",
+                impact="Assessment could not run against this target from this network.",
+                root_cause="Egress blocked or target not reachable from the runner.",
+                recommendation="Run Aegis from a network that can reach the target.",
+                evidence=[ev] if ev else [],
+                module=self.name,
+            ))
+            return findings
+
         for key, label, why in _CHECKS:
             if resp.header(key) is None:
                 fid = ctx.next_fid("HDR")
