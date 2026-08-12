@@ -1209,6 +1209,7 @@ button { font-family: inherit; border: none; background: none; cursor: pointer; 
 
 .theme-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .theme-card {
+  position: relative;
   padding: 10px; border-radius: 14px; cursor: pointer; text-align: center;
   background: linear-gradient(180deg, #241d38, #17122a);
   border: 2px solid rgba(255,255,255,0.10); transition: transform .1s, border-color .2s;
@@ -1217,6 +1218,13 @@ button { font-family: inherit; border: none; background: none; cursor: pointer; 
 .theme-card.active { border-color: #7fe6a0; box-shadow: 0 0 0 2px rgba(127,230,160,0.4); }
 .theme-card.ready { border-color: rgba(255,207,106,0.6); }
 .theme-card.locked { opacity: 0.55; }
+.theme-card.seasonal:not(.locked) { border-color: rgba(255,79,216,0.5); }
+.theme-ribbon {
+  position: absolute; top: -8px; left: 50%; transform: translateX(-50%);
+  background: linear-gradient(180deg, #ff4fd8, #a726c9);
+  color: #fff; font-size: 8.5px; font-weight: 800; white-space: nowrap;
+  padding: 3px 8px; border-radius: 999px; box-shadow: 0 3px 8px rgba(0,0,0,0.4);
+}
 .theme-sw { display: flex; gap: 4px; justify-content: center; margin-bottom: 6px; }
 .theme-sw i { width: 20px; height: 20px; border-radius: 6px; box-shadow: inset 0 0 4px rgba(0,0,0,0.4); }
 .theme-name { font-weight: 800; color: #fff; font-size: 12.5px; }

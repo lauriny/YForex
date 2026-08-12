@@ -58,8 +58,28 @@ export const CLUB_THEMES = [
   { id: 'toxic',   name: 'Toxic',        req: 5e8,   accent: '#39ff14', sw: ['#39ff14', '#b6ff00', '#00e5a0'], desc: 'Grelles Neon-Grün.' },
   { id: 'ice',     name: 'Ice',          req: 5e10,  accent: '#5ad0ff', sw: ['#5ad0ff', '#7a9cff', '#a0f0ff'], desc: 'Kühles Eisblau.' },
   { id: 'gold',    name: 'Gold VIP',     req: 5e12,  accent: '#ffcf6a', sw: ['#ffd93c', '#ffb347', '#fff1a8'], desc: 'Purer Luxus in Gold.' },
+  // ---- Saison-Themes: nur in ihrem Zeitfenster neu freischaltbar, danach dauerhaft im Besitz ----
+  { id: 'halloween', name: 'Spooky Night',      req: 50_000,  accent: '#ff8a00', sw: ['#ff8a00', '#7c3aed', '#39ff14'], desc: 'Kürbis-Orange trifft Hexen-Violett.',
+    season: { from: '10-15', to: '11-05', label: '🎃 Nur im Oktober' } },
+  { id: 'summer',    name: 'Sommer Beach Club', req: 100_000, accent: '#4fe0ff', sw: ['#4fe0ff', '#ff9f43', '#ffe14d'], desc: 'Türkises Meer & Korallen-Sonnenuntergang.',
+    season: { from: '06-01', to: '08-31', label: '☀️ Nur im Sommer' } },
+  { id: 'silvester', name: 'Neon Silvester',    req: 200_000, accent: '#ffd93c', sw: ['#ffd93c', '#ff4fd8', '#fff1a8'], desc: 'Feuerwerk, Gold & Konfetti zum Jahreswechsel.',
+    season: { from: '12-20', to: '01-05', label: '🎆 Nur zum Jahreswechsel' } },
 ];
 export const THEME_MAP = Object.fromEntries(CLUB_THEMES.map(x => [x.id, x]));
+
+// Prüft, ob "jetzt" innerhalb eines MM-DD…MM-DD-Fensters liegt (Fenster darf übers Jahresende laufen)
+export function inSeasonWindow(fromMD, toMD, now = new Date()) {
+  const y = now.getFullYear();
+  const [fm, fd] = fromMD.split('-').map(Number);
+  const [tm, td] = toMD.split('-').map(Number);
+  const from = new Date(y, fm - 1, fd, 0, 0, 0);
+  const to = new Date(y, tm - 1, td, 23, 59, 59);
+  if (to < from) {   // Fenster wraps über Silvester (z. B. 12-20 → 01-05)
+    if (now >= from) to.setFullYear(y + 1); else from.setFullYear(y - 1);
+  }
+  return now >= from && now <= to;
+}
 
 export const BOOST = { dur: 300, cd: 300, mult: 2 };      // x2-Einkommen: 5 min an, dann 5 min CD → alle 10 min nutzbar
 export const DROP  = { dur: 12, mult: 3 };                // Hype-DROP: 12 s x3

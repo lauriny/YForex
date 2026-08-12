@@ -1867,6 +1867,9 @@ function themeFloorHue(i, j, t) {
     case 'toxic':  return 90 + wv * 70;            // Neon-Grün
     case 'ice':    return 180 + wv * 70;           // Eisblau
     case 'gold':   return 40 + wv * 18;            // Gold
+    case 'halloween': return wv < 0.5 ? 20 + wv * 20 : 268 + (wv - 0.5) * 24;   // Kürbis-Orange ↔ Hexen-Violett
+    case 'summer':    return wv < 0.5 ? 174 + wv * 24 : 12 + (wv - 0.5) * 26;   // Türkis ↔ Koralle
+    case 'silvester': return wv < 0.5 ? 46 + wv * 12 : 328 + (wv - 0.5) * 40;   // Gold ↔ Pink-Feuerwerk
     default:       return base % 360;              // Classic-Regenbogen
   }
 }

@@ -4,7 +4,7 @@
 import {
   STATIONS, STATION_MAP, STAFF, STAFF_MAP, SHOP, CASH_STATIONS,
   T2_REQ, ROOF_REQ, PERFORMER, AUTOCOLLECT, CLUB_EXPAND, autoCollectInterval,
-  MARKETING, marketingCost, DJS, DJ_MAP, DRINKS, drinkTier, CLUB_THEMES, THEME_MAP,
+  MARKETING, marketingCost, DJS, DJ_MAP, DRINKS, drinkTier, CLUB_THEMES, THEME_MAP, inSeasonWindow,
   BOOST, DROP, OFFLINE, CELEB, PRESTIGE,
   EVENTS, EVENT_GAP, WHEEL, DAILY_MIN_GAP_H, DAILY_STREAK_MAX, ACHIEVEMENTS,
   getPhase, chestReward, costOf, bulkCost, maxAffordable, milestoneMult,
@@ -762,7 +762,15 @@ export function nextDrink() { const t = drinkTier(state.stations.bar || 0); retu
 export function drinkMult() { return 1 + drinkTier(state.stations.bar || 0) * 0.18; }
 
 // ---- Club-Themes (freischaltbare Dancefloor-Looks) --------------------
-export function themeUnlocked(id) { const th = THEME_MAP[id]; return th ? state.lifetime >= th.req : false; }
+// Saison-Themes lassen sich nur in ihrem Zeitfenster NEU freischalten (danach dauerhaft nutzbar,
+// unabhängig von der Saison — kein nachträgliches Wegnehmen bereits gekaufter Looks).
+export function themeInSeason(id) { const th = THEME_MAP[id]; return !th?.season || inSeasonWindow(th.season.from, th.season.to); }
+export function themeUnlocked(id) {
+  const th = THEME_MAP[id];
+  if (!th) return false;
+  if (th.season && !themeOwned(id) && !themeInSeason(id)) return false;
+  return state.lifetime >= th.req;
+}
 export function themeOwned(id) { return (state.themesOwned || ['classic']).includes(id); }
 export function unlockTheme(id) {
   if (themeOwned(id) || !themeUnlocked(id)) return false;

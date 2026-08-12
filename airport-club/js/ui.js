@@ -460,14 +460,17 @@ function openGoalsModal() {
       const grid = el('div', 'theme-grid');
       for (const th of CLUB_THEMES) {
         const owned = G.themeOwned(th.id), can = G.themeUnlocked(th.id), active = G.state.clubTheme === th.id;
-        const card = el('div', 'theme-card' + (active ? ' active' : owned ? ' owned' : can ? ' ready' : ' locked'));
+        const inSeason = !th.season || G.themeInSeason(th.id);
+        const card = el('div', 'theme-card' + (active ? ' active' : owned ? ' owned' : can ? ' ready' : ' locked') + (th.season ? ' seasonal' : ''));
         const sw = th.sw.map(c => `<i style="background:${c}"></i>`).join('');
         let btn;
         if (active) btn = '<div class="theme-btn on">Aktiv ✓</div>';
         else if (owned) btn = '<div class="theme-btn">Anwenden</div>';
         else if (can) btn = '<div class="theme-btn buy">Freischalten</div>';
+        else if (th.season && !inSeason) btn = `<div class="theme-btn lock">🔒 ${th.season.label}</div>`;
         else btn = `<div class="theme-btn lock">🔒 ${fmt(th.req)} €</div>`;
-        card.innerHTML = `<div class="theme-sw">${sw}</div><div class="theme-name">${th.name}</div><div class="theme-desc">${th.desc}</div>${btn}`;
+        const ribbon = th.season && !owned ? `<div class="theme-ribbon">${th.season.label}</div>` : '';
+        card.innerHTML = `${ribbon}<div class="theme-sw">${sw}</div><div class="theme-name">${th.name}</div><div class="theme-desc">${th.desc}</div>${btn}`;
         if (!active) card.addEventListener('click', () => {
           if (owned) { G.setTheme(th.id); playSfx('click'); }
           else if (can) { if (!G.unlockTheme(th.id)) return; confetti(30); playSfx('chest'); toast(`🎨 Theme „${th.name}" freigeschaltet!`); }
