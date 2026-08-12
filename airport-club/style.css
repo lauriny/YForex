@@ -1335,3 +1335,109 @@ body.run-mode #bottomnav { display: none !important; }
 .tp-card .goal-bar i.crime { background: linear-gradient(90deg, #c56cf0, #8b5cf6); }
 .tp-sub { font-size: 10px; font-weight: 700; color: var(--brown-2); margin-top: 5px; line-height: 1.3; }
 .tp-card.crime .tp-sub { color: #b6a6cc; }
+
+/* ============================================================
+   NEON GLASS — durchgängige Club-Ästhetik statt Cream-Papier
+   Ersetzt die warmen Creme-Karten (gedacht für ein helles Brettspiel-
+   UI) durch dunkles Frosted-Glass mit Neon-Kontur, damit das Chrome
+   zur dunklen Neon-Iso-Clubszene passt statt dagegen zu wirken.
+   Tap-Buttons (nav-btn/btn-buy/rail-btn/…) behalten bewusst ihr
+   chunky 3D-Press-Feedback — nur die passiven Karten/Modale wandern
+   auf Glas.
+   ============================================================ */
+:root {
+  --glass-hi:   rgba(48, 36, 88, 0.75);
+  --glass-lo:   rgba(22, 16, 42, 0.62);
+  --glass-line: rgba(255,255,255,0.14);
+  --glass-line-hi: rgba(255,255,255,0.26);
+  --neon-pink:  #ff4fd8;
+  --neon-cyan:  #4fe0ff;
+  --ink:        #f4eeff;
+  --ink-2:      #cabfe6;
+  --ink-3:      #9a8dc0;
+}
+
+/* ---- Basis-Kartenlook: Glas statt Papier ---- */
+.up-card, .station-row, .room-card, .quest-row, .goal-card, .tp-card,
+.modal-sheet, .chest-box, .btn-flat, .mode-btn {
+  background: linear-gradient(180deg, var(--glass-hi) 0%, var(--glass-lo) 100%);
+  border-color: var(--glass-line);
+  color: var(--ink);
+}
+.up-card, .modal-sheet, .chest-box {
+  backdrop-filter: blur(16px) saturate(1.3);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+}
+.up-card { box-shadow: 0 10px 24px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.08); }
+.up-card.affordable { border-color: var(--green); animation: cardglowGlass 1.6s ease-in-out infinite; }
+@keyframes cardglowGlass {
+  0%, 100% { box-shadow: 0 10px 24px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.08); }
+  50% { box-shadow: 0 10px 24px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.08), 0 0 18px rgba(67,217,94,0.55); }
+}
+.up-title { color: var(--ink); }
+.up-cost { color: #7cf49a; }
+.up-card:not(.affordable) .up-cost { color: #ff8f9a; }
+
+.modal-sheet {
+  box-shadow: 0 -10px 40px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.1);
+  border-color: var(--glass-line-hi);
+}
+.modal-head h2 { color: var(--ink); }
+.modal-text { color: var(--ink-2); }
+.modal-text.small { color: var(--ink-3); }
+
+.btn-flat { border-width: 2px; color: var(--ink-2); font-weight: 700; }
+.btn-flat.danger { color: #ff8f9a; }
+.mode-btn { border-width: 2px; color: var(--ink-3); }
+.mode-btn.active { color: #fff; }
+
+.station-row, .room-card, .quest-row, .goal-card, .tp-card {
+  box-shadow: 0 8px 18px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255,255,255,0.07);
+  border-width: 2px;
+}
+.station-row.active-row { background: linear-gradient(180deg, rgba(67,217,94,0.22), rgba(67,217,94,0.08)); border-color: var(--green); }
+.room-card.prestige { border-color: var(--gold); background: linear-gradient(180deg, rgba(255,217,60,0.22), rgba(255,217,60,0.07)); }
+.room-card.perf { border-color: var(--neon-pink); background: linear-gradient(180deg, rgba(255,79,216,0.2), rgba(255,79,216,0.06)); }
+.station-row.hilite { border-color: var(--gold); background: linear-gradient(180deg, rgba(255,217,60,0.22), rgba(255,217,60,0.07)); }
+
+.st-icon {
+  background: linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.04));
+  border-color: var(--glass-line);
+}
+.st-name { color: var(--ink); }
+.st-lvl { color: var(--ink-3); }
+.st-desc { color: var(--ink-2); }
+
+.room-info b { color: var(--ink); }
+.room-info span { color: var(--ink-2); }
+
+.q-txt { color: var(--ink); }
+.list-caption { color: var(--ink-2); }
+
+.chest-box {
+  box-shadow: 0 14px 40px rgba(0,0,0,0.55), 0 0 44px rgba(255,217,60,0.3), inset 0 1px 0 rgba(255,255,255,0.1);
+}
+.chest-box h2 { color: var(--ink); }
+
+.goal-title { color: var(--ink); }
+.goal-sub { color: var(--ink-2); }
+.goal-req { color: var(--ink-3); }
+.goal-ic { background: linear-gradient(180deg, rgba(255,255,255,0.14), rgba(255,255,255,0.05)); box-shadow: none; }
+
+.tp-card { background: linear-gradient(180deg, rgba(255,217,60,0.14), var(--glass-lo)); border-color: rgba(255,217,60,0.3); }
+.tp-h { color: #ffd93c; }
+.tp-goal { color: var(--ink); }
+.tp-sub { color: var(--ink-2); }
+
+/* ---- Weltrangliste: Text auf Glas statt auf Creme (sonst wieder unsichtbar) ---- */
+.rival-row {
+  background: rgba(255,255,255,0.05);
+  border-color: var(--glass-line);
+  color: var(--ink);
+}
+.rival-row .rr-rank { color: var(--ink-3); }
+.rival-row .rr-name { color: var(--ink); }
+.rival-row .rr-worth { color: var(--ink-2); }
+
+/* ---- Dev-Code-Eingabe: sauberer Rahmen statt undefinierter Fallback-Variable ---- */
+.dev-code-row input { border-color: var(--glass-line); background: rgba(255,255,255,0.05); color: var(--ink); }
