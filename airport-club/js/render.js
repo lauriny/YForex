@@ -3122,133 +3122,223 @@ function drawPinAt(px, py, amount, t, seed) {
   ctx.font = `800 12px system-ui, sans-serif`; ctx.fillText(label, px-bw/2+23, py+4);
   ctx.textAlign = 'center';
 }
-
 // ============================================================
-//  Das Boot · Oberdeck (Franchise #2) — eigener Standort, eigene Optik.
-//  Wirtschaft (Geld/Level/Lifetime/Ruf) bleibt dieselbe wie am Airport;
-//  nur Kamera/Szene/Gäste sind ein eigenständiges, kleines Set (Vertical Slice).
+//  Das Boot (Franchise #2) — eigener Standort, eigene Optik.
+//  Wirtschaft (Geld/Level/Lifetime/Ruf) bleibt dieselbe wie am Airport.
+//  Aufbau: EIN durchgehender Schiffsrumpf mit spitzem Bug, darauf drei
+//  Decks als Aufbauten (jedes höhere etwas schmaler). Die Bordwände
+//  verbinden die Decks, die vordere Seite ist aufgeschnitten — dadurch
+//  liest es sich als Schiff und man sieht trotzdem in alle Decks.
 // ============================================================
-// Drei Decks mit gleichem Grundriss, vertikal gestapelt (Cutaway-Querschnitt):
-// alle gleichzeitig auf EINEM Screen sichtbar, kein Scrollen. Der z-Abstand ist so
-// gewählt, dass sich die Decks auf dem Bildschirm nicht überlappen.
-const BOOT_W = 9, BOOT_D = 4.5, BOOT_DZ = 11;
+const BOOT_L = 12, BOOT_W = 5;        // Rumpflänge/-breite in Tiles (Bug bei +x)
+const BOOT_TAPER = 0.78;              // ab diesem Längenanteil läuft der Bug spitz zu
+const BOOT_DZ = 8;                    // Höhenabstand der Decks
 const BOOT_DECKS = [
-  { id: 'boot1', z: BOOT_DZ * 2, name: 'OBERDECK · PARTY',   floor: '#9a7449', wall: '#5d4630', accent: '#ff4fd8' },
-  { id: 'boot2', z: BOOT_DZ,     name: 'MITTELDECK · VIP',   floor: '#6b5a86', wall: '#3d3350', accent: '#ffd93c' },
-  { id: 'boot3', z: 0,           name: 'UNTERDECK · RAVE',   floor: '#39414f', wall: '#242a35', accent: '#4fe0ff' },
+  { id: 'boot1', z: BOOT_DZ * 2, in: 0.8, name: 'OBERDECK · PARTY', floor: '#a8814f', wall: '#eef1f6', accent: '#ff4fd8' },
+  { id: 'boot2', z: BOOT_DZ,     in: 0.4, name: 'MITTELDECK · VIP', floor: '#7a6a94', wall: '#dfe4ec', accent: '#ffd93c' },
+  { id: 'boot3', z: 0,           in: 0,   name: 'UNTERDECK · RAVE', floor: '#414a58', wall: '#1e3a52', accent: '#4fe0ff' },
 ];
 let bootCamOver = { s: 1, ox: 0, oy: 0 };
-const BOOT_ENTRY = { x: 4.5, y: 5.3 };       // Treppen-/Gangway-Podest je Deck (Ein- und Ausstieg)
-const A_BOOT = {                              // Anker = Stations-Id (deck = Index in BOOT_DECKS)
-  hafenbar:       { x: 1.4, y: 1.0, deck: 0 },
-  bierpong:       { x: 4.4, y: 3.1, deck: 0 },
-  sonnendeck:     { x: 7.6, y: 1.5, deck: 0 },
-  kapitaenssuite: { x: 2.0, y: 1.4, deck: 1 },
-  salon:          { x: 6.8, y: 2.3, deck: 1 },
-  maschinenraum:  { x: 2.4, y: 2.2, deck: 2 },
-  kesselbar:      { x: 6.9, y: 1.4, deck: 2 },
-};
-// Möbel-Grundflächen je Deck — Gäste laufen aussen herum statt hindurch
-const BOOT_OBSTACLES = [
-  { deck: 0, x: 0.1, y: 0.5, w: 2.6, d: 1.0 },   // Hafenbar
-  { deck: 0, x: 3.1, y: 2.6, w: 2.6, d: 1.0 },   // Bierpong-Tisch
-  { deck: 0, x: 6.5, y: 1.2, w: 2.3, d: 1.6 },   // Liegen + Schirm
-  { deck: 1, x: 1.0, y: 0.5, w: 2.0, d: 1.7 },   // Kapitänssuite
-  { deck: 1, x: 5.4, y: 1.7, w: 2.8, d: 1.2 },   // Panorama-Salon
-  { deck: 2, x: 1.2, y: 1.3, w: 2.4, d: 1.8 },   // Maschinenraum
-  { deck: 2, x: 5.7, y: 0.95, w: 2.4, d: 0.9 },  // Kesselbar
-];
+
+// Bootsförmiger Grundriss eines Decks (Heck flach, Bug spitz)
+function deckPoly(inset) {
+  const x0 = inset, x1 = BOOT_L - inset * 1.4, y0 = inset, y1 = BOOT_W - inset;
+  const tx = x0 + (x1 - x0) * BOOT_TAPER, cy = (y0 + y1) / 2;
+  return [
+    { x: x0, y: y0 },   // 0 Heck steuerbord (hinten oben)
+    { x: tx, y: y0 },   // 1
+    { x: x1, y: cy },   // 2 Bugspitze
+    { x: tx, y: y1 },   // 3
+    { x: x0, y: y1 },   // 4 Heck backbord
+  ];
+}
 function deckZ(i) { return BOOT_DECKS[i].z; }
-function anchorLift(a) { return deckZ(a.deck) * TILE.z * cam.s; }   // Personen-Hub in Bildschirm-px
+function deckBounds(i) {          // begehbarer Bereich (für Gäste-Begrenzung)
+  const n = BOOT_DECKS[i].in;
+  return { x0: n + 0.5, x1: n + (BOOT_L - n * 1.4 - n) * BOOT_TAPER - 0.4, y0: n + 0.5, y1: BOOT_W - n - 0.5 };
+}
+function deckEntry(i) { const n = BOOT_DECKS[i].in; return { x: n + 1.0, y: BOOT_W - n - 1.0 }; }
+
+const A_BOOT = {                   // Anker = Stations-Id (deck = Index in BOOT_DECKS)
+  hafenbar:       { x: 3.2, y: 1.9, deck: 0 },
+  bierpong:       { x: 6.2, y: 2.9, deck: 0 },
+  sonnendeck:     { x: 8.6, y: 1.9, deck: 0 },
+  kapitaenssuite: { x: 3.0, y: 2.3, deck: 1 },
+  salon:          { x: 7.0, y: 2.5, deck: 1 },
+  maschinenraum:  { x: 3.2, y: 2.5, deck: 2 },
+  kesselbar:      { x: 7.4, y: 2.3, deck: 2 },
+};
+// Möbel-Grundflächen — Gäste laufen aussen herum statt hindurch
+const BOOT_OBSTACLES = [
+  { deck: 0, x: 0.7, y: 0.9, w: 1.3, d: 1.4 },   // Schornstein-Sockel
+  { deck: 0, x: 1.9, y: 1.4, w: 2.6, d: 1.0 },   // Hafenbar
+  { deck: 0, x: 4.9, y: 2.4, w: 2.6, d: 1.0 },   // Bierpong-Tisch
+  { deck: 0, x: 7.5, y: 1.6, w: 2.3, d: 1.6 },   // Liegen + Schirm
+  { deck: 1, x: 2.0, y: 1.4, w: 2.0, d: 1.7 },   // Kapitänssuite
+  { deck: 1, x: 5.6, y: 1.9, w: 2.8, d: 1.2 },   // Panorama-Salon
+  { deck: 2, x: 2.0, y: 1.6, w: 2.4, d: 1.8 },   // Maschinenraum
+  { deck: 2, x: 6.2, y: 1.85, w: 2.4, d: 0.9 },  // Kesselbar
+];
 
 function setupBootCamera() {
-  const m = 0.9, topZ = BOOT_DECKS[0].z + 2.6;
+  const m = 0.8, topZ = BOOT_DECKS[0].z + 4.2;   // + Schornstein/Mast
   const pts = [
-    projRaw(-m, -m, topZ),
-    projRaw(BOOT_W + m, -m, topZ),
-    projRaw(BOOT_W + m, BOOT_D + m + 1.0, 0),
-    projRaw(-m, BOOT_D + m + 1.0, 0),
+    projRaw(-m, -m, topZ), projRaw(BOOT_L + m, -m, topZ),
+    projRaw(BOOT_L + m, BOOT_W + m, -2.4), projRaw(-m, BOOT_W + m, -2.4),
   ];
   bootCamOver = fitTransform(pts, W * 0.03, H * 0.03, 1.0, 0);
 }
 
+// Bordwand-Band zwischen zwei Höhen entlang der abgewandten Kanten (Heck + Steuerbord + Bug).
+// Die zugewandten Kanten bleiben offen → Cutaway-Blick ins Deck.
+function drawHullBand(poly, zLo, zHi, colStern, colSide, portholes) {
+  const seg = (a, b, col) => quad(
+    [iso(a.x, a.y, zHi), iso(b.x, b.y, zHi), iso(b.x, b.y, zLo), iso(a.x, a.y, zLo)],
+    col, 'rgba(0,0,0,0.22)', 1);
+  seg(poly[4], poly[0], colStern);   // Heck
+  seg(poly[0], poly[1], colSide);    // Steuerbord-Längsseite
+  seg(poly[1], poly[2], colSide);    // Bug-Schräge
+  if (portholes) {                    // Bullaugen + Fugenlinie brechen die Wandfläche auf
+    const a = poly[0], b = poly[1], zm = zLo + (zHi - zLo) * 0.45;
+    const l1 = iso(a.x, a.y, zm + 1.1), l2 = iso(b.x, b.y, zm + 1.1);
+    ctx.strokeStyle = 'rgba(0,0,0,0.12)'; ctx.lineWidth = Math.max(1, 1.5 * cam.s);
+    ctx.beginPath(); ctx.moveTo(l1.x, l1.y); ctx.lineTo(l2.x, l2.y); ctx.stroke();
+    for (let i = 1; i <= 5; i++) {
+      const f = i / 6, p = iso(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f, zm);
+      ctx.fillStyle = 'rgba(255,232,164,0.9)';
+      ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(1.6, 2.5 * cam.s), 0, 7); ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 1; ctx.stroke();
+    }
+  }
+}
+
 function drawHarborBg(t) {
   const sky = ctx.createLinearGradient(0, 0, 0, H);
-  sky.addColorStop(0, '#0c2540'); sky.addColorStop(0.5, '#123f57'); sky.addColorStop(1, '#0a1d2c');
+  sky.addColorStop(0, '#0b2036'); sky.addColorStop(0.55, '#123f57'); sky.addColorStop(1, '#0a1d2c');
   ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
   ctx.fillStyle = 'rgba(255,246,214,0.85)';
-  ctx.beginPath(); ctx.arc(W * 0.18, H * 0.1, 15, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(W * 0.17, H * 0.09, 15, 0, 7); ctx.fill();
   ctx.fillStyle = 'rgba(255,255,255,0.45)';
-  for (let i = 0; i < 34; i++) { const sx = (i * 89) % W, sy = (i * 41) % (H * 0.35);
+  for (let i = 0; i < 34; i++) { const sx = (i * 89) % W, sy = (i * 41) % (H * 0.32);
     ctx.globalAlpha = 0.25 + 0.5 * Math.abs(Math.sin(i + t * 0.3)); ctx.fillRect(sx, sy, 1.3, 1.3); }
   ctx.globalAlpha = 1;
-  const horizon = H * 0.5;
-  for (let i = 0; i < 5; i++) {   // ferne Hafenkräne
-    const cx = (i / 5) * W + 40, ch2 = 50 + (i % 3) * 22;
-    ctx.strokeStyle = 'rgba(10,20,30,0.7)'; ctx.lineWidth = 4;
-    ctx.beginPath(); ctx.moveTo(cx, horizon); ctx.lineTo(cx, horizon - ch2); ctx.lineTo(cx + 34, horizon - ch2 * 0.7); ctx.stroke();
+  // Wasserlinie liegt knapp unter dem Unterdeck
+  const wl = iso(BOOT_L * BOOT_TAPER, BOOT_W, -1.4).y;
+  for (let i = 0; i < 5; i++) {   // ferne Hafenkräne am Horizont
+    const cx = (i / 5) * W + 34, ch2 = 46 + (i % 3) * 20;
+    ctx.strokeStyle = 'rgba(10,22,32,0.75)'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(cx, wl); ctx.lineTo(cx, wl - ch2); ctx.lineTo(cx + 30, wl - ch2 * 0.7); ctx.stroke();
   }
-  const water = ctx.createLinearGradient(0, horizon, 0, H);
-  water.addColorStop(0, '#134a5e'); water.addColorStop(1, '#051620');
-  ctx.fillStyle = water; ctx.fillRect(0, horizon, W, H - horizon);
-  ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.lineWidth = 1.5;
-  for (let i = 0; i < 18; i++) {   // Wellen-Schimmer
-    const wy = horizon + 14 + i * ((H - horizon) / 18), drift = Math.sin(t * 0.8 + i * 0.6) * 10;
+  const water = ctx.createLinearGradient(0, wl, 0, H);
+  water.addColorStop(0, '#14536a'); water.addColorStop(1, '#051620');
+  ctx.fillStyle = water; ctx.fillRect(0, wl, W, H - wl);
+  ctx.strokeStyle = 'rgba(255,255,255,0.11)'; ctx.lineWidth = 1.4;
+  for (let i = 0; i < 14; i++) {
+    const wy = wl + 12 + i * ((H - wl) / 14), drift = Math.sin(t * 0.8 + i * 0.6) * 10;
     ctx.beginPath(); ctx.moveTo(drift, wy);
-    for (let x = 0; x <= W; x += 24) ctx.lineTo(x + drift, wy + Math.sin(t * 1.4 + x * 0.04 + i) * 2.5);
+    for (let x = 0; x <= W; x += 26) ctx.lineTo(x + drift, wy + Math.sin(t * 1.4 + x * 0.04 + i) * 2.4);
     ctx.stroke();
   }
-  ctx.fillStyle = 'rgba(255,246,214,0.12)';
-  ctx.beginPath(); ctx.ellipse(W * 0.18, horizon + 40, 30, 70, 0, 0, 7); ctx.fill();
-  // Wasserlinie: das Schiff liegt mit dem Unterdeck im Wasser
-  const pad = 1.3;
-  const p = [iso(-pad, -pad), iso(BOOT_W + pad, -pad), iso(BOOT_W + pad, BOOT_D + pad), iso(-pad, BOOT_D + pad)];
-  ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 26; ctx.shadowOffsetY = 10;
-  quad(p, 'rgba(8,26,36,0.55)'); ctx.restore();
 }
 
-// Rumpf + Boden + Reling eines Decks (flach, keine Tiefensortierung nötig)
+// Rumpf unter dem untersten Deck + Wasserlinie
+function drawHullBase(t) {
+  const p = deckPoly(0);
+  drawHullBand(p, -2.4, 0, '#12293c', '#1e3a52', false);
+  quad([iso(p[2].x, p[2].y, -2.4), iso(p[3].x, p[3].y, -2.4), iso(p[4].x, p[4].y, -2.4), iso(p[0].x, p[0].y, -2.4)], '#0d1f2e');
+  // Schaumsaum an der Wasserlinie
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  ctx.strokeStyle = 'rgba(180,230,255,0.3)'; ctx.lineWidth = Math.max(1.5, 2.5 * cam.s);
+  const a = iso(p[2].x, p[2].y, -1.5), b = iso(p[3].x, p[3].y, -1.5), c = iso(p[4].x, p[4].y, -1.5);
+  ctx.beginPath(); ctx.moveTo(a.x, a.y + Math.sin(t * 2) * 1.5);
+  ctx.lineTo(b.x, b.y + Math.sin(t * 2 + 1) * 1.5); ctx.lineTo(c.x, c.y + Math.sin(t * 2 + 2) * 1.5); ctx.stroke();
+  ctx.restore();
+}
+
+// Rumpf/Aufbau-Band + Boden + Reling eines Decks
 function drawDeckShell(di, t) {
-  const D = BOOT_DECKS[di], z = D.z;
-  isoBoxAt(0, 0, BOOT_W, BOOT_D, 0.55, z - 0.55, D.floor, '#243039', '#1a232b', 'rgba(0,0,0,0.35)');
-  ctx.strokeStyle = 'rgba(0,0,0,0.16)'; ctx.lineWidth = 1;                    // Deckplanken
-  for (let i = 1; i < BOOT_W; i++) { const a = iso(i, 0, z), b = iso(i, BOOT_D, z);
-    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); }
-  // Reling an den drei offenen Kanten
-  ctx.strokeStyle = di === 0 ? '#eef3f5' : 'rgba(238,243,245,0.45)'; ctx.lineWidth = 2.2;
-  for (const [x1, y1, x2, y2] of [[0, 0, BOOT_W, 0], [BOOT_W, 0, BOOT_W, BOOT_D], [0, BOOT_D, 0, 0]]) {
-    const a = iso(x1, y1, z + 0.62), b = iso(x2, y2, z + 0.62);
-    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  const D = BOOT_DECKS[di], z = D.z, poly = deckPoly(D.in);
+  const zLo = di === BOOT_DECKS.length - 1 ? -2.4 : BOOT_DECKS[di + 1].z;
+  if (di < BOOT_DECKS.length - 1) drawHullBand(poly, BOOT_DECKS[di + 1].z, z, D.wall, D.wall, true);
+  // Deckboden
+  quad(poly.map(p => iso(p.x, p.y, z)), D.floor, 'rgba(0,0,0,0.25)', 1);
+  ctx.strokeStyle = 'rgba(0,0,0,0.13)'; ctx.lineWidth = 1;      // Deckplanken
+  const b = deckBounds(di);
+  for (let x = Math.ceil(b.x0); x < b.x1 + 1.5; x++) {
+    const p1 = iso(x, poly[0].y, z), p2 = iso(x, poly[4].y, z);
+    ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
   }
-  // Treppen-Podest vorne (verbindet die Decks optisch)
-  isoBoxAt(BOOT_ENTRY.x - 0.8, BOOT_D - 0.15, 1.6, 0.9, 0.25, z, '#c9b08a', '#7a6248', '#5e4c38', 'rgba(0,0,0,0.25)');
-  if (di > 0) {   // durchgehende Treppe hoch zum darüberliegenden Deck (Wange + Stufen)
-    const steps = 9, stepH = (BOOT_DZ - 0.55) / steps, sx = BOOT_W - 1.5, sy = BOOT_D - 1.0;
-    const a = iso(sx + 0.5, sy + 0.3, z), b = iso(sx + 0.5, sy + 0.3, z + BOOT_DZ - 0.55);
-    ctx.strokeStyle = '#5e4c38'; ctx.lineWidth = Math.max(2, 7 * cam.s);
-    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  // Reling an den offenen (zugewandten) Kanten
+  ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = Math.max(1.4, 2 * cam.s);
+  for (const [i, j] of [[2, 3], [3, 4]]) {
+    const p1 = iso(poly[i].x, poly[i].y, z + 0.62), p2 = iso(poly[j].x, poly[j].y, z + 0.62);
+    ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
+  }
+  // Treppe zum Deck darüber (am Heck, innen)
+  if (di > 0) {
+    const e = deckEntry(di), steps = 8, sh = (z - BOOT_DECKS[di - 1].z) / steps;
     for (let s = 0; s < steps; s++)
-      isoBoxAt(sx, sy, 1.0, 0.6, 0.14, z + 0.2 + s * stepH, '#c9b08a', '#7a6248', '#5e4c38', null);
+      isoBoxAt(e.x - 0.5, e.y - 0.35, 0.9, 0.55, 0.13, z + 0.1 - s * sh, '#d8c39c', '#8a6a45', '#6b5236', null);
   }
-  // Deck-Beschriftung mittig UNTER der vorderen Deckkante (in der Lücke zum Deck darunter)
-  const lp = iso(BOOT_W / 2, BOOT_D, z - 1.3);
-  ctx.save(); ctx.textAlign = 'center'; ctx.font = `800 ${Math.max(8, 9.5 * cam.s)}px system-ui, sans-serif`;
-  ctx.fillStyle = D.accent; ctx.shadowColor = 'rgba(0,0,0,0.9)'; ctx.shadowBlur = 5;
-  ctx.fillText(D.name, lp.x, lp.y); ctx.restore();
+  // Rettungsboote an der Bordwand — typisches Schiffsdetail, bricht die weiße Fläche auf
+  if (di < BOOT_DECKS.length - 1) {
+    const a = poly[0], b = poly[1], zb = BOOT_DECKS[di + 1].z + (z - BOOT_DECKS[di + 1].z) * 0.78;
+    for (const f of [0.3, 0.62]) {
+      const p = iso(a.x + (b.x - a.x) * f, a.y, zb);
+      const bw = 13 * cam.s, bh = 5 * cam.s;
+      ctx.fillStyle = '#ff9f43';
+      ctx.beginPath(); ctx.ellipse(p.x, p.y, bw, bh, 0, Math.PI, 0, true); ctx.fill();
+      ctx.fillStyle = 'rgba(0,0,0,0.25)';
+      ctx.fillRect(p.x - bw, p.y - bh * 0.25, bw * 2, bh * 0.3);
+    }
+  }
 }
 
-// Bierpong: Tisch mit Becher-Pyramiden, vier Spielern und fliegendem Ball
+// Deck-Beschriftungen ganz zum Schluss, damit kein Aufbau sie überdeckt
+function drawDeckLabels() {
+  for (let di = 0; di < BOOT_DECKS.length; di++) {
+    const D = BOOT_DECKS[di], poly = deckPoly(D.in);
+    const zLo = di === BOOT_DECKS.length - 1 ? -2.4 : BOOT_DECKS[di + 1].z;
+    const lp = iso((poly[0].x + poly[1].x) / 2, poly[0].y, zLo + (D.z - zLo) * 0.34);
+    ctx.save(); ctx.textAlign = 'center'; ctx.font = `800 ${Math.max(7.5, 8.5 * cam.s)}px system-ui, sans-serif`;
+    ctx.fillStyle = D.accent; ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 3;
+    ctx.fillText(D.name, lp.x, lp.y); ctx.restore();
+  }
+}
+
+// Schornstein, Mast & Flagge auf dem Oberdeck — macht die Silhouette zum Schiff
+function drawShipTop(t, beat) {
+  const D = BOOT_DECKS[0], z = D.z;
+  isoBoxAt(0.8, 1.0, 1.2, 1.2, 2.5, z, '#e8412f', '#b52d20', '#8f2317', 'rgba(0,0,0,0.3)');
+  isoBoxAt(0.8, 1.0, 1.2, 1.2, 0.4, z + 2.5, '#1e2733', '#141c24', '#0e141a', null);
+  ctx.save(); ctx.globalAlpha = 0.3;                       // Rauch
+  for (let i = 0; i < 4; i++) {
+    const f = ((t * 0.35 + i * 0.25) % 1);
+    const p = iso(1.4 + f * 1.1, 1.6 - f * 0.45, z + 3.0 + f * 3.0);
+    ctx.fillStyle = '#dfe6ee';
+    ctx.beginPath(); ctx.arc(p.x, p.y, (4 + f * 11) * cam.s, 0, 7); ctx.fill();
+  }
+  ctx.restore();
+  const mb = iso(10.2, 2.5, z), mt = iso(10.2, 2.5, z + 3.6);   // Mast am Bug
+  ctx.strokeStyle = '#cfd6de'; ctx.lineWidth = Math.max(1.5, 2.2 * cam.s);
+  ctx.beginPath(); ctx.moveTo(mb.x, mb.y); ctx.lineTo(mt.x, mt.y); ctx.stroke();
+  ctx.fillStyle = '#ff4f6d';                                  // Flagge
+  ctx.beginPath(); ctx.moveTo(mt.x, mt.y);
+  ctx.lineTo(mt.x + 17 * cam.s, mt.y + (4 + Math.sin(t * 3) * 2) * cam.s);
+  ctx.lineTo(mt.x, mt.y + 11 * cam.s); ctx.closePath(); ctx.fill();
+}
+
+// Bierpong: Tisch mit Becher-Pyramiden, fliegendem Ball und vier Spielern
 let pongBall = { t: 0, dir: 1 };
 function drawBierpong(t, beat, drawables) {
-  const a = A_BOOT.bierpong, z = deckZ(a.deck), lift = anchorLift(a);
+  const a = A_BOOT.bierpong, z = deckZ(a.deck), lift = deckZ(a.deck) * TILE.z * cam.s;
   const cups = [[0, 0], [0.34, -0.2], [0.34, 0.2], [0.68, -0.4], [0.68, 0], [0.68, 0.4]];
   drawables.push({ d: a.x + a.y, fn: () => {
-    isoBoxAt(a.x - 1.3, a.y - 0.5, 2.6, 1.0, 0.55, z, '#efe9dc', '#2f6ea8', '#245685', 'rgba(0,0,0,0.28)');
-    const mid = iso(a.x, a.y - 0.5, z + 0.55), mid2 = iso(a.x, a.y + 0.5, z + 0.55);
+    isoBoxAt(a.x - 1.3, a.y - 0.5, 2.6, 1.0, 0.55, z, '#f2efe6', '#2f6ea8', '#245685', 'rgba(0,0,0,0.28)');
+    const m1 = iso(a.x, a.y - 0.5, z + 0.55), m2 = iso(a.x, a.y + 0.5, z + 0.55);
     ctx.strokeStyle = 'rgba(47,110,168,0.5)'; ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.moveTo(mid.x, mid.y); ctx.lineTo(mid2.x, mid2.y); ctx.stroke();
-    // Becher an beiden Tischenden
-    const cupR = Math.max(2, 3.4 * cam.s);
+    ctx.beginPath(); ctx.moveTo(m1.x, m1.y); ctx.lineTo(m2.x, m2.y); ctx.stroke();
+    const cupR = Math.max(2, 3.2 * cam.s);
     for (const side of [-1, 1]) for (const [cx, cy] of cups) {
       const p = iso(a.x + side * (0.95 - cx), a.y + cy, z + 0.55);
       ctx.fillStyle = '#b4232f';
@@ -3259,20 +3349,16 @@ function drawBierpong(t, beat, drawables) {
       ctx.fillStyle = '#f6d67a';
       ctx.beginPath(); ctx.ellipse(p.x, p.y - cupR * 1.35, cupR * 0.7, cupR * 0.3, 0, 0, 7); ctx.fill();
     }
-    // Ball fliegt im Bogen von einer Seite zur anderen
-    const bt = pongBall.t;
-    if (bt < 1) {
-      const bx = a.x + pongBall.dir * (1.05 - 2.1 * bt);
-      const p = iso(bx, a.y, z + 0.55);
-      const arc = Math.sin(bt * Math.PI) * 26 * cam.s;
+    if (pongBall.t < 1) {
+      const bx = a.x + pongBall.dir * (1.05 - 2.1 * pongBall.t);
+      const p = iso(bx, a.y, z + 0.55), arc = Math.sin(pongBall.t * Math.PI) * 24 * cam.s;
       ctx.fillStyle = '#fffdf0';
-      ctx.beginPath(); ctx.arc(p.x, p.y - cupR * 1.5 - arc, Math.max(1.6, 2.6 * cam.s), 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(p.x, p.y - cupR * 1.5 - arc, Math.max(1.6, 2.5 * cam.s), 0, 7); ctx.fill();
     }
   } });
-  // Vier Spieler rund um den Tisch (zwei je Seite), mit leichtem Wippen
   const spots = [
-    { x: a.x - 1.7, y: a.y - 0.35, c: '#4fd7f7', f: false }, { x: a.x - 1.7, y: a.y + 0.45, c: '#ff8fab', f: true },
-    { x: a.x + 1.7, y: a.y - 0.35, c: '#95e04a', f: true },  { x: a.x + 1.7, y: a.y + 0.45, c: '#f7b32b', f: false },
+    { x: a.x - 1.75, y: a.y - 0.35, c: '#4fd7f7', f: false }, { x: a.x - 1.75, y: a.y + 0.45, c: '#ff8fab', f: true },
+    { x: a.x + 1.75, y: a.y - 0.35, c: '#95e04a', f: true },  { x: a.x + 1.75, y: a.y + 0.45, c: '#f7b32b', f: false },
   ];
   spots.forEach((s, i) => drawables.push({ d: s.x + s.y, fn: () => drawPerson(s.x, s.y, {
     color: s.c, skin: SKIN[i % SKIN.length], hair: HAIR[(i * 2) % HAIR.length], female: s.f,
@@ -3281,22 +3367,20 @@ function drawBierpong(t, beat, drawables) {
 }
 
 function drawBootDeck(di, t, beat, drawables) {
-  const z = deckZ(di), D = BOOT_DECKS[di];
+  const z = deckZ(di);
   drawDeckShell(di, t);
   const push = (a, fn) => drawables.push({ d: a.x + a.y, fn });
 
-  if (di === 0) {   // ---- Oberdeck: Party ----
-    // kleine Tanzfläche mit pulsierenden Neon-Kacheln (hinten Mitte, hinter dem Bierpong)
-    for (let i = 0; i < 4; i++) for (let j = 0; j < 2; j++) {
-      const px = 3.1 + i * 0.62, py = 0.35 + j * 0.62;
-      const p = [iso(px, py, z + 0.02), iso(px + 0.58, py, z + 0.02), iso(px + 0.58, py + 0.58, z + 0.02), iso(px, py + 0.58, z + 0.02)];
-      const hue = ((i + j) * 55 + t * 90) % 360;
-      quad(p, `hsl(${hue | 0},78%,${(46 + 16 * Math.sin(beat + i + j)) | 0}%)`);
+  if (di === 0) {                       // ---- Oberdeck: Party ----
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 2; j++) {     // Neon-Tanzfläche
+      const px = 5.0 + i * 0.58, py = 1.2 + j * 0.58;
+      const p = [iso(px, py, z + 0.02), iso(px + 0.56, py, z + 0.02), iso(px + 0.56, py + 0.56, z + 0.02), iso(px, py + 0.56, z + 0.02)];
+      quad(p, `hsl(${(((i + j) * 55 + t * 90) % 360) | 0},78%,${(46 + 16 * Math.sin(beat + i + j)) | 0}%)`);
     }
     const hb = A_BOOT.hafenbar;
     push(hb, () => {
-      isoBoxAt(hb.x - 1.3, hb.y - 0.5, 2.6, 1.0, 0.95, z, '#efe9dc', '#0e5e73', '#0a4a5c', 'rgba(0,0,0,0.28)');
-      for (let i = 0; i < 4; i++) {   // Flaschenregal
+      isoBoxAt(hb.x - 1.3, hb.y - 0.5, 2.6, 1.0, 0.95, z, '#f2efe6', '#0e5e73', '#0a4a5c', 'rgba(0,0,0,0.28)');
+      for (let i = 0; i < 4; i++) {
         const p = iso(hb.x - 0.9 + i * 0.6, hb.y - 0.4, z + 1.05);
         ctx.fillStyle = ['#8ef5c0', '#ffd93c', '#ff8fab', '#4fd7f7'][i];
         ctx.fillRect(p.x - 2 * cam.s, p.y - 9 * cam.s, 4 * cam.s, 9 * cam.s);
@@ -3307,34 +3391,34 @@ function drawBootDeck(di, t, beat, drawables) {
     push(sd, () => {
       isoBoxAt(sd.x - 1.1, sd.y - 0.3, 0.8, 1.6, 0.35, z, '#f2d9a0', '#c9a464', '#a9884f', 'rgba(0,0,0,0.2)');
       isoBoxAt(sd.x + 0.4, sd.y - 0.3, 0.8, 1.6, 0.35, z, '#f2d9a0', '#c9a464', '#a9884f', 'rgba(0,0,0,0.2)');
-      // Sonnenschirm: Mast + gestreiftes Schirmdach
       const base = iso(sd.x + 0.4, sd.y + 0.55, z), u = iso(sd.x + 0.4, sd.y + 0.55, z + 2.0);
       ctx.strokeStyle = '#a9884f'; ctx.lineWidth = Math.max(1.5, 2 * cam.s);
       ctx.beginPath(); ctx.moveTo(base.x, base.y); ctx.lineTo(u.x, u.y); ctx.stroke();
-      const rw = 15 * cam.s, rh = 5.5 * cam.s;
+      const rw = 14 * cam.s, rh = 5 * cam.s;
       for (let s = 0; s < 6; s++) {
         const a0 = s * Math.PI / 3, a1 = a0 + Math.PI / 3;
         ctx.fillStyle = s % 2 ? '#ff5e6c' : '#fff1e6';
         ctx.beginPath(); ctx.moveTo(u.x, u.y - 4 * cam.s);
         ctx.lineTo(u.x + Math.cos(a0) * rw, u.y + Math.sin(a0) * rh);
-        ctx.lineTo(u.x + Math.cos(a1) * rw, u.y + Math.sin(a1) * rh);
-        ctx.closePath(); ctx.fill();
+        ctx.lineTo(u.x + Math.cos(a1) * rw, u.y + Math.sin(a1) * rh); ctx.closePath(); ctx.fill();
       }
     });
-    // Lichterkette über dem Deck
-    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';        // Lichterkette
+    const pl = deckPoly(BOOT_DECKS[0].in);
     for (let i = 0; i <= 12; i++) {
-      const p = iso(i * (BOOT_W / 12), 0.15, z + 2.3 - Math.sin(i / 12 * Math.PI) * 0.5);
+      const f = i / 12, p = iso(pl[0].x + (pl[1].x - pl[0].x) * f, pl[0].y, z + 2.5 - Math.sin(f * Math.PI) * 0.45);
       ctx.fillStyle = `hsl(${(i * 30 + t * 60) % 360},90%,62%)`;
-      ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(1.4, 2.4 * cam.s), 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(1.4, 2.2 * cam.s), 0, 7); ctx.fill();
     }
     ctx.restore();
-  } else if (di === 1) {   // ---- Mitteldeck: VIP ----
+  } else if (di === 1) {                // ---- Mitteldeck: VIP ----
+    const rp = [iso(4.0, 1.6, z + 0.02), iso(5.4, 1.6, z + 0.02), iso(5.4, 5.0, z + 0.02), iso(4.0, 5.0, z + 0.02)];
+    quad(rp, 'rgba(212,175,90,0.35)', 'rgba(255,217,60,0.3)', 1);
     const ks = A_BOOT.kapitaenssuite;
     push(ks, () => {
-      isoBoxAt(ks.x - 1.0, ks.y - 0.9, 2.0, 1.7, 1.4, z, '#f4f1e8', '#1b2c3a', '#13212c', 'rgba(0,0,0,0.3)');
-      const wheelP = iso(ks.x, ks.y + 0.85, z + 0.75);
-      ctx.save(); ctx.translate(wheelP.x, wheelP.y); ctx.rotate(t * 0.15);
+      isoBoxAt(ks.x - 1.0, ks.y - 0.9, 2.0, 1.7, 1.4, z, '#f7f5ee', '#1b2c3a', '#13212c', 'rgba(0,0,0,0.3)');
+      const wp = iso(ks.x, ks.y + 0.85, z + 0.75);
+      ctx.save(); ctx.translate(wp.x, wp.y); ctx.rotate(t * 0.15);
       ctx.strokeStyle = '#d9c08a'; ctx.lineWidth = 2.5;
       ctx.beginPath(); ctx.arc(0, 0, 9 * cam.s, 0, 7); ctx.stroke();
       for (let i = 0; i < 6; i++) { const ang = i * Math.PI / 3;
@@ -3346,22 +3430,19 @@ function drawBootDeck(di, t, beat, drawables) {
     push(sa, () => {
       isoBoxAt(sa.x - 1.4, sa.y - 0.6, 2.8, 1.2, 0.45, z, '#d9c08a', '#8a6a45', '#6b5236', 'rgba(0,0,0,0.25)');
       isoBoxAt(sa.x - 1.4, sa.y - 0.6, 2.8, 0.35, 0.95, z, '#c9a464', '#8a6a45', '#6b5236', 'rgba(0,0,0,0.25)');
-      const g = iso(sa.x, sa.y + 0.1, z + 0.55);   // Champagnerkühler
+      const g = iso(sa.x, sa.y + 0.1, z + 0.55);
       ctx.fillStyle = '#e8e4d8'; ctx.beginPath(); ctx.ellipse(g.x, g.y - 5 * cam.s, 6 * cam.s, 3 * cam.s, 0, 0, 7); ctx.fill();
       ctx.fillStyle = '#2b4a2f'; ctx.fillRect(g.x - 1.5 * cam.s, g.y - 15 * cam.s, 3 * cam.s, 10 * cam.s);
     });
-    // goldener Teppichläufer vom Treppenpodest zur Suite
-    const rp = [iso(3.7, 1.2, z + 0.02), iso(5.3, 1.2, z + 0.02), iso(5.3, BOOT_D - 0.2, z + 0.02), iso(3.7, BOOT_D - 0.2, z + 0.02)];
-    quad(rp, 'rgba(212,175,90,0.4)', 'rgba(255,217,60,0.35)', 1);
-  } else {   // ---- Unterdeck: Maschinenraum-Rave ----
+  } else {                              // ---- Unterdeck: Maschinenraum-Rave ----
     const mr = A_BOOT.maschinenraum;
     push(mr, () => {
-      isoBoxAt(mr.x - 1.2, mr.y - 0.9, 2.4, 1.8, 1.6, z, '#4a5262', '#2b323d', '#1f242d', 'rgba(0,0,0,0.35)');
-      for (let i = 0; i < 3; i++) {   // pumpende Kolben
+      isoBoxAt(mr.x - 1.2, mr.y - 0.9, 2.4, 1.8, 1.6, z, '#525b6b', '#2b323d', '#1f242d', 'rgba(0,0,0,0.35)');
+      for (let i = 0; i < 3; i++) {
         const ph = 0.35 + 0.3 * Math.abs(Math.sin(beat * 0.9 + i * 1.2));
         isoBoxAt(mr.x - 0.85 + i * 0.8, mr.y - 0.45, 0.45, 0.45, ph, z + 1.6, '#8d97a8', '#57606e', '#434b56', null);
       }
-      const gl = iso(mr.x, mr.y + 0.7, z + 0.5);   // glühende Ofenklappe
+      const gl = iso(mr.x, mr.y + 0.7, z + 0.5);
       ctx.save(); ctx.globalCompositeOperation = 'lighter';
       const rg = ctx.createRadialGradient(gl.x, gl.y, 1, gl.x, gl.y, 22 * cam.s);
       rg.addColorStop(0, `rgba(255,140,40,${0.5 + 0.3 * Math.sin(beat * 2)})`); rg.addColorStop(1, 'rgba(255,140,40,0)');
@@ -3370,16 +3451,15 @@ function drawBootDeck(di, t, beat, drawables) {
     const kb = A_BOOT.kesselbar;
     push(kb, () => {
       isoBoxAt(kb.x - 1.2, kb.y - 0.45, 2.4, 0.9, 0.9, z, '#6b4a2f', '#3a2a1c', '#2a1e14', 'rgba(0,0,0,0.3)');
-      const p = iso(kb.x + 1.35, kb.y, z);   // Kessel daneben
+      const p = iso(kb.x + 1.35, kb.y, z);
       ctx.fillStyle = '#5a6270';
       ctx.beginPath(); ctx.ellipse(p.x, p.y - 16 * cam.s, 11 * cam.s, 18 * cam.s, 0, 0, 7); ctx.fill();
       ctx.fillStyle = 'rgba(255,120,40,0.7)';
       ctx.beginPath(); ctx.arc(p.x, p.y - 16 * cam.s, 4 * cam.s, 0, 7); ctx.fill();
     });
-    // Strobo-Blitze im Takt
-    if (Math.sin(beat * 3) > 0.86) {
-      const fp = [iso(0, 0, z + 0.02), iso(BOOT_W, 0, z + 0.02), iso(BOOT_W, BOOT_D, z + 0.02), iso(0, BOOT_D, z + 0.02)];
-      quad(fp, 'rgba(180,230,255,0.14)');
+    if (Math.sin(beat * 3) > 0.86) {    // Strobo im Takt
+      const pl = deckPoly(0);
+      quad(pl.map(p => iso(p.x, p.y, z + 0.02)), 'rgba(180,230,255,0.13)');
     }
   }
 }
@@ -3397,17 +3477,15 @@ function drawBootCashPins(t) {
 }
 
 // ---- Boot-Gäste: leichte 3-Zustands-Simulation je Deck (Treppe → Station → weg) ----
-// Bewusst simpler als der Airport-Aktivitätsgraph: jeder Gast gehört zu genau einem
-// Deck und läuft dort zwischen Treppenpodest und „seiner" Station.
 let bootGuests = [];
 function bootStations() { return Object.keys(A_BOOT).filter(id => (state.stations[id] || 0) > 0); }
 function bootTargetCount() { return Math.min(16, bootStations().length * 2 + Math.floor(state.level / 12)); }
 function spawnBootGuest() {
   const open = bootStations();
   if (!open.length) return;
-  const stId = pick(open), a = A_BOOT[stId];
+  const stId = pick(open), a = A_BOOT[stId], e = deckEntry(a.deck);
   bootGuests.push({
-    x: BOOT_ENTRY.x + rnd(-0.4, 0.4), y: BOOT_ENTRY.y, tx: a.x + rnd(-0.35, 0.35), ty: a.y + rnd(0.5, 0.9),
+    x: e.x + rnd(-0.3, 0.3), y: e.y, tx: a.x + rnd(-0.35, 0.35), ty: a.y + rnd(0.6, 0.95),
     station: stId, deck: a.deck,
     mode: 'walk', actT: rnd(6, 12), speed: rnd(1.5, 2.1), leaving: false,
     color: pick(GUEST_COLORS), skin: pick(SKIN), hair: pick(HAIR), female: Math.random() < 0.5,
@@ -3415,7 +3493,7 @@ function spawnBootGuest() {
   });
 }
 function updateBootGuests(dt, beat) {
-  pongBall.t += dt * 1.1;                                  // Bierpong-Ball fliegt hin und her
+  pongBall.t += dt * 1.1;
   if (pongBall.t > 1.8) { pongBall.t = 0; pongBall.dir *= -1; }
   const want = bootTargetCount();
   if (bootGuests.length < want && Math.random() < dt * 0.8) spawnBootGuest();
@@ -3430,14 +3508,16 @@ function updateBootGuests(dt, beat) {
       g.actT -= dt;
       if (g.actT <= 0) {
         depositAtStation(g.station);
+        const e = deckEntry(g.deck);
         g.mode = 'walk'; g.leaving = true;
-        g.tx = BOOT_ENTRY.x + rnd(-0.5, 0.5); g.ty = BOOT_ENTRY.y + rnd(0, 0.5);
+        g.tx = e.x + rnd(-0.4, 0.4); g.ty = e.y + rnd(-0.2, 0.3);
       }
     }
     if (g.mode === 'gone') { bootGuests.splice(i, 1); continue; }
     for (const o of BOOT_OBSTACLES) if (o.deck === g.deck) pushOutOfRect(g, o.x, o.y, o.w, o.d, 0.3);
-    g.x = Math.max(0.25, Math.min(BOOT_W - 0.25, g.x));    // nicht über die Reling laufen
-    g.y = Math.max(0.25, Math.min(BOOT_D + 0.6, g.y));
+    const b = deckBounds(g.deck);                       // nicht über die Reling laufen
+    g.x = Math.max(b.x0, Math.min(b.x1, g.x));
+    g.y = Math.max(b.y0, Math.min(b.y1, g.y));
   }
 }
 function handleBootTap(mx, my, e) {
@@ -3453,7 +3533,6 @@ function handleBootTap(mx, my, e) {
     }
   }
 }
-
 // ---------------- Frame ----------------
 let lastFrame = 0;
 let incomeCache = 0, incomeTimer = 0;
@@ -3497,15 +3576,16 @@ export function renderFrame(now) {
   // Beschaffungs-Run: eigener Vollbild-View (überlagert den Club)
   if (runView) { rgUpdate(dt); if (runView) { rgDraw(t); return; } }
 
-  // Das Boot: eigene Zeichnen-Kette (3 gestapelte Decks) statt der Airport-Räume
+  // Das Boot: eigene Zeichnen-Kette (ein Rumpf, drei aufgesetzte Decks)
   if (state.location === 'boot') {
     updateBootGuests(dt, beat);
     updateParticles(dt);
     incomeTimer += dt; if (incomeTimer > 0.25) { incomeTimer = 0; incomeCache = incomePerSec(); }
     drawHarborBg(t);
-    // Deck für Deck von oben nach unten — innerhalb eines Decks tiefensortiert,
-    // damit Gäste korrekt vor/hinter den Möbeln stehen.
-    for (let di = 0; di < BOOT_DECKS.length; di++) {
+    drawHullBase(t);
+    // Von unten nach oben: höhere Decks liegen näher an der Kamera und
+    // überdecken die Bordwand darunter — dadurch wirkt es als ein Körper.
+    for (let di = BOOT_DECKS.length - 1; di >= 0; di--) {
       const deckDrawables = [];
       drawBootDeck(di, t, beat, deckDrawables);
       for (const g of bootGuests) {
@@ -3519,6 +3599,8 @@ export function renderFrame(now) {
       deckDrawables.sort((a, b) => a.d - b.d);
       for (const it of deckDrawables) it.fn();
     }
+    drawShipTop(t, beat);
+    drawDeckLabels();
     drawBootCashPins(t);
     for (const p of particles) {
       ctx.globalAlpha = Math.max(0, Math.min(1, p.life));
