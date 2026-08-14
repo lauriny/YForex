@@ -1059,19 +1059,32 @@ function actDuration(act) {
 }
 
 // Gast aus Möbel-Hindernissen herausdrücken → er gleitet aussen herum statt durch
+// Gast aus EINEM Rechteck herausschieben (kleinste Überlappung = an der Kante entlanggleiten)
+function pushOutOfRect(g, ox, oy, ow, od, rad = 0.28) {
+  const minX = ox - rad, maxX = ox + ow + rad, minY = oy - rad, maxY = oy + od + rad;
+  if (g.x <= minX || g.x >= maxX || g.y <= minY || g.y >= maxY) return;
+  const dL = g.x - minX, dR = maxX - g.x, dT = g.y - minY, dB = maxY - g.y;
+  const m = Math.min(dL, dR, dT, dB);
+  if (m === dL) g.x = minX; else if (m === dR) g.x = maxX;
+  else if (m === dT) g.y = minY; else g.y = maxY;
+}
 function avoidObstacles(g) {
-  const rad = 0.28, gr = t1Grow();
+  const gr = t1Grow();
   for (const o of OBSTACLES) {
     let ox = o.x, oy = o.y;
     if (o.grow === 'shots') ox += gr.dw; else if (o.grow === 'ward') { ox += gr.dw; oy += gr.dd; } else if (o.grow === 'dj') ox += gr.dw * 0.5;
-    const minX = ox - rad, maxX = ox + o.w + rad, minY = oy - rad, maxY = oy + o.d + rad;
-    if (g.x <= minX || g.x >= maxX || g.y <= minY || g.y >= maxY) continue;
-    // kleinste Überlappung finden und in diese Richtung herausschieben (an der Kante entlanggleiten)
-    const dL = g.x - minX, dR = maxX - g.x, dT = g.y - minY, dB = maxY - g.y;
-    const m = Math.min(dL, dR, dT, dB);
-    if (m === dL) g.x = minX; else if (m === dR) g.x = maxX;
-    else if (m === dT) g.y = minY; else g.y = maxY;
+    pushOutOfRect(g, ox, oy, o.w, o.d);
   }
+}
+// Bühne des Show-Acts — steht je nach Zuweisung in einem anderen Raum, ist also
+// kein statisches OBSTACLE. Niemand hat sie als Ziel, darum dürfen auch LAUFENDE
+// Gäste hier herausgedrückt werden (sonst laufen sie mitten durch die Bühne).
+const PERF_CENTERS = { t1: { x: 6.2, y: 8.6 }, t2: { x: 15.5, y: 5.5 }, roof: { x: 13.5, y: 15.2 } };
+function performerStageRect() {
+  if (!state.performer.unlocked) return null;
+  const c = PERF_CENTERS[state.performer.room];
+  if (!c || !roomUnlocked(state.performer.room)) return null;
+  return { x: c.x - 0.8, y: c.y - 0.8, w: 1.6, d: 1.6 };
 }
 
 // Gäste, die zu dicht stehen, sanft auseinanderdrücken (kein Stapeln/Schlange an Ständen)
@@ -1088,6 +1101,8 @@ function separateGuests() {
     }
   }
   for (const g of guests) if (g.mode === 'act') avoidObstacles(g);   // stehende Gäste von Möbeln fernhalten
+  const ps = performerStageRect();                                    // Bühne gilt auch für laufende Gäste
+  if (ps) for (const g of guests) pushOutOfRect(g, ps.x, ps.y, ps.w, ps.d, 0.34);
 }
 
 // Security/Türsteher: manchmal dreht ein (betrunkener) Gast durch → Türsteher eskortiert ihn raus
@@ -1197,12 +1212,16 @@ function quad(p, fill, stroke, lw = 1) {
 }
 
 // Iso-Quader mit 3 Sichtflächen (Deckel, Front = +y, rechts = +x)
-function isoBox(x, y, w, d, h, top, front, side, stroke) {
-  const A0 = iso(x, y, h), B0 = iso(x + w, y, h), C0 = iso(x + w, y + d, h), D0 = iso(x, y + d, h);
-  const Cf = iso(x + w, y + d, 0), Df = iso(x, y + d, 0), Bf = iso(x + w, y, 0);
+// Box, die auf einer beliebigen Höhe `base` steht (für die gestapelten Boot-Decks)
+function isoBoxAt(x, y, w, d, h, base, top, front, side, stroke) {
+  const A0 = iso(x, y, base + h), B0 = iso(x + w, y, base + h), C0 = iso(x + w, y + d, base + h), D0 = iso(x, y + d, base + h);
+  const Cf = iso(x + w, y + d, base), Df = iso(x, y + d, base), Bf = iso(x + w, y, base);
   quad([D0, C0, Cf, Df], front, stroke, 1);          // Frontfläche (+y)
   quad([B0, C0, Cf, Bf], side, stroke, 1);           // rechte Fläche (+x)
   quad([A0, B0, C0, D0], top, stroke, 1);            // Deckel
+}
+function isoBox(x, y, w, d, h, top, front, side, stroke) {
+  isoBoxAt(x, y, w, d, h, 0, top, front, side, stroke);
 }
 
 // gefüllter Boden eines Rechtecks (z=0)
@@ -1669,8 +1688,7 @@ function drawRoof(t, beat, drawables) {
 function drawPerformer(t, beat, drawables) {
   if (!state.performer.unlocked) return;
   const room = state.performer.room;
-  const centers = { t1: { x: 6.2, y: 8.6 }, t2: { x: 15.5, y: 5.5 }, roof: { x: 13.5, y: 15.2 } };
-  const c = centers[room] || centers.t1;
+  const c = PERF_CENTERS[room] || PERF_CENTERS.t1;
   if (!roomUnlocked(room)) return;
   // Bühne
   isoBox(c.x - 0.8, c.y - 0.8, 1.6, 1.6, 0.3, '#ff5e8a', '#c73d68', '#a32e52');
@@ -3110,24 +3128,48 @@ function drawPinAt(px, py, amount, t, seed) {
 //  Wirtschaft (Geld/Level/Lifetime/Ruf) bleibt dieselbe wie am Airport;
 //  nur Kamera/Szene/Gäste sind ein eigenständiges, kleines Set (Vertical Slice).
 // ============================================================
-const RM_BOOT = { boot1: { x: 0, y: 0, w: 11, d: 9, name: 'OBERDECK' } };
+// Drei Decks mit gleichem Grundriss, vertikal gestapelt (Cutaway-Querschnitt):
+// alle gleichzeitig auf EINEM Screen sichtbar, kein Scrollen. Der z-Abstand ist so
+// gewählt, dass sich die Decks auf dem Bildschirm nicht überlappen.
+const BOOT_W = 9, BOOT_D = 4.5, BOOT_DZ = 11;
+const BOOT_DECKS = [
+  { id: 'boot1', z: BOOT_DZ * 2, name: 'OBERDECK · PARTY',   floor: '#9a7449', wall: '#5d4630', accent: '#ff4fd8' },
+  { id: 'boot2', z: BOOT_DZ,     name: 'MITTELDECK · VIP',   floor: '#6b5a86', wall: '#3d3350', accent: '#ffd93c' },
+  { id: 'boot3', z: 0,           name: 'UNTERDECK · RAVE',   floor: '#39414f', wall: '#242a35', accent: '#4fe0ff' },
+];
 let bootCamOver = { s: 1, ox: 0, oy: 0 };
-const BOOT_GANGWAY = { x: 5.5, y: 10.6 };   // Einstiegssteg, knapp außerhalb des Decks
-const A_BOOT = {                             // Anker = Stations-Id (1:1, kein PIN_AT nötig)
-  hafenbar:       { x: 1.8, y: 2.0 },
-  sonnendeck:     { x: 8.2, y: 2.2 },
-  kapitaenssuite: { x: 5.0, y: 4.6 },
+const BOOT_ENTRY = { x: 4.5, y: 5.3 };       // Treppen-/Gangway-Podest je Deck (Ein- und Ausstieg)
+const A_BOOT = {                              // Anker = Stations-Id (deck = Index in BOOT_DECKS)
+  hafenbar:       { x: 1.4, y: 1.0, deck: 0 },
+  bierpong:       { x: 4.4, y: 3.1, deck: 0 },
+  sonnendeck:     { x: 7.6, y: 1.5, deck: 0 },
+  kapitaenssuite: { x: 2.0, y: 1.4, deck: 1 },
+  salon:          { x: 6.8, y: 2.3, deck: 1 },
+  maschinenraum:  { x: 2.4, y: 2.2, deck: 2 },
+  kesselbar:      { x: 6.9, y: 1.4, deck: 2 },
 };
+// Möbel-Grundflächen je Deck — Gäste laufen aussen herum statt hindurch
+const BOOT_OBSTACLES = [
+  { deck: 0, x: 0.1, y: 0.5, w: 2.6, d: 1.0 },   // Hafenbar
+  { deck: 0, x: 3.1, y: 2.6, w: 2.6, d: 1.0 },   // Bierpong-Tisch
+  { deck: 0, x: 6.5, y: 1.2, w: 2.3, d: 1.6 },   // Liegen + Schirm
+  { deck: 1, x: 1.0, y: 0.5, w: 2.0, d: 1.7 },   // Kapitänssuite
+  { deck: 1, x: 5.4, y: 1.7, w: 2.8, d: 1.2 },   // Panorama-Salon
+  { deck: 2, x: 1.2, y: 1.3, w: 2.4, d: 1.8 },   // Maschinenraum
+  { deck: 2, x: 5.7, y: 0.95, w: 2.4, d: 0.9 },  // Kesselbar
+];
+function deckZ(i) { return BOOT_DECKS[i].z; }
+function anchorLift(a) { return deckZ(a.deck) * TILE.z * cam.s; }   // Personen-Hub in Bildschirm-px
 
 function setupBootCamera() {
-  const r = RM_BOOT.boot1, m = 0.9;
+  const m = 0.9, topZ = BOOT_DECKS[0].z + 2.6;
   const pts = [
-    projRaw(r.x - m, r.y - m, WALL_H + 0.6),
-    projRaw(r.x + r.w + m, r.y - m, WALL_H),
-    projRaw(r.x + r.w + m, r.y + r.d + m + 0.8, 0),
-    projRaw(r.x - m, r.y + r.d + m + 0.8, 0),
+    projRaw(-m, -m, topZ),
+    projRaw(BOOT_W + m, -m, topZ),
+    projRaw(BOOT_W + m, BOOT_D + m + 1.0, 0),
+    projRaw(-m, BOOT_D + m + 1.0, 0),
   ];
-  bootCamOver = fitTransform(pts, W * 0.03, H * 0.04, 1.32, H * 0.03);
+  bootCamOver = fitTransform(pts, W * 0.03, H * 0.03, 1.0, 0);
 }
 
 function drawHarborBg(t) {
@@ -3158,40 +3200,188 @@ function drawHarborBg(t) {
   }
   ctx.fillStyle = 'rgba(255,246,214,0.12)';
   ctx.beginPath(); ctx.ellipse(W * 0.18, horizon + 40, 30, 70, 0, 0, 7); ctx.fill();
-  const r = RM_BOOT.boot1, pad = 1.1;
-  const p = [iso(r.x - pad, r.y - pad), iso(r.x + r.w + pad, r.y - pad), iso(r.x + r.w + pad, r.y + r.d + pad), iso(r.x - pad, r.y + r.d + pad)];
+  // Wasserlinie: das Schiff liegt mit dem Unterdeck im Wasser
+  const pad = 1.3;
+  const p = [iso(-pad, -pad), iso(BOOT_W + pad, -pad), iso(BOOT_W + pad, BOOT_D + pad), iso(-pad, BOOT_D + pad)];
   ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 26; ctx.shadowOffsetY = 10;
-  quad(p, '#1c2f38'); ctx.restore();
-  quad(p, null, 'rgba(255,255,255,0.08)', 1.5);
+  quad(p, 'rgba(8,26,36,0.55)'); ctx.restore();
 }
 
-function drawBoot1(t, beat, drawables) {
-  const r = RM_BOOT.boot1;
-  // Boden + Reling: liegen immer flach am Grund, brauchen keine Tiefensortierung
-  floorRect(r.x, r.y, r.w, r.d, '#8a6a45');
-  ctx.strokeStyle = 'rgba(0,0,0,0.15)'; ctx.lineWidth = 1;
-  for (let i = 1; i < r.w; i++) { const a = iso(r.x + i, r.y), b = iso(r.x + i, r.y + r.d);
+// Rumpf + Boden + Reling eines Decks (flach, keine Tiefensortierung nötig)
+function drawDeckShell(di, t) {
+  const D = BOOT_DECKS[di], z = D.z;
+  isoBoxAt(0, 0, BOOT_W, BOOT_D, 0.55, z - 0.55, D.floor, '#243039', '#1a232b', 'rgba(0,0,0,0.35)');
+  ctx.strokeStyle = 'rgba(0,0,0,0.16)'; ctx.lineWidth = 1;                    // Deckplanken
+  for (let i = 1; i < BOOT_W; i++) { const a = iso(i, 0, z), b = iso(i, BOOT_D, z);
     ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); }
-  const railEdges = [[r.x, r.y, r.x + r.w, r.y], [r.x + r.w, r.y, r.x + r.w, r.y + r.d], [r.x, r.y + r.d, r.x, r.y]];
-  ctx.strokeStyle = '#eef3f5'; ctx.lineWidth = 2.5;
-  for (const [x1, y1, x2, y2] of railEdges) { const a = iso(x1, y1, 0.6), b = iso(x2, y2, 0.6);
-    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); }
-  // Möbel gehen in die Tiefensortier-Liste, damit Gäste korrekt davor/dahinter erscheinen
-  drawables.push({ d: A_BOOT.hafenbar.x + A_BOOT.hafenbar.y - 0.5, fn: () =>
-    isoBox(A_BOOT.hafenbar.x - 1.3, A_BOOT.hafenbar.y - 0.5, 2.6, 1.0, 0.9, '#eef3f5', '#0e5e73', '#0a4a5c', 'rgba(0,0,0,0.25)') });
-  drawables.push({ d: A_BOOT.sonnendeck.x + A_BOOT.sonnendeck.y - 0.3, fn: () => {
-    isoBox(A_BOOT.sonnendeck.x - 1.1, A_BOOT.sonnendeck.y - 0.3, 0.8, 1.6, 0.35, '#f2d9a0', '#c9a464', '#a9884f', 'rgba(0,0,0,0.2)');
-    isoBox(A_BOOT.sonnendeck.x + 0.4, A_BOOT.sonnendeck.y - 0.3, 0.8, 1.6, 0.35, '#f2d9a0', '#c9a464', '#a9884f', 'rgba(0,0,0,0.2)');
+  // Reling an den drei offenen Kanten
+  ctx.strokeStyle = di === 0 ? '#eef3f5' : 'rgba(238,243,245,0.45)'; ctx.lineWidth = 2.2;
+  for (const [x1, y1, x2, y2] of [[0, 0, BOOT_W, 0], [BOOT_W, 0, BOOT_W, BOOT_D], [0, BOOT_D, 0, 0]]) {
+    const a = iso(x1, y1, z + 0.62), b = iso(x2, y2, z + 0.62);
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  }
+  // Treppen-Podest vorne (verbindet die Decks optisch)
+  isoBoxAt(BOOT_ENTRY.x - 0.8, BOOT_D - 0.15, 1.6, 0.9, 0.25, z, '#c9b08a', '#7a6248', '#5e4c38', 'rgba(0,0,0,0.25)');
+  if (di > 0) {   // durchgehende Treppe hoch zum darüberliegenden Deck (Wange + Stufen)
+    const steps = 9, stepH = (BOOT_DZ - 0.55) / steps, sx = BOOT_W - 1.5, sy = BOOT_D - 1.0;
+    const a = iso(sx + 0.5, sy + 0.3, z), b = iso(sx + 0.5, sy + 0.3, z + BOOT_DZ - 0.55);
+    ctx.strokeStyle = '#5e4c38'; ctx.lineWidth = Math.max(2, 7 * cam.s);
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    for (let s = 0; s < steps; s++)
+      isoBoxAt(sx, sy, 1.0, 0.6, 0.14, z + 0.2 + s * stepH, '#c9b08a', '#7a6248', '#5e4c38', null);
+  }
+  // Deck-Beschriftung mittig UNTER der vorderen Deckkante (in der Lücke zum Deck darunter)
+  const lp = iso(BOOT_W / 2, BOOT_D, z - 1.3);
+  ctx.save(); ctx.textAlign = 'center'; ctx.font = `800 ${Math.max(8, 9.5 * cam.s)}px system-ui, sans-serif`;
+  ctx.fillStyle = D.accent; ctx.shadowColor = 'rgba(0,0,0,0.9)'; ctx.shadowBlur = 5;
+  ctx.fillText(D.name, lp.x, lp.y); ctx.restore();
+}
+
+// Bierpong: Tisch mit Becher-Pyramiden, vier Spielern und fliegendem Ball
+let pongBall = { t: 0, dir: 1 };
+function drawBierpong(t, beat, drawables) {
+  const a = A_BOOT.bierpong, z = deckZ(a.deck), lift = anchorLift(a);
+  const cups = [[0, 0], [0.34, -0.2], [0.34, 0.2], [0.68, -0.4], [0.68, 0], [0.68, 0.4]];
+  drawables.push({ d: a.x + a.y, fn: () => {
+    isoBoxAt(a.x - 1.3, a.y - 0.5, 2.6, 1.0, 0.55, z, '#efe9dc', '#2f6ea8', '#245685', 'rgba(0,0,0,0.28)');
+    const mid = iso(a.x, a.y - 0.5, z + 0.55), mid2 = iso(a.x, a.y + 0.5, z + 0.55);
+    ctx.strokeStyle = 'rgba(47,110,168,0.5)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(mid.x, mid.y); ctx.lineTo(mid2.x, mid2.y); ctx.stroke();
+    // Becher an beiden Tischenden
+    const cupR = Math.max(2, 3.4 * cam.s);
+    for (const side of [-1, 1]) for (const [cx, cy] of cups) {
+      const p = iso(a.x + side * (0.95 - cx), a.y + cy, z + 0.55);
+      ctx.fillStyle = '#b4232f';
+      ctx.beginPath(); ctx.moveTo(p.x - cupR, p.y - cupR * 1.5); ctx.lineTo(p.x + cupR, p.y - cupR * 1.5);
+      ctx.lineTo(p.x + cupR * 0.65, p.y); ctx.lineTo(p.x - cupR * 0.65, p.y); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#e03b49';
+      ctx.beginPath(); ctx.ellipse(p.x, p.y - cupR * 1.5, cupR, cupR * 0.45, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = '#f6d67a';
+      ctx.beginPath(); ctx.ellipse(p.x, p.y - cupR * 1.35, cupR * 0.7, cupR * 0.3, 0, 0, 7); ctx.fill();
+    }
+    // Ball fliegt im Bogen von einer Seite zur anderen
+    const bt = pongBall.t;
+    if (bt < 1) {
+      const bx = a.x + pongBall.dir * (1.05 - 2.1 * bt);
+      const p = iso(bx, a.y, z + 0.55);
+      const arc = Math.sin(bt * Math.PI) * 26 * cam.s;
+      ctx.fillStyle = '#fffdf0';
+      ctx.beginPath(); ctx.arc(p.x, p.y - cupR * 1.5 - arc, Math.max(1.6, 2.6 * cam.s), 0, 7); ctx.fill();
+    }
   } });
-  drawables.push({ d: A_BOOT.kapitaenssuite.x + A_BOOT.kapitaenssuite.y - 1.0, fn: () => {
-    isoBox(A_BOOT.kapitaenssuite.x - 1.0, A_BOOT.kapitaenssuite.y - 1.0, 2.0, 1.8, 1.5, '#fff', '#1b2c3a', '#13212c', 'rgba(0,0,0,0.3)');
-    const wheelP = iso(A_BOOT.kapitaenssuite.x, A_BOOT.kapitaenssuite.y - 1.6, 1.6);
-    ctx.save(); ctx.translate(wheelP.x, wheelP.y); ctx.rotate(t * 0.15);
-    ctx.strokeStyle = '#d9c08a'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(0, 0, 12 * cam.s, 0, 7); ctx.stroke();
+  // Vier Spieler rund um den Tisch (zwei je Seite), mit leichtem Wippen
+  const spots = [
+    { x: a.x - 1.7, y: a.y - 0.35, c: '#4fd7f7', f: false }, { x: a.x - 1.7, y: a.y + 0.45, c: '#ff8fab', f: true },
+    { x: a.x + 1.7, y: a.y - 0.35, c: '#95e04a', f: true },  { x: a.x + 1.7, y: a.y + 0.45, c: '#f7b32b', f: false },
+  ];
+  spots.forEach((s, i) => drawables.push({ d: s.x + s.y, fn: () => drawPerson(s.x, s.y, {
+    color: s.c, skin: SKIN[i % SKIN.length], hair: HAIR[(i * 2) % HAIR.length], female: s.f,
+    bob: Math.sin(beat * 0.8 + i * 1.7) * 1.8 * cam.s, bobPhase: i * 1.3,
+    drink: i % 2 === 0 ? '🍺' : null, lift }) }));
+}
+
+function drawBootDeck(di, t, beat, drawables) {
+  const z = deckZ(di), D = BOOT_DECKS[di];
+  drawDeckShell(di, t);
+  const push = (a, fn) => drawables.push({ d: a.x + a.y, fn });
+
+  if (di === 0) {   // ---- Oberdeck: Party ----
+    // kleine Tanzfläche mit pulsierenden Neon-Kacheln (hinten Mitte, hinter dem Bierpong)
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 2; j++) {
+      const px = 3.1 + i * 0.62, py = 0.35 + j * 0.62;
+      const p = [iso(px, py, z + 0.02), iso(px + 0.58, py, z + 0.02), iso(px + 0.58, py + 0.58, z + 0.02), iso(px, py + 0.58, z + 0.02)];
+      const hue = ((i + j) * 55 + t * 90) % 360;
+      quad(p, `hsl(${hue | 0},78%,${(46 + 16 * Math.sin(beat + i + j)) | 0}%)`);
+    }
+    const hb = A_BOOT.hafenbar;
+    push(hb, () => {
+      isoBoxAt(hb.x - 1.3, hb.y - 0.5, 2.6, 1.0, 0.95, z, '#efe9dc', '#0e5e73', '#0a4a5c', 'rgba(0,0,0,0.28)');
+      for (let i = 0; i < 4; i++) {   // Flaschenregal
+        const p = iso(hb.x - 0.9 + i * 0.6, hb.y - 0.4, z + 1.05);
+        ctx.fillStyle = ['#8ef5c0', '#ffd93c', '#ff8fab', '#4fd7f7'][i];
+        ctx.fillRect(p.x - 2 * cam.s, p.y - 9 * cam.s, 4 * cam.s, 9 * cam.s);
+      }
+    });
+    drawBierpong(t, beat, drawables);
+    const sd = A_BOOT.sonnendeck;
+    push(sd, () => {
+      isoBoxAt(sd.x - 1.1, sd.y - 0.3, 0.8, 1.6, 0.35, z, '#f2d9a0', '#c9a464', '#a9884f', 'rgba(0,0,0,0.2)');
+      isoBoxAt(sd.x + 0.4, sd.y - 0.3, 0.8, 1.6, 0.35, z, '#f2d9a0', '#c9a464', '#a9884f', 'rgba(0,0,0,0.2)');
+      // Sonnenschirm: Mast + gestreiftes Schirmdach
+      const base = iso(sd.x + 0.4, sd.y + 0.55, z), u = iso(sd.x + 0.4, sd.y + 0.55, z + 2.0);
+      ctx.strokeStyle = '#a9884f'; ctx.lineWidth = Math.max(1.5, 2 * cam.s);
+      ctx.beginPath(); ctx.moveTo(base.x, base.y); ctx.lineTo(u.x, u.y); ctx.stroke();
+      const rw = 15 * cam.s, rh = 5.5 * cam.s;
+      for (let s = 0; s < 6; s++) {
+        const a0 = s * Math.PI / 3, a1 = a0 + Math.PI / 3;
+        ctx.fillStyle = s % 2 ? '#ff5e6c' : '#fff1e6';
+        ctx.beginPath(); ctx.moveTo(u.x, u.y - 4 * cam.s);
+        ctx.lineTo(u.x + Math.cos(a0) * rw, u.y + Math.sin(a0) * rh);
+        ctx.lineTo(u.x + Math.cos(a1) * rw, u.y + Math.sin(a1) * rh);
+        ctx.closePath(); ctx.fill();
+      }
+    });
+    // Lichterkette über dem Deck
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i <= 12; i++) {
+      const p = iso(i * (BOOT_W / 12), 0.15, z + 2.3 - Math.sin(i / 12 * Math.PI) * 0.5);
+      ctx.fillStyle = `hsl(${(i * 30 + t * 60) % 360},90%,62%)`;
+      ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(1.4, 2.4 * cam.s), 0, 7); ctx.fill();
+    }
     ctx.restore();
-  } });
-  drawables.push({ d: r.x + r.w / 2 + r.y - 1.4, fn: () =>
-    isoBox(r.x + r.w / 2 - 0.5, r.y - 1.4, 1.0, 1.0, 2.6, '#ff5e6c', '#c94856', '#a83a45', 'rgba(0,0,0,0.3)') });
+  } else if (di === 1) {   // ---- Mitteldeck: VIP ----
+    const ks = A_BOOT.kapitaenssuite;
+    push(ks, () => {
+      isoBoxAt(ks.x - 1.0, ks.y - 0.9, 2.0, 1.7, 1.4, z, '#f4f1e8', '#1b2c3a', '#13212c', 'rgba(0,0,0,0.3)');
+      const wheelP = iso(ks.x, ks.y + 0.85, z + 0.75);
+      ctx.save(); ctx.translate(wheelP.x, wheelP.y); ctx.rotate(t * 0.15);
+      ctx.strokeStyle = '#d9c08a'; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(0, 0, 9 * cam.s, 0, 7); ctx.stroke();
+      for (let i = 0; i < 6; i++) { const ang = i * Math.PI / 3;
+        ctx.beginPath(); ctx.moveTo(Math.cos(ang) * 4 * cam.s, Math.sin(ang) * 4 * cam.s);
+        ctx.lineTo(Math.cos(ang) * 13 * cam.s, Math.sin(ang) * 13 * cam.s); ctx.stroke(); }
+      ctx.restore();
+    });
+    const sa = A_BOOT.salon;
+    push(sa, () => {
+      isoBoxAt(sa.x - 1.4, sa.y - 0.6, 2.8, 1.2, 0.45, z, '#d9c08a', '#8a6a45', '#6b5236', 'rgba(0,0,0,0.25)');
+      isoBoxAt(sa.x - 1.4, sa.y - 0.6, 2.8, 0.35, 0.95, z, '#c9a464', '#8a6a45', '#6b5236', 'rgba(0,0,0,0.25)');
+      const g = iso(sa.x, sa.y + 0.1, z + 0.55);   // Champagnerkühler
+      ctx.fillStyle = '#e8e4d8'; ctx.beginPath(); ctx.ellipse(g.x, g.y - 5 * cam.s, 6 * cam.s, 3 * cam.s, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = '#2b4a2f'; ctx.fillRect(g.x - 1.5 * cam.s, g.y - 15 * cam.s, 3 * cam.s, 10 * cam.s);
+    });
+    // goldener Teppichläufer vom Treppenpodest zur Suite
+    const rp = [iso(3.7, 1.2, z + 0.02), iso(5.3, 1.2, z + 0.02), iso(5.3, BOOT_D - 0.2, z + 0.02), iso(3.7, BOOT_D - 0.2, z + 0.02)];
+    quad(rp, 'rgba(212,175,90,0.4)', 'rgba(255,217,60,0.35)', 1);
+  } else {   // ---- Unterdeck: Maschinenraum-Rave ----
+    const mr = A_BOOT.maschinenraum;
+    push(mr, () => {
+      isoBoxAt(mr.x - 1.2, mr.y - 0.9, 2.4, 1.8, 1.6, z, '#4a5262', '#2b323d', '#1f242d', 'rgba(0,0,0,0.35)');
+      for (let i = 0; i < 3; i++) {   // pumpende Kolben
+        const ph = 0.35 + 0.3 * Math.abs(Math.sin(beat * 0.9 + i * 1.2));
+        isoBoxAt(mr.x - 0.85 + i * 0.8, mr.y - 0.45, 0.45, 0.45, ph, z + 1.6, '#8d97a8', '#57606e', '#434b56', null);
+      }
+      const gl = iso(mr.x, mr.y + 0.7, z + 0.5);   // glühende Ofenklappe
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      const rg = ctx.createRadialGradient(gl.x, gl.y, 1, gl.x, gl.y, 22 * cam.s);
+      rg.addColorStop(0, `rgba(255,140,40,${0.5 + 0.3 * Math.sin(beat * 2)})`); rg.addColorStop(1, 'rgba(255,140,40,0)');
+      ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(gl.x, gl.y, 22 * cam.s, 0, 7); ctx.fill(); ctx.restore();
+    });
+    const kb = A_BOOT.kesselbar;
+    push(kb, () => {
+      isoBoxAt(kb.x - 1.2, kb.y - 0.45, 2.4, 0.9, 0.9, z, '#6b4a2f', '#3a2a1c', '#2a1e14', 'rgba(0,0,0,0.3)');
+      const p = iso(kb.x + 1.35, kb.y, z);   // Kessel daneben
+      ctx.fillStyle = '#5a6270';
+      ctx.beginPath(); ctx.ellipse(p.x, p.y - 16 * cam.s, 11 * cam.s, 18 * cam.s, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = 'rgba(255,120,40,0.7)';
+      ctx.beginPath(); ctx.arc(p.x, p.y - 16 * cam.s, 4 * cam.s, 0, 7); ctx.fill();
+    });
+    // Strobo-Blitze im Takt
+    if (Math.sin(beat * 3) > 0.86) {
+      const fp = [iso(0, 0, z + 0.02), iso(BOOT_W, 0, z + 0.02), iso(BOOT_W, BOOT_D, z + 0.02), iso(0, BOOT_D, z + 0.02)];
+      quad(fp, 'rgba(180,230,255,0.14)');
+    }
+  }
 }
 
 function drawBootCashPins(t) {
@@ -3201,50 +3391,62 @@ function drawBootCashPins(t) {
     const amount = state.stationCash[id] || 0;
     if (amount < 1) continue;
     const a = A_BOOT[id];
-    const p = iso(a.x, a.y, 1.1);
+    const p = iso(a.x, a.y, deckZ(a.deck) + 1.5);
     drawPinAt(p.x, p.y, amount, t, idx);
   }
 }
 
-// ---- Boot-Gäste: leichte 3-Zustands-Simulation (Gangway → Station → weg) ----
+// ---- Boot-Gäste: leichte 3-Zustands-Simulation je Deck (Treppe → Station → weg) ----
+// Bewusst simpler als der Airport-Aktivitätsgraph: jeder Gast gehört zu genau einem
+// Deck und läuft dort zwischen Treppenpodest und „seiner" Station.
 let bootGuests = [];
-function bootTargetCount() { return Math.min(14, 3 + Math.floor(state.level / 8)); }
+function bootStations() { return Object.keys(A_BOOT).filter(id => (state.stations[id] || 0) > 0); }
+function bootTargetCount() { return Math.min(16, bootStations().length * 2 + Math.floor(state.level / 12)); }
 function spawnBootGuest() {
-  const stId = pick(Object.keys(A_BOOT)), a = A_BOOT[stId];
+  const open = bootStations();
+  if (!open.length) return;
+  const stId = pick(open), a = A_BOOT[stId];
   bootGuests.push({
-    x: BOOT_GANGWAY.x, y: BOOT_GANGWAY.y, tx: a.x + rnd(-0.3, 0.3), ty: a.y + rnd(-0.3, 0.3), station: stId,
-    mode: 'walk', actT: rnd(6, 12), speed: rnd(1.6, 2.2), leaving: false,
+    x: BOOT_ENTRY.x + rnd(-0.4, 0.4), y: BOOT_ENTRY.y, tx: a.x + rnd(-0.35, 0.35), ty: a.y + rnd(0.5, 0.9),
+    station: stId, deck: a.deck,
+    mode: 'walk', actT: rnd(6, 12), speed: rnd(1.5, 2.1), leaving: false,
     color: pick(GUEST_COLORS), skin: pick(SKIN), hair: pick(HAIR), female: Math.random() < 0.5,
     bobPhase: rnd(0, 6.28), alpha: 0, fadeIn: true,
   });
 }
-function updateBootGuests(dt) {
+function updateBootGuests(dt, beat) {
+  pongBall.t += dt * 1.1;                                  // Bierpong-Ball fliegt hin und her
+  if (pongBall.t > 1.8) { pongBall.t = 0; pongBall.dir *= -1; }
   const want = bootTargetCount();
-  if (bootGuests.length < want && Math.random() < dt * 0.5) spawnBootGuest();
+  if (bootGuests.length < want && Math.random() < dt * 0.8) spawnBootGuest();
   for (let i = bootGuests.length - 1; i >= 0; i--) {
     const g = bootGuests[i];
     if (g.fadeIn) { g.alpha = Math.min(1, (g.alpha || 0) + dt * 1.6); if (g.alpha >= 1) g.fadeIn = false; }
     if (g.mode === 'walk') {
       const dx = g.tx - g.x, dy = g.ty - g.y, d = Math.hypot(dx, dy);
-      if (d < 0.15) { g.mode = g.leaving ? 'gone' : 'act'; }
+      if (d < 0.15) g.mode = g.leaving ? 'gone' : 'act';
       else { g.x += dx / d * g.speed * dt; g.y += dy / d * g.speed * dt; }
     } else if (g.mode === 'act') {
       g.actT -= dt;
       if (g.actT <= 0) {
         depositAtStation(g.station);
         g.mode = 'walk'; g.leaving = true;
-        g.tx = BOOT_GANGWAY.x + rnd(-0.4, 0.4); g.ty = BOOT_GANGWAY.y + rnd(-0.2, 0.4);
+        g.tx = BOOT_ENTRY.x + rnd(-0.5, 0.5); g.ty = BOOT_ENTRY.y + rnd(0, 0.5);
       }
     }
-    if (g.mode === 'gone') bootGuests.splice(i, 1);
+    if (g.mode === 'gone') { bootGuests.splice(i, 1); continue; }
+    for (const o of BOOT_OBSTACLES) if (o.deck === g.deck) pushOutOfRect(g, o.x, o.y, o.w, o.d, 0.3);
+    g.x = Math.max(0.25, Math.min(BOOT_W - 0.25, g.x));    // nicht über die Reling laufen
+    g.y = Math.max(0.25, Math.min(BOOT_D + 0.6, g.y));
   }
 }
 function handleBootTap(mx, my, e) {
   for (const id of Object.keys(A_BOOT)) {
     const amount = state.stationCash[id] || 0;
     if (amount < 1) continue;
-    const s = iso(A_BOOT[id].x, A_BOOT[id].y, 1.1);
-    if (Math.hypot(mx - s.x, my - s.y) < 30) {
+    const a = A_BOOT[id];
+    const s = iso(a.x, a.y, deckZ(a.deck) + 1.5);
+    if (Math.hypot(mx - s.x, my - s.y) < 34) {
       const collected = collectStation(id, true);
       if (collected > 0 && onTapFeedback) onTapFeedback({ type: 'collect', x: e.clientX, y: e.clientY, amount: collected });
       return;
@@ -3295,21 +3497,28 @@ export function renderFrame(now) {
   // Beschaffungs-Run: eigener Vollbild-View (überlagert den Club)
   if (runView) { rgUpdate(dt); if (runView) { rgDraw(t); return; } }
 
-  // Das Boot: eigene, viel kleinere Zeichnen-Kette statt der Airport-Räume
+  // Das Boot: eigene Zeichnen-Kette (3 gestapelte Decks) statt der Airport-Räume
   if (state.location === 'boot') {
-    updateBootGuests(dt);
+    updateBootGuests(dt, beat);
     updateParticles(dt);
     incomeTimer += dt; if (incomeTimer > 0.25) { incomeTimer = 0; incomeCache = incomePerSec(); }
     drawHarborBg(t);
-    const bootDrawables = [];
-    drawBoot1(t, beat, bootDrawables);
-    for (const g of bootGuests) {
-      const gg = g;
-      bootDrawables.push({ d: gg.x + gg.y, fn: () => drawPerson(gg.x, gg.y, {
-        color: gg.color, skin: gg.skin, hair: gg.hair, female: gg.female, alpha: gg.alpha, bobPhase: gg.bobPhase }) });
+    // Deck für Deck von oben nach unten — innerhalb eines Decks tiefensortiert,
+    // damit Gäste korrekt vor/hinter den Möbeln stehen.
+    for (let di = 0; di < BOOT_DECKS.length; di++) {
+      const deckDrawables = [];
+      drawBootDeck(di, t, beat, deckDrawables);
+      for (const g of bootGuests) {
+        if (g.deck !== di) continue;
+        const gg = g, lift = deckZ(di) * TILE.z * cam.s;
+        deckDrawables.push({ d: gg.x + gg.y, fn: () => drawPerson(gg.x, gg.y, {
+          color: gg.color, skin: gg.skin, hair: gg.hair, female: gg.female,
+          alpha: gg.alpha, bobPhase: gg.bobPhase, lift,
+          bob: gg.mode === 'act' ? Math.sin(beat + gg.bobPhase) * 2 * cam.s : 0 }) });
+      }
+      deckDrawables.sort((a, b) => a.d - b.d);
+      for (const it of deckDrawables) it.fn();
     }
-    bootDrawables.sort((a, b) => a.d - b.d);
-    for (const it of bootDrawables) it.fn();
     drawBootCashPins(t);
     for (const p of particles) {
       ctx.globalAlpha = Math.max(0, Math.min(1, p.life));

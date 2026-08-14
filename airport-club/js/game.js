@@ -80,7 +80,7 @@ export const state = {
 export function roomUnlocked(roomId) {
   if (roomId === 't2') return state.t2Unlocked;
   if (roomId === 'roof') return state.roofUnlocked;
-  if (roomId === 'boot1') return state.bootUnlocked;
+  if (roomId === 'boot1' || roomId === 'boot2' || roomId === 'boot3') return state.bootUnlocked;   // ganzes Schiff auf einmal
   if (roomId === 'hinter') return undergroundUnlocked() && !dealerJailed();
   return true; // t1
 }

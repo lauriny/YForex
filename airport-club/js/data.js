@@ -353,7 +353,9 @@ export const ROOMS = [
   { id: 't1',   name: 'Terminal 1', sub: 'Mainfloor',  icon: '🪩' },
   { id: 't2',   name: 'Terminal 2', sub: 'Zweiter Floor', icon: '🪩' },
   { id: 'roof', name: 'Rooftop',    sub: 'VIP Sky Lounge', icon: '🌃' },
-  { id: 'boot1', name: 'Das Boot · Oberdeck', sub: 'Franchise #2 · Würzburg', icon: '🚢' },
+  { id: 'boot1', name: 'Das Boot · Oberdeck',  sub: 'Partydeck · Bierpong & Hafenbar', icon: '🚢' },
+  { id: 'boot2', name: 'Das Boot · Mitteldeck', sub: 'VIP-Salon & Kapitänssuite',      icon: '🥂' },
+  { id: 'boot3', name: 'Das Boot · Unterdeck',  sub: 'Maschinenraum-Rave',             icon: '⚙️' },
 ];
 
 // ---- Stationen -------------------------------------------------
@@ -373,17 +375,25 @@ export const STATIONS = [
   { id: 'skybar',    room: 'roof', name: 'Skybar',           icon: '🍸', desc: 'Drinks über den Dächern',       baseCost: 8e9,    growth: 1.18, baseIncome: 4.2e6 },
   { id: 'pool',      room: 'roof', name: 'Pool-Bar',         icon: '🏊', desc: 'Party am Rooftop-Pool',         baseCost: 5e10,   growth: 1.18, baseIncome: 1.9e7 },
   { id: 'stars',     room: 'roof', name: 'Sternenhimmel',    icon: '🌌', desc: 'Open-Air-Floor unterm Himmel',  baseCost: 3.5e11, growth: 1.19, baseIncome: 9e7 },
-  // ---- Das Boot · Oberdeck (Franchise #2, Endgame — setzt die Kurve hinter Rooftop fort) ----
+  // ---- Das Boot (Franchise #2, Endgame — setzt die Kurve hinter Rooftop fort) ----
+  // Oberdeck · Partydeck
   { id: 'gangway',        room: 'boot1', name: 'Gangway',           icon: '🛳️', desc: 'Mehr Gäste kommen an Bord',     baseCost: 2e12,   growth: 1.16, baseIncome: 2e8 },
   { id: 'hafenbar',       room: 'boot1', name: 'Hafenbar',          icon: '⚓',  desc: 'Cocktails mit Meerblick',       baseCost: 1.2e13, growth: 1.17, baseIncome: 9e8 },
-  { id: 'sonnendeck',     room: 'boot1', name: 'Sonnendeck-Lounge', icon: '🌊', desc: 'Liegen & Champagner an Deck',   baseCost: 8e13,   growth: 1.18, baseIncome: 4e9 },
-  { id: 'kapitaenssuite', room: 'boot1', name: 'Kapitänssuite',     icon: '👑', desc: 'Die exklusivste Adresse an Bord', baseCost: 6e14, growth: 1.19, baseIncome: 1.8e10 },
+  { id: 'bierpong',       room: 'boot1', name: 'Bierpong-Tisch',    icon: '🍺', desc: 'Wer verliert, zahlt die Runde',  baseCost: 5e13,   growth: 1.17, baseIncome: 2.4e9 },
+  { id: 'sonnendeck',     room: 'boot1', name: 'Sonnendeck-Lounge', icon: '🌊', desc: 'Liegen & Champagner an Deck',   baseCost: 1.6e14, growth: 1.18, baseIncome: 6e9 },
+  // Mitteldeck · VIP
+  { id: 'kapitaenssuite', room: 'boot2', name: 'Kapitänssuite',     icon: '👑', desc: 'Die exklusivste Adresse an Bord', baseCost: 6e14, growth: 1.19, baseIncome: 1.8e10 },
+  { id: 'salon',          room: 'boot2', name: 'Panorama-Salon',    icon: '🥂', desc: 'Rundumblick über den Hafen',     baseCost: 4e15,   growth: 1.19, baseIncome: 8e10 },
+  // Unterdeck · Maschinenraum-Rave
+  { id: 'maschinenraum',  room: 'boot3', name: 'Maschinenraum-Rave', icon: '⚙️', desc: 'Techno zwischen Kolben & Stahl', baseCost: 3e16,  growth: 1.2,  baseIncome: 3.5e11 },
+  { id: 'kesselbar',      room: 'boot3', name: 'Kesselbar',         icon: '🔥', desc: 'Shots direkt am Heizkessel',    baseCost: 2e17,   growth: 1.2,  baseIncome: 1.5e12 },
 ];
 
 export const STATION_MAP = Object.fromEntries(STATIONS.map(s => [s.id, s]));
 
 // Konsum-Stationen: hier fällt einsammelbares Geld an (Pins).
-export const CASH_STATIONS = ['garderobe', 'bar', 'shots', 'champus', 'tables', 'chill', 'skybar', 'pool', 'hafenbar', 'sonnendeck', 'kapitaenssuite'];
+export const CASH_STATIONS = ['garderobe', 'bar', 'shots', 'champus', 'tables', 'chill', 'skybar', 'pool',
+  'hafenbar', 'bierpong', 'sonnendeck', 'kapitaenssuite', 'salon', 'maschinenraum', 'kesselbar'];
 
 // ---- Personal ---------------------------------------------------
 export const STAFF = [
@@ -391,7 +401,7 @@ export const STAFF = [
   { id: 'mia',   name: 'Barkeeperin Mia',  icon: '🍸', desc: '+20 % auf alle Bars & Lounges pro Stufe', baseCost: 40000, growth: 6, max: 10, targets: ['bar', 'shots', 'champus', 'tables', 'skybar', 'pool'], perLevel: 0.2 },
   { id: 'neon',  name: 'DJ Neon',          icon: '🎛️', desc: '+8 % Gesamteinkommen & +2 s DROP-Dauer pro Stufe', baseCost: 600000, growth: 6, max: 10, global: 0.08, dropBonus: 2 },
   { id: 'lea',   name: 'Promoterin Lea',   icon: '📣', desc: '+25 % Offline-Einnahmen & +5 % Gesamteinkommen pro Stufe', baseCost: 9e6, growth: 6, max: 10, global: 0.05, offline: 0.25 },
-  { id: 'kapitaen', name: 'Kapitän Henriksen', icon: '⚓', desc: '+20 % auf alle Boot-Stationen pro Stufe', baseCost: 5e12, growth: 6, max: 10, targets: ['hafenbar', 'sonnendeck', 'kapitaenssuite'], perLevel: 0.2 },
+  { id: 'kapitaen', name: 'Kapitän Henriksen', icon: '⚓', desc: '+20 % auf alle Boot-Stationen pro Stufe', baseCost: 5e12, growth: 6, max: 10, targets: ['hafenbar', 'bierpong', 'sonnendeck', 'kapitaenssuite', 'salon', 'maschinenraum', 'kesselbar'], perLevel: 0.2 },
 ];
 
 export const STAFF_MAP = Object.fromEntries(STAFF.map(s => [s.id, s]));

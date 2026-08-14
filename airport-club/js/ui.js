@@ -18,8 +18,12 @@ const ROOM_META = {
   t2:   { icon: '🪩', name: 'Terminal 2',        sub: 'Zweiter Floor' },
   roof: { icon: '🌃', name: 'Rooftop · VIP',     sub: 'VIP Sky Lounge' },
   hinter: { icon: '🕶️', name: 'Hinterzimmer',    sub: 'Schwarzmarkt · Ware beschaffen & dealen' },
-  boot1: { icon: '🚢', name: 'Das Boot · Oberdeck', sub: 'Franchise #2 · Würzburg' },
+  boot1: { icon: '🚢', name: 'Das Boot · Oberdeck',  sub: 'Partydeck · Bierpong & Hafenbar' },
+  boot2: { icon: '🥂', name: 'Das Boot · Mitteldeck', sub: 'VIP-Salon & Kapitänssuite' },
+  boot3: { icon: '⚙️', name: 'Das Boot · Unterdeck',  sub: 'Maschinenraum-Rave' },
 };
+const BOOT_ROOMS = ['boot1', 'boot2', 'boot3'];
+function bootIncome() { return BOOT_ROOMS.reduce((sum, id) => sum + G.roomIncome(id), 0); }
 
 const $ = sel => document.querySelector(sel);
 const el = (tag, cls, html) => {
@@ -318,6 +322,8 @@ function openStationsModal() {
         list.appendChild(el('div', 'list-caption', `${roomDef.icon} ${roomDef.name} · ${roomDef.sub}`));
         // Gesperrter Raum → Freischalt-Zeile (Terminal 2 / Rooftop / Das Boot)
         if (!G.roomUnlocked(roomDef.id)) {
+          // Das Boot wird als ganzes Schiff freigeschaltet → CTA nur einmal (am Oberdeck)
+          if (roomDef.id === 'boot2' || roomDef.id === 'boot3') { list.removeChild(list.lastChild); continue; }
           if (roomDef.id === 'boot1') {
             const bp = G.bootProgress(), ready = G.canUnlockBoot();
             const hint = ready ? '🎉 Bereit zur großen Eröffnung!'
@@ -648,14 +654,13 @@ function lockedRoomCard(id, req, canUnlock, doUnlock, extraHint) {
 // „Das Boot": eigener Standort statt Airport-Raum — Karte führt nicht in eine
 // Raum-Detailansicht, sondern wechselt den Standort.
 function bootRoomCard(refresh) {
-  const m = ROOM_META.boot1;
   if (!G.state.bootUnlocked) {
     const bp = G.bootProgress(), ready = G.canUnlockBoot();
     const card = el('div', 'room-card locked');
     const hint = ready ? '🎉 Bereit zur großen Eröffnung!'
       : `⭐ ${bp.fame}/${bp.fameReq} Ruf-Sterne · 💰 ${fmt(bp.lifetime)}/${fmt(bp.ltReq)} €`;
     card.innerHTML = `<div class="room-emoji">🔒</div>
-      <div class="room-info"><b>${m.name}</b><span>${hint}</span></div>
+      <div class="room-info"><b>Das Boot</b><span>${hint}</span></div>
       <button class="btn-buy${ready ? '' : ' disabled'}"><span>Franchise</span><b>Eröffnen!</b></button>`;
     card.querySelector('button').addEventListener('click', () => {
       if (G.unlockBoot()) { playSfx('chest'); confetti(50); updateHUD(); refresh(); toast('🚢 „Das Boot" ist eröffnet!'); }
@@ -664,8 +669,8 @@ function bootRoomCard(refresh) {
   }
   const here = G.state.location === 'boot';
   const card = el('div', 'room-card unlocked clickable');
-  card.innerHTML = `<div class="room-emoji">${m.icon}</div>
-    <div class="room-info"><b>${m.name}</b><span>${m.sub} · ${fmt(G.roomIncome('boot1'))} €/s${here ? ' · 📍 du bist hier' : ''}</span></div>
+  card.innerHTML = `<div class="room-emoji">🚢</div>
+    <div class="room-info"><b>Das Boot</b><span>3 Decks · Würzburg · ${fmt(bootIncome())} €/s${here ? ' · 📍 du bist hier' : ''}</span></div>
     <div class="room-emoji enter-arrow">→</div>`;
   card.addEventListener('click', () => {
     closeModal(); exitRoom(); hideRoomHud();
