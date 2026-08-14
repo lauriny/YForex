@@ -645,6 +645,35 @@ function lockedRoomCard(id, req, canUnlock, doUnlock, extraHint) {
   return card;
 }
 
+// „Das Boot": eigener Standort statt Airport-Raum — Karte führt nicht in eine
+// Raum-Detailansicht, sondern wechselt den Standort.
+function bootRoomCard(refresh) {
+  const m = ROOM_META.boot1;
+  if (!G.state.bootUnlocked) {
+    const bp = G.bootProgress(), ready = G.canUnlockBoot();
+    const card = el('div', 'room-card locked');
+    const hint = ready ? '🎉 Bereit zur großen Eröffnung!'
+      : `⭐ ${bp.fame}/${bp.fameReq} Ruf-Sterne · 💰 ${fmt(bp.lifetime)}/${fmt(bp.ltReq)} €`;
+    card.innerHTML = `<div class="room-emoji">🔒</div>
+      <div class="room-info"><b>${m.name}</b><span>${hint}</span></div>
+      <button class="btn-buy${ready ? '' : ' disabled'}"><span>Franchise</span><b>Eröffnen!</b></button>`;
+    card.querySelector('button').addEventListener('click', () => {
+      if (G.unlockBoot()) { playSfx('chest'); confetti(50); updateHUD(); refresh(); toast('🚢 „Das Boot" ist eröffnet!'); }
+    });
+    return card;
+  }
+  const here = G.state.location === 'boot';
+  const card = el('div', 'room-card unlocked clickable');
+  card.innerHTML = `<div class="room-emoji">${m.icon}</div>
+    <div class="room-info"><b>${m.name}</b><span>${m.sub} · ${fmt(G.roomIncome('boot1'))} €/s${here ? ' · 📍 du bist hier' : ''}</span></div>
+    <div class="room-emoji enter-arrow">→</div>`;
+  card.addEventListener('click', () => {
+    closeModal(); exitRoom(); hideRoomHud();
+    G.setLocation('boot'); playSfx('click'); updateHUD();
+  });
+  return card;
+}
+
 function openRoomsModal() {
   openModal('📍 Räume & Etagen', body => {
     const list = el('div', 'room-list');
@@ -673,6 +702,9 @@ function openRoomsModal() {
         if (!jailed) hc.addEventListener('click', () => { closeModal(); openRoomView('hinter'); });
         list.appendChild(hc);
       }
+
+      // Das Boot — zweiter Standort (Franchise #2)
+      list.appendChild(bootRoomCard(render));
 
       // Show-Act (Tänzerin) — freischalten oder in einen Raum stellen
       list.appendChild(performerCard(render));
@@ -1241,7 +1273,12 @@ function hideRoomHud() {
   $('#side-rail').classList.remove('dim-hide');
   $('#tap-hint').classList.remove('dim-hide');
 }
-function openRoomView(id) { if (enterRoom(id)) { showRoomHud(id); playSfx('click'); } }
+// Airport-Raum öffnen — vom Boot aus erst zurück an den Airport wechseln,
+// sonst würde die Raumansicht hinter der Hafen-Szene liegen.
+function openRoomView(id) {
+  if (G.state.location === 'boot') { G.setLocation('airport'); updateHUD(); }
+  if (enterRoom(id)) { showRoomHud(id); playSfx('click'); }
+}
 // Zurück: Raum verlassen → Iso-Übersicht
 function closeRoomView() { detailBack(); hideRoomHud(); playSfx('click'); }
 
