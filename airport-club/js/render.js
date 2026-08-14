@@ -315,6 +315,7 @@ function setupCamera() {
 
   if (!focusRoom) Object.assign(cam, camOver);
   frameRoom(framedRoom, false);   // Einzel-Raum-Rahmen an neue Bildschirmgröße anpassen
+  setupBootCamera();
 }
 
 // Raum betreten / verlassen (von Tap oder UI aufgerufen)
@@ -364,6 +365,9 @@ function handleTap(e) {
 
   // Beschaffungs-Run: nur die Run-Buttons; Bewegung läuft über den Joystick
   if (runView) return;   // Run läuft über eigene Pointer-Handler (Multi-Touch)
+
+  // Das Boot: eigene, viel kleinere Tap-Logik (nur Geld-Pins)
+  if (state.location === 'boot') { handleBootTap(mx, my, e); return; }
 
   // Promi zuerst (große Trefferfläche)
   if (state.celeb) {
@@ -3101,11 +3105,159 @@ function drawPinAt(px, py, amount, t, seed) {
   ctx.textAlign = 'center';
 }
 
+// ============================================================
+//  Das Boot · Oberdeck (Franchise #2) — eigener Standort, eigene Optik.
+//  Wirtschaft (Geld/Level/Lifetime/Ruf) bleibt dieselbe wie am Airport;
+//  nur Kamera/Szene/Gäste sind ein eigenständiges, kleines Set (Vertical Slice).
+// ============================================================
+const RM_BOOT = { boot1: { x: 0, y: 0, w: 11, d: 9, name: 'OBERDECK' } };
+let bootCamOver = { s: 1, ox: 0, oy: 0 };
+const BOOT_GANGWAY = { x: 5.5, y: 10.6 };   // Einstiegssteg, knapp außerhalb des Decks
+const A_BOOT = {                             // Anker = Stations-Id (1:1, kein PIN_AT nötig)
+  hafenbar:       { x: 1.8, y: 2.0 },
+  sonnendeck:     { x: 8.2, y: 2.2 },
+  kapitaenssuite: { x: 5.0, y: 4.6 },
+};
+
+function setupBootCamera() {
+  const r = RM_BOOT.boot1, m = 0.9;
+  const pts = [
+    projRaw(r.x - m, r.y - m, WALL_H + 0.6),
+    projRaw(r.x + r.w + m, r.y - m, WALL_H),
+    projRaw(r.x + r.w + m, r.y + r.d + m + 0.8, 0),
+    projRaw(r.x - m, r.y + r.d + m + 0.8, 0),
+  ];
+  bootCamOver = fitTransform(pts, W * 0.03, H * 0.04, 1.32, H * 0.03);
+}
+
+function drawHarborBg(t) {
+  const sky = ctx.createLinearGradient(0, 0, 0, H);
+  sky.addColorStop(0, '#0c2540'); sky.addColorStop(0.5, '#123f57'); sky.addColorStop(1, '#0a1d2c');
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = 'rgba(255,246,214,0.85)';
+  ctx.beginPath(); ctx.arc(W * 0.18, H * 0.1, 15, 0, 7); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.45)';
+  for (let i = 0; i < 34; i++) { const sx = (i * 89) % W, sy = (i * 41) % (H * 0.35);
+    ctx.globalAlpha = 0.25 + 0.5 * Math.abs(Math.sin(i + t * 0.3)); ctx.fillRect(sx, sy, 1.3, 1.3); }
+  ctx.globalAlpha = 1;
+  const horizon = H * 0.5;
+  for (let i = 0; i < 5; i++) {   // ferne Hafenkräne
+    const cx = (i / 5) * W + 40, ch2 = 50 + (i % 3) * 22;
+    ctx.strokeStyle = 'rgba(10,20,30,0.7)'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(cx, horizon); ctx.lineTo(cx, horizon - ch2); ctx.lineTo(cx + 34, horizon - ch2 * 0.7); ctx.stroke();
+  }
+  const water = ctx.createLinearGradient(0, horizon, 0, H);
+  water.addColorStop(0, '#134a5e'); water.addColorStop(1, '#051620');
+  ctx.fillStyle = water; ctx.fillRect(0, horizon, W, H - horizon);
+  ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.lineWidth = 1.5;
+  for (let i = 0; i < 18; i++) {   // Wellen-Schimmer
+    const wy = horizon + 14 + i * ((H - horizon) / 18), drift = Math.sin(t * 0.8 + i * 0.6) * 10;
+    ctx.beginPath(); ctx.moveTo(drift, wy);
+    for (let x = 0; x <= W; x += 24) ctx.lineTo(x + drift, wy + Math.sin(t * 1.4 + x * 0.04 + i) * 2.5);
+    ctx.stroke();
+  }
+  ctx.fillStyle = 'rgba(255,246,214,0.12)';
+  ctx.beginPath(); ctx.ellipse(W * 0.18, horizon + 40, 30, 70, 0, 0, 7); ctx.fill();
+  const r = RM_BOOT.boot1, pad = 1.1;
+  const p = [iso(r.x - pad, r.y - pad), iso(r.x + r.w + pad, r.y - pad), iso(r.x + r.w + pad, r.y + r.d + pad), iso(r.x - pad, r.y + r.d + pad)];
+  ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 26; ctx.shadowOffsetY = 10;
+  quad(p, '#1c2f38'); ctx.restore();
+  quad(p, null, 'rgba(255,255,255,0.08)', 1.5);
+}
+
+function drawBoot1(t, beat, drawables) {
+  const r = RM_BOOT.boot1;
+  // Boden + Reling: liegen immer flach am Grund, brauchen keine Tiefensortierung
+  floorRect(r.x, r.y, r.w, r.d, '#8a6a45');
+  ctx.strokeStyle = 'rgba(0,0,0,0.15)'; ctx.lineWidth = 1;
+  for (let i = 1; i < r.w; i++) { const a = iso(r.x + i, r.y), b = iso(r.x + i, r.y + r.d);
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); }
+  const railEdges = [[r.x, r.y, r.x + r.w, r.y], [r.x + r.w, r.y, r.x + r.w, r.y + r.d], [r.x, r.y + r.d, r.x, r.y]];
+  ctx.strokeStyle = '#eef3f5'; ctx.lineWidth = 2.5;
+  for (const [x1, y1, x2, y2] of railEdges) { const a = iso(x1, y1, 0.6), b = iso(x2, y2, 0.6);
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); }
+  // Möbel gehen in die Tiefensortier-Liste, damit Gäste korrekt davor/dahinter erscheinen
+  drawables.push({ d: A_BOOT.hafenbar.x + A_BOOT.hafenbar.y - 0.5, fn: () =>
+    isoBox(A_BOOT.hafenbar.x - 1.3, A_BOOT.hafenbar.y - 0.5, 2.6, 1.0, 0.9, '#eef3f5', '#0e5e73', '#0a4a5c', 'rgba(0,0,0,0.25)') });
+  drawables.push({ d: A_BOOT.sonnendeck.x + A_BOOT.sonnendeck.y - 0.3, fn: () => {
+    isoBox(A_BOOT.sonnendeck.x - 1.1, A_BOOT.sonnendeck.y - 0.3, 0.8, 1.6, 0.35, '#f2d9a0', '#c9a464', '#a9884f', 'rgba(0,0,0,0.2)');
+    isoBox(A_BOOT.sonnendeck.x + 0.4, A_BOOT.sonnendeck.y - 0.3, 0.8, 1.6, 0.35, '#f2d9a0', '#c9a464', '#a9884f', 'rgba(0,0,0,0.2)');
+  } });
+  drawables.push({ d: A_BOOT.kapitaenssuite.x + A_BOOT.kapitaenssuite.y - 1.0, fn: () => {
+    isoBox(A_BOOT.kapitaenssuite.x - 1.0, A_BOOT.kapitaenssuite.y - 1.0, 2.0, 1.8, 1.5, '#fff', '#1b2c3a', '#13212c', 'rgba(0,0,0,0.3)');
+    const wheelP = iso(A_BOOT.kapitaenssuite.x, A_BOOT.kapitaenssuite.y - 1.6, 1.6);
+    ctx.save(); ctx.translate(wheelP.x, wheelP.y); ctx.rotate(t * 0.15);
+    ctx.strokeStyle = '#d9c08a'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(0, 0, 12 * cam.s, 0, 7); ctx.stroke();
+    ctx.restore();
+  } });
+  drawables.push({ d: r.x + r.w / 2 + r.y - 1.4, fn: () =>
+    isoBox(r.x + r.w / 2 - 0.5, r.y - 1.4, 1.0, 1.0, 2.6, '#ff5e6c', '#c94856', '#a83a45', 'rgba(0,0,0,0.3)') });
+}
+
+function drawBootCashPins(t) {
+  let idx = 0;
+  for (const id of Object.keys(A_BOOT)) {
+    idx++;
+    const amount = state.stationCash[id] || 0;
+    if (amount < 1) continue;
+    const a = A_BOOT[id];
+    const p = iso(a.x, a.y, 1.1);
+    drawPinAt(p.x, p.y, amount, t, idx);
+  }
+}
+
+// ---- Boot-Gäste: leichte 3-Zustands-Simulation (Gangway → Station → weg) ----
+let bootGuests = [];
+function bootTargetCount() { return Math.min(14, 3 + Math.floor(state.level / 8)); }
+function spawnBootGuest() {
+  const stId = pick(Object.keys(A_BOOT)), a = A_BOOT[stId];
+  bootGuests.push({
+    x: BOOT_GANGWAY.x, y: BOOT_GANGWAY.y, tx: a.x + rnd(-0.3, 0.3), ty: a.y + rnd(-0.3, 0.3), station: stId,
+    mode: 'walk', actT: rnd(6, 12), speed: rnd(1.6, 2.2), leaving: false,
+    color: pick(GUEST_COLORS), skin: pick(SKIN), hair: pick(HAIR), female: Math.random() < 0.5,
+    bobPhase: rnd(0, 6.28), alpha: 0, fadeIn: true,
+  });
+}
+function updateBootGuests(dt) {
+  const want = bootTargetCount();
+  if (bootGuests.length < want && Math.random() < dt * 0.5) spawnBootGuest();
+  for (let i = bootGuests.length - 1; i >= 0; i--) {
+    const g = bootGuests[i];
+    if (g.fadeIn) { g.alpha = Math.min(1, (g.alpha || 0) + dt * 1.6); if (g.alpha >= 1) g.fadeIn = false; }
+    if (g.mode === 'walk') {
+      const dx = g.tx - g.x, dy = g.ty - g.y, d = Math.hypot(dx, dy);
+      if (d < 0.15) { g.mode = g.leaving ? 'gone' : 'act'; }
+      else { g.x += dx / d * g.speed * dt; g.y += dy / d * g.speed * dt; }
+    } else if (g.mode === 'act') {
+      g.actT -= dt;
+      if (g.actT <= 0) {
+        depositAtStation(g.station);
+        g.mode = 'walk'; g.leaving = true;
+        g.tx = BOOT_GANGWAY.x + rnd(-0.4, 0.4); g.ty = BOOT_GANGWAY.y + rnd(-0.2, 0.4);
+      }
+    }
+    if (g.mode === 'gone') bootGuests.splice(i, 1);
+  }
+}
+function handleBootTap(mx, my, e) {
+  for (const id of Object.keys(A_BOOT)) {
+    const amount = state.stationCash[id] || 0;
+    if (amount < 1) continue;
+    const s = iso(A_BOOT[id].x, A_BOOT[id].y, 1.1);
+    if (Math.hypot(mx - s.x, my - s.y) < 30) {
+      const collected = collectStation(id, true);
+      if (collected > 0 && onTapFeedback) onTapFeedback({ type: 'collect', x: e.clientX, y: e.clientY, amount: collected });
+      return;
+    }
+  }
+}
+
 // ---------------- Frame ----------------
 let lastFrame = 0;
 let incomeCache = 0, incomeTimer = 0;
 
 let lastClubSize = -1;
+let lastLocation = 'airport';
 export function renderFrame(now) {
   if (!ctx) return;
   const dt = Math.min(0.1, (now - lastFrame) / 1000) || 0.016;
@@ -3118,14 +3270,21 @@ export function renderFrame(now) {
   const beat = t * (bpm / 60) * Math.PI;
   tickerX -= dt * 40 * cam.s;
 
+  // Standort-Wechsel (Airport ↔ Boot): Kamera sofort auf den neuen Ort springen lassen,
+  // sonst würde der alte Ort für einen Moment ins neue Bild reingezoomt/-geschwenkt.
+  if (state.location !== lastLocation) {
+    lastLocation = state.location;
+    Object.assign(cam, state.location === 'boot' ? bootCamOver : (focusRoom ? (camRooms[focusRoom] || camOver) : camOver));
+  }
+
   // Kamera zum Ziel animieren (Übersicht ↔ Raum-Detail), bei viel Gästeandrang leicht rausgezoomt
-  const rawTarget = focusRoom ? (camRooms[focusRoom] || camOver) : camOver;
-  const target = zoomAround(rawTarget, densityZoom(focusRoom), W / 2, H / 2);
+  const rawTarget = state.location === 'boot' ? bootCamOver : (focusRoom ? (camRooms[focusRoom] || camOver) : camOver);
+  const target = state.location === 'boot' ? rawTarget : zoomAround(rawTarget, densityZoom(focusRoom), W / 2, H / 2);
   const k = 1 - Math.pow(0.0015, dt);
   cam.s += (target.s - cam.s) * k;
   cam.ox += (target.ox - cam.ox) * k;
   cam.oy += (target.oy - cam.oy) * k;
-  focusAmt += ((focusRoom ? 1 : 0) - focusAmt) * k;
+  focusAmt += ((focusRoom && state.location !== 'boot' ? 1 : 0) - focusAmt) * k;
   if (focusRoom) lastFocusRoom = focusRoom;
   if (roomFade > 0) roomFade = Math.max(0, roomFade - dt * 4.5);   // kurzer Überblend beim Raumwechsel
 
@@ -3135,6 +3294,32 @@ export function renderFrame(now) {
 
   // Beschaffungs-Run: eigener Vollbild-View (überlagert den Club)
   if (runView) { rgUpdate(dt); if (runView) { rgDraw(t); return; } }
+
+  // Das Boot: eigene, viel kleinere Zeichnen-Kette statt der Airport-Räume
+  if (state.location === 'boot') {
+    updateBootGuests(dt);
+    updateParticles(dt);
+    incomeTimer += dt; if (incomeTimer > 0.25) { incomeTimer = 0; incomeCache = incomePerSec(); }
+    drawHarborBg(t);
+    const bootDrawables = [];
+    drawBoot1(t, beat, bootDrawables);
+    for (const g of bootGuests) {
+      const gg = g;
+      bootDrawables.push({ d: gg.x + gg.y, fn: () => drawPerson(gg.x, gg.y, {
+        color: gg.color, skin: gg.skin, hair: gg.hair, female: gg.female, alpha: gg.alpha, bobPhase: gg.bobPhase }) });
+    }
+    bootDrawables.sort((a, b) => a.d - b.d);
+    for (const it of bootDrawables) it.fn();
+    drawBootCashPins(t);
+    for (const p of particles) {
+      ctx.globalAlpha = Math.max(0, Math.min(1, p.life));
+      ctx.font = `700 ${p.size}px system-ui, sans-serif`; ctx.textAlign = 'center';
+      ctx.fillStyle = p.color || '#fff';
+      ctx.fillText(p.txt, p.x, p.y);
+    }
+    ctx.globalAlpha = 1;
+    return;
+  }
 
   updateGuests(dt);
   updateParticles(dt);

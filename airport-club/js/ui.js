@@ -18,6 +18,7 @@ const ROOM_META = {
   t2:   { icon: '🪩', name: 'Terminal 2',        sub: 'Zweiter Floor' },
   roof: { icon: '🌃', name: 'Rooftop · VIP',     sub: 'VIP Sky Lounge' },
   hinter: { icon: '🕶️', name: 'Hinterzimmer',    sub: 'Schwarzmarkt · Ware beschaffen & dealen' },
+  boot1: { icon: '🚢', name: 'Das Boot · Oberdeck', sub: 'Franchise #2 · Würzburg' },
 };
 
 const $ = sel => document.querySelector(sel);
@@ -53,6 +54,13 @@ export function updateHUD() {
   // Phasen-Fortschritt (jetzt im Seiten-Button 📋)
   const p = G.phaseInfo();
   const rp = $('#rail-prog'); if (rp) rp.textContent = `${p.doneCount}/${p.total}`;
+
+  // Standort-Umschalter (Airport ↔ Das Boot)
+  const locBtn = $('#loc-switch');
+  if (locBtn) {
+    locBtn.classList.toggle('hidden', !G.state.bootUnlocked);
+    locBtn.textContent = G.state.location === 'boot' ? '✈️ Zurück zum Airport' : '🚢 Zum Boot';
+  }
 
   // Hype
   const hypePct = G.dropActive() ? 100 : G.state.hype;
@@ -308,8 +316,26 @@ function openStationsModal() {
       }
       for (const roomDef of ROOMS) {
         list.appendChild(el('div', 'list-caption', `${roomDef.icon} ${roomDef.name} · ${roomDef.sub}`));
-        // Gesperrter Raum → Freischalt-Zeile (Terminal 2 / Rooftop)
+        // Gesperrter Raum → Freischalt-Zeile (Terminal 2 / Rooftop / Das Boot)
         if (!G.roomUnlocked(roomDef.id)) {
+          if (roomDef.id === 'boot1') {
+            const bp = G.bootProgress(), ready = G.canUnlockBoot();
+            const hint = ready ? '🎉 Bereit zur großen Eröffnung!'
+              : `⭐ ${bp.fame}/${bp.fameReq} Ruf-Sterne · 💰 ${fmt(bp.lifetime)}/${fmt(bp.ltReq)} €`;
+            const row = el('div', 'station-row' + (ready ? '' : ' dim'));
+            row.innerHTML = `
+              <div class="st-icon">🔒</div>
+              <div class="st-info">
+                <div class="st-name">${roomDef.name} gesperrt</div>
+                <div class="st-desc">${hint}</div>
+              </div>
+              <button class="btn-buy${ready ? '' : ' disabled'}"><span>Franchise</span><b>Eröffnen!</b></button>`;
+            row.querySelector('.btn-buy').addEventListener('click', () => {
+              if (G.unlockBoot()) { playSfx('chest'); confetti(50); renderRows(); updateHUD(); toast('🚢 „Das Boot" ist eröffnet!'); }
+            });
+            list.appendChild(row);
+            continue;
+          }
           const isRoof = roomDef.id === 'roof';
           const req = isRoof ? ROOF_REQ : T2_REQ;
           const ready = isRoof ? G.canUnlockRoof() : G.canUnlockT2();
@@ -411,8 +437,9 @@ function buildGoals() {
   if (ndj) out.push({ icon: ndj.icon, title: `DJ: ${ndj.name}`, sub: ndj.desc, done: false, progress: s.money / ndj.cost, reqLabel: `${fmt(ndj.cost)} €` });
   out.push({ icon: '♻️', title: 'Neueröffnung (Prestige)', sub: 'Ruf-Sterne für dauerhaften Bonus', done: s.fame > 0, progress: s.level / PRESTIGE.minLevel, reqLabel: `Level ${PRESTIGE.minLevel} · du: ${s.level}` });
   const bp = G.bootProgress();
-  out.push({ icon: '🚢', title: 'Franchise: „Das Boot“', sub: 'Der 2. Club (Würzburg) — 3 Etagen, Wasser-Theme. Das große Endgame.',
-    done: bp.ready, progress: Math.min(bp.fame / bp.fameReq, bp.lifetime / bp.ltReq),
+  out.push({ icon: '🚢', title: 'Franchise: „Das Boot“',
+    sub: s.bootUnlocked ? 'Eröffnet — dein zweiter Club läuft am Hafen.' : bp.ready ? '🎉 Bereit! Im Menü „Räume" eröffnen.' : 'Der 2. Club (Würzburg) — Oberdeck, Wasser-Theme. Das große Endgame.',
+    done: s.bootUnlocked, progress: Math.min(bp.fame / bp.fameReq, bp.lifetime / bp.ltReq),
     reqLabel: `${bp.fame}/${bp.fameReq} ⭐ Ruf · ${fmt(bp.lifetime)} / ${fmt(bp.ltReq)} €` });
   return out;
 }
@@ -1134,6 +1161,10 @@ export function initUI() {
   $('#btn-ach').addEventListener('click', openAchievementsModal);
   $('#btn-rivals').addEventListener('click', () => { rivalUnseen = false; openRivalsModal(); });
   $('#btn-photo').addEventListener('click', openPhotoModal);
+  $('#loc-switch').addEventListener('click', () => {
+    G.setLocation(G.state.location === 'boot' ? 'airport' : 'boot');
+    playSfx('click'); updateHUD();
+  });
   $('#btn-underground').addEventListener('click', () => { ugUnseen = false; openRoomView('hinter'); });
   // Zurück aus der Raum-Detailansicht
   $('#room-back').addEventListener('click', closeRoomView);
@@ -1164,6 +1195,7 @@ export function initUI() {
   G.on('celebSpawn', () => toast('🌟 Ein Promi ist im Club! Tipp ihn an!'));
   G.on('t2unlocked', () => {});
   G.on('roofunlocked', () => { playSfx('chest'); confetti(50); toast('🌃 Rooftop eröffnet — Sky Lounge über den Dächern!'); });
+  G.on('bootunlocked', () => { updateHUD(); });
   G.on('story', beat => storyPopup(beat));
   G.on('ugPhase', ({ name }) => { playSfx('quest'); toast(`🕶️ Unterwelt-Kapitel: „${name}"`); updateHUD(); });
   G.on('performer', () => {});

@@ -71,6 +71,8 @@ export const state = {
   storySeen: {},          // gesehene Story-Beats (id -> true)
   raidUntil: 0,            // bis dahin ist der Club nach einer Razzia fast dicht
   bootTeased: false,       // „Das Boot"-Endgame schon einmal angekündigt?
+  bootUnlocked: false,     // Franchise #2 eröffnet?
+  location: 'airport',     // aktueller Standort: 'airport' | 'boot'
   createdAt: Date.now(),
 };
 
@@ -78,6 +80,7 @@ export const state = {
 export function roomUnlocked(roomId) {
   if (roomId === 't2') return state.t2Unlocked;
   if (roomId === 'roof') return state.roofUnlocked;
+  if (roomId === 'boot1') return state.bootUnlocked;
   if (roomId === 'hinter') return undergroundUnlocked() && !dealerJailed();
   return true; // t1
 }
@@ -553,6 +556,23 @@ export function custSpawnInterval() {
 export function bootProgress() {
   return { fame: state.fame, fameReq: BOOT_REQ.fame, lifetime: state.lifetime, ltReq: BOOT_REQ.lifetime,
     ready: state.fame >= BOOT_REQ.fame && state.lifetime >= BOOT_REQ.lifetime };
+}
+export function canUnlockBoot() { return !state.bootUnlocked && bootProgress().ready; }
+export function unlockBoot() {
+  if (!canUnlockBoot()) return false;
+  state.bootUnlocked = true;
+  state.location = 'boot';
+  emit('bootunlocked');
+  storyFire('bootOpen');
+  save();
+  return true;
+}
+// Standort wechseln (Airport ↔ Boot) — reines Präsentations-Feld, dieselbe Wirtschaft läuft weiter
+export function setLocation(loc) {
+  if (loc === 'boot' && !state.bootUnlocked) return false;
+  state.location = loc === 'boot' ? 'boot' : 'airport';
+  save();
+  return true;
 }
 
 export function incomePerSec() {
