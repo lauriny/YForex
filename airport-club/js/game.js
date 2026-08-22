@@ -11,6 +11,7 @@ import {
   RIVALS, RIVAL_OVERTAKE_MULT, UNDERGROUND_JOBS, UNDERGROUND_REQ, HEAT_MAX, HEAT_DECAY, BOOT_REQ, RAID_DUR, TAKEDOWN_CD, BODY_RAID_DELAY, BRIBE_MULT,
   DEAL_CATS, DEAL_GOODS, DEAL_GOODS_FLAT, goodById, CUSTOMER_ARCHETYPES, DEAL_CFG, SOURCING,
   SHOOTER, BUST_PENALTY, NEMESIS, UNDERWORLD_PHASES, getUgPhase, STORY,
+  NIGHT, REP, repTier, INCIDENTS, CHAPTERS, chapterFor,
 } from './data.js';
 
 const SAVE_KEY = 'airportClub.save.v1';
@@ -64,6 +65,17 @@ export const state = {
   settings: { sound: true, music: true, musicStyle: 'house' },
   devMode: false,          // Dev-Modus (per Code in den Einstellungen)
   nightStreak: 0,          // wie viele Club-Nächte in Folge durchgezogen
+  // ---- Die Nacht: Kern-Loop mit Ziel, Verlauf und Ausgang ----
+  clock: NIGHT.startMin,   // aktuelle Uhrzeit in Minuten (22:00 → 04:00)
+  nights: 0,               // erfolgreich abgeschlossene Nächte
+  nightGoal: 0,            // Umsatzziel dieser Nacht (0 = noch nicht gesetzt)
+  nightEarned: 0,          // in dieser Nacht bereits verdient
+  nightMult: 1,            // temporärer Gäste-/Einkommensschub aus Vorfällen
+  rep: REP.start,          // Ruf 0..100 — zweite knappe Ressource
+  incident: null,          // aktuell offener Vorfall { id, until, opts }
+  nextIncidentAt: 0,       // Uhrzeit (Nacht-Minuten) des nächsten Vorfalls
+  incidentsHandled: 0,
+  chapter: 0,              // erreichtes Story-Kapitel
   rivals: { beaten: [], seeded: false },  // ids überholter Rivalen (dauerhafter Einkommens-Bonus)
   underground: { unlocked: false, job: null, heat: 0, done: 0, lastResult: null, takedownCdUntil: 0, pendingRaidAt: 0 },
   dealer: { rep: 0, stock: [], served: 0, runsDone: 0, catsRun: {}, lastDeal: null, run: null, customer: null, jailUntil: 0, lastBust: null },   // Schwarzmarkt
@@ -138,12 +150,26 @@ export function eventGuestMult() { const d = eventDef(); return d ? d.guests : 1
 export function raidActive() { return Date.now() < (state.raidUntil || 0); }
 export function raidLeft() { return Math.max(0, ((state.raidUntil || 0) - Date.now()) / 1000); }
 
-export function globalMult() {
+// Multiplikatoren OHNE Ruf/Nacht — Basis für Zielwerte und Vorfallskosten,
+// damit sich Kosten nicht mit dem Ruf selbst aufschaukeln.
+export function baseMult() {
   let m = staffGlobalMult() * fameMult() * djMult() * rivalMult();
+  if (raidActive()) m *= 0.05;
+  return m;
+}
+export function baseIncomePerSec() {
+  let sum = 0;
+  for (const st of STATIONS) sum += stationIncome(st.id);
+  return sum * baseMult();
+}
+export function globalMult() {
+  let m = baseMult();
+  m *= REP.multAt(state.rep);                  // Ruf schlägt direkt aufs Geschäft durch
+  m *= state.nightMult || 1;                   // temporärer Schub aus Vorfällen
+  m *= 0.55 + 0.75 * nightPeak();              // Kurve der Nacht: leer → Peak → Ausklang
   if (boostActive()) m *= BOOST.mult;
   if (dropActive()) m *= DROP.mult;
   if (eventActive()) m *= eventMult();
-  if (raidActive()) m *= 0.05;                 // Razzia: Laden fast geschlossen
   return m;
 }
 
@@ -451,16 +477,7 @@ export function checkUgPhase() {
   save();
 }
 // Nordstern: beide Endgame-Wege mit Fortschritt (0..1)
-export function northStar() {
-  const rank = rivalRank(), total = RIVALS.length + 1, nx = nextRival(), bp = bootProgress();
-  const legalFrac = 1 - (rank - 1) / total;
-  const crimeFrac = Math.min(1, 0.5 * Math.min(1, state.lifetime / bp.ltReq) + 0.5 * Math.min(1, state.fame / bp.fameReq));
-  return {
-    legal: { label: rank <= 1 ? '👑 Weltrangliste #1!' : `🏆 Rang #${rank}${nx ? ' → ' + nx.name : ''}`, frac: legalFrac, rank },
-    crime: { label: bp.ready ? '🚢 „Das Boot" bereit!' : `🚢 Das Boot ${Math.round(crimeFrac * 100)} %`, frac: crimeFrac, ready: bp.ready },
-    nemesis: NEMESIS,
-  };
-}
+// northStar/nightReport wurden vom Kapitel- und Nacht-System abgelöst.
 
 // ---- Feilsch-Engine (Theke) ------------------------------------
 export function offerPrice(item, kind) { return Math.max(1, Math.round(calcValue(item) * (DEAL_CFG.offers[kind] || 1))); }
@@ -596,10 +613,14 @@ export function levelFor(lifetime) {
 }
 
 // ---- Geld ----------------------------------------------------------
+const NIGHT_EXCLUDED = new Set(['chest', 'offline', 'night', 'daily', 'shop', 'dev', 'underground', 'dealer']);
 export function addMoney(n, source) {
   if (n <= 0) return;
   state.money += n;
   state.lifetime += n;
+  // Aufs Nachtziel zählt nur der Betrieb — nicht Truhen, Offline, Shop & Co.
+  // Das Ziel misst „wie gut lief der Laden heute", nicht wie viele Geschenke ankamen.
+  if (!NIGHT_EXCLUDED.has(source)) state.nightEarned += n;
   const newLevel = levelFor(state.lifetime);
   while (newLevel > state.level) {
     state.level++;
@@ -1094,6 +1115,7 @@ export function tick(now) {
   lastTick = now;
   if (dt <= 0) return;
 
+  advanceClock(dt);            // Die Nacht läuft — Ziel, Vorfälle, Nachtende
   addMoney(incomePerSec() * dt);
 
   // Hype füllt sich automatisch → regelmäßiger DROP ohne Tippen
@@ -1151,18 +1173,6 @@ export function goldenBottleReward() {
 }
 
 // ---- Nacht-Report (Club-Nacht 22:00 → 02:00 durchgezogen) -------------------------
-export function nightReport(earned) {
-  state.nightStreak = (state.nightStreak || 0) + 1;
-  const streak = state.nightStreak;
-  const bonus = Math.max(50, earned * (0.12 + Math.min(0.4, streak * 0.04)));
-  const gems = streak % 3 === 0 ? 2 : 0;
-  addMoney(bonus, 'night');
-  if (gems) state.gems += gems;
-  save();
-  const out = { night: streak, earned, bonus, gems };
-  emit('nightReport', out);
-  return out;
-}
 
 // ---- Dev-Modus (per Code in den Einstellungen) ------------------------------------
 const DEV_CODE = '1337';
@@ -1272,4 +1282,171 @@ export function resetSave() {
   if (savePending) { clearTimeout(savePending); savePending = null; }   // sonst könnte ein noch ausstehendes save() den Reset überschreiben
   try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
   location.reload();
+}
+
+// ============================================================
+//  DIE NACHT — Kern-Loop: Ziel, Verlauf, Ausgang
+// ============================================================
+const INCIDENT_MIN_LEVEL = 4;   // vorher lernt der Spieler erst den Grundbetrieb
+
+export function nightProgress() {
+  return Math.max(0, Math.min(1, (state.clock - NIGHT.startMin) / (NIGHT.endMin - NIGHT.startMin)));
+}
+export function clockLabel() {
+  const h = Math.floor(state.clock / 60) % 24, m = Math.floor(state.clock % 60);
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+// „Wie voll ist der Laden" — steigt zur Kernzeit an und fällt gegen Morgen
+export function nightPeak() {
+  const p = nightProgress();
+  return 0.35 + 0.65 * Math.sin(Math.min(1, p * 1.15) * Math.PI);
+}
+export function nightGoalInfo() {
+  const goal = state.nightGoal || 1;
+  return { goal, earned: state.nightEarned, frac: Math.min(1, state.nightEarned / goal), done: state.nightEarned >= goal };
+}
+function rollNightGoal() {
+  // Ziel bemisst sich am aktuellen Einkommen, wächst mit jeder geschafften Nacht
+  const base = Math.max(200, baseIncomePerSec() * NIGHT.goalSeconds);
+  state.nightGoal = Math.floor(base * Math.pow(NIGHT.goalGrowth, Math.min(NIGHT.goalGrowthCap, state.nights)));
+  state.nightEarned = 0;
+  state.nightMult = 1;
+  state.incident = null;
+  state.incidentsHandled = 0;
+  state.nextIncidentAt = NIGHT.startMin + 25 + Math.random() * 30;
+}
+export function startNightIfNeeded() { if (!state.nightGoal) rollNightGoal(); }
+
+function endNight() {
+  const info = nightGoalInfo();
+  const won = info.done;
+  const before = state.rep;
+  addRep(won ? NIGHT.repWin : -NIGHT.repLose);
+  if (won) state.nights++;
+  state.nightStreak = won ? (state.nightStreak || 0) + 1 : 0;
+  const bonus = won ? Math.max(100, info.earned * (0.15 + Math.min(0.35, state.nightStreak * 0.03))) : 0;
+  const gems = won && state.nightStreak % 3 === 0 ? 2 : 0;
+  if (bonus) addMoney(bonus, 'night');
+  if (gems) state.gems += gems;
+  const out = { won, night: state.nights, streak: state.nightStreak, earned: info.earned, goal: info.goal,
+    bonus, gems, rep: state.rep, repDelta: state.rep - before };
+  state.clock = NIGHT.startMin;
+  rollNightGoal();
+  checkChapter();
+  saveNow();
+  emit('nightEnd', out);
+  return out;
+}
+
+// Uhr läuft — wird aus tick() gespeist
+function advanceClock(dt) {
+  startNightIfNeeded();
+  state.clock += dt * NIGHT.minutesPerSecond;
+  if (state.clock >= NIGHT.endMin) { endNight(); return; }
+  // Vorfall fällig? (erst wenn der Laden läuft — ein Neuling ohne Kasse
+  // soll nicht für Entscheidungen bestraft werden, die er nicht bezahlen kann)
+  if (!state.incident && state.level >= INCIDENT_MIN_LEVEL && state.clock >= state.nextIncidentAt) rollIncident();
+  // offener Vorfall läuft ab → gilt als „nichts getan"
+  if (state.incident && state.clock >= state.incident.until) resolveIncident(-1);
+}
+
+// ---- Ruf -----------------------------------------------------------
+export function addRep(d) {
+  const before = state.rep;
+  state.rep = Math.max(REP.min, Math.min(REP.max, state.rep + d));
+  if (state.rep !== before) emit('rep', { rep: state.rep, delta: state.rep - before });
+  return state.rep;
+}
+export function repMult() { return REP.multAt(state.rep); }
+export function repInfo() { const t = repTier(state.rep); return { rep: Math.round(state.rep), ...t }; }
+
+// ---- Vorfälle: die Entscheidungen -----------------------------------
+function incidentPool() {
+  return INCIDENTS.filter(i => {
+    if (i.minLevel && state.level < i.minLevel) return false;
+    if (i.nemesis && state.chapter < 3) return false;
+    return true;
+  });
+}
+function rollIncident() {
+  const pool = incidentPool();
+  if (!pool.length) return;
+  let total = 0; for (const i of pool) total += i.w;
+  let r = Math.random() * total, pickedDef = pool[0];
+  for (const i of pool) { r -= i.w; if (r <= 0) { pickedDef = i; break; } }
+  // Optionen, die eine Bedingung haben (z. B. nur mit Untergrund), rausfiltern
+  const opts = pickedDef.opts.filter(o => o.hidden !== 'crime' || undergroundUnlocked());
+  state.incident = { id: pickedDef.id, until: state.clock + 45, opts: opts.map((_, i) => i) };
+  emit('incident', incidentInfo());
+}
+export function incidentInfo() {
+  if (!state.incident) return null;
+  const def = INCIDENTS.find(i => i.id === state.incident.id);
+  if (!def) return null;
+  const opts = def.opts.filter(o => o.hidden !== 'crime' || undergroundUnlocked());
+  const per = baseIncomePerSec();
+  return {
+    id: def.id, icon: def.icon, title: def.title, text: def.text,
+    left: Math.max(0, (state.incident.until - state.clock) / NIGHT.minutesPerSecond),
+    opts: opts.map((o, i) => ({
+      i, label: o.label,
+      money: Math.round((o.money || 0) * per),
+      rep: o.rep || 0, heat: o.heat || 0,
+      affordable: (o.money || 0) >= 0 || state.money >= Math.abs((o.money || 0) * per),
+    })),
+  };
+}
+// idx = -1 bedeutet: abgelaufen / nichts getan
+export function resolveIncident(idx) {
+  if (!state.incident) return null;
+  const def = INCIDENTS.find(i => i.id === state.incident.id);
+  // Nicht bezahlbare Option: gar nicht erst zulassen — der Vorfall bleibt offen,
+  // damit niemand bestraft wird, nur weil die Kasse gerade leer ist.
+  if (def && idx >= 0) {
+    const opts0 = def.opts.filter(o => o.hidden !== 'crime' || undergroundUnlocked());
+    const o0 = opts0[idx];
+    if (o0 && (o0.money || 0) < 0 && state.money < Math.abs((o0.money || 0) * baseIncomePerSec())) return null;
+  }
+  state.incident = null;
+  state.nextIncidentAt = state.clock + 45 + Math.random() * 55;
+  if (!def) return null;
+  const opts = def.opts.filter(o => o.hidden !== 'crime' || undergroundUnlocked());
+  const per = baseIncomePerSec();
+  let out;
+  if (idx < 0 || !opts[idx]) {
+    // Nichts tun ist auch eine Entscheidung — und meistens die teuerste
+    addRep(-5);
+    out = { id: def.id, icon: def.icon, ignored: true, rep: -5, money: 0,
+      txt: 'Du hast zu lange gezögert. Das Problem hat sich von selbst gelöst — zu deinen Lasten.' };
+  } else {
+    const o = opts[idx];
+    const money = Math.round((o.money || 0) * per);
+    if (money < 0) state.money += money;
+    else if (money > 0) addMoney(money, 'incident');
+    if (o.rep) addRep(o.rep);
+    if (o.heat) state.underground.heat = Math.max(0, Math.min(HEAT_MAX, state.underground.heat + o.heat));
+    if (o.guests) state.nightMult *= o.guests;
+    out = { id: def.id, icon: def.icon, label: o.label, money, rep: o.rep || 0, heat: o.heat || 0, txt: o.txt };
+  }
+  state.incidentsHandled++;
+  emit('incidentDone', out);
+  save();
+  return out;
+}
+
+// ---- Kapitel --------------------------------------------------------
+export function chapterInfo() {
+  const ch = chapterFor(state);
+  return { ...ch, idx: ch.id, total: CHAPTERS.length };
+}
+function checkChapter() {
+  const ch = chapterFor(state);
+  if (ch.id > (state.chapter || 0)) {
+    state.chapter = ch.id;
+    emit('chapter', ch);
+  }
+}
+
+export function devSetNightClock(min) {
+  state.clock = Math.max(NIGHT.startMin, Math.min(NIGHT.endMin - 0.5, min));
 }

@@ -8,7 +8,8 @@ import {
   depositAtStation, collectStation, roomUnlocked,
   eventDef, eventGuestMult, incomePerSec,
   marketingGuestBonus, marketingSpawnBonus, activeDjDef,
-  currentDrink, activeTheme, goldenBottleReward, nightReport,
+  currentDrink, activeTheme, goldenBottleReward,
+  nightProgress as gameNightProgress, clockLabel as gameClockLabel, devSetNightClock, repInfo,
   activeJob, startJob, jobStake, jobFailChance,
   deliverGoods, surrenderJob, doTakedown, disposeBody, takedownAvailable, takedownLeft,
   bribeCost, bribeJob, dropAndFlee,
@@ -156,22 +157,13 @@ function t1DanceFloor() { const g = t1Grow(); return { x: 2.5, y: 9.3, w: 4.6 + 
 function doorPoint() { const g = t1Grow(); return { x: 4.0 + g.dw * 0.5, y: 14.2 + g.dd }; }
 
 // ---- Nachtzeit & „je später, desto mehr geht ab" ----
-let clubClock = 22 * 60;                 // Minuten seit Mitternacht, Start 22:00
-const NIGHT_START = 22 * 60, NIGHT_END = 26 * 60;   // 22:00 → 02:00 (dann Loop)
-let nightLifetimeStart = null;           // Einnahmen-Snapshot beim Nacht-Start (für den Nacht-Report)
-export function devSetClock(min) { clubClock = Math.max(NIGHT_START, Math.min(NIGHT_END - 0.5, min)); }
-function updateClock(dt) {
-  if (nightLifetimeStart == null) nightLifetimeStart = state.lifetime;
-  clubClock += dt * 0.7;                 // ~1 Spielminute/1.4 s
-  if (clubClock >= NIGHT_END) {          // 02:00 — Nacht geschafft → Report + Bonus + neue Nacht
-    clubClock = NIGHT_START;
-    nightReport(Math.max(0, state.lifetime - nightLifetimeStart));
-    nightLifetimeStart = state.lifetime;
-  }
-}
-function nightProgress() { return Math.max(0, Math.min(1, (clubClock - NIGHT_START) / (NIGHT_END - NIGHT_START))); }
+// Die Uhr läuft jetzt in game.js — sie ist Spiellogik (Nachtziel, Vorfälle),
+// nicht Darstellung. Hier wird sie nur noch gelesen.
+export function devSetClock(min) { devSetNightClock(min); }
+function updateClock(dt) { /* no-op: übernimmt game.js */ }
+function nightProgress() { return gameNightProgress(); }
 function nightDrunk() { return nightProgress() * (dropActive() ? 1 : 0.9); }   // 0..1 Betrunkenheit/Energie
-function clockLabel() { const h = Math.floor(clubClock / 60) % 24, m = Math.floor(clubClock % 60); return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`; }
+function clockLabel() { return gameClockLabel(); }
 // Welt-Position eines Geld-Ankers inkl. Club-Ausbau-Versatz (Shots/Garderobe wandern nach aussen)
 function anchorWorld(id) {
   const a = A[id], g = t1Grow();

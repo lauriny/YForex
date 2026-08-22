@@ -297,24 +297,7 @@ button { font-family: inherit; border: none; background: none; cursor: pointer; 
   text-shadow: 0 1px 3px rgba(0,0,0,0.7);
 }
 
-#tap-hint {
-  position: absolute;
-  left: 50%;
-  bottom: 46px;
-  transform: translateX(-50%);
-  z-index: 3;
-  color: rgba(255,255,255,0.85);
-  font-size: 11px;
-  font-weight: 700;
-  text-shadow: 0 1px 3px rgba(0,0,0,0.8);
-  pointer-events: none;
-  animation: hintfade 2.4s ease-in-out infinite;
-  white-space: nowrap;
-}
-@keyframes hintfade {
-  0%, 100% { opacity: 0.35; }
-  50% { opacity: 0.95; }
-}
+
 
 /* ---------------- Bottom-Nav ---------------- */
 #bottomnav {
@@ -730,6 +713,10 @@ button { font-family: inherit; border: none; background: none; cursor: pointer; 
 #splash.gone { opacity: 0; pointer-events: none; }
 .splash-inner { text-align: center; animation: splashpop .5s cubic-bezier(.34,1.56,.64,1); }
 @keyframes splashpop { 0% { transform: scale(0.85); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+@keyframes hintfade {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.95; }
+}
 .splash-logo { font-size: 64px; filter: drop-shadow(0 0 18px rgba(139,92,246,0.8)); animation: hintfade 2.4s ease-in-out infinite; }
 .splash-title {
   font-size: 46px; font-weight: 900; letter-spacing: 3px; color: #fff;
@@ -1287,27 +1274,14 @@ body.run-mode #room-hud,
 body.run-mode #side-rail,
 body.run-mode #income-rate,
 body.run-mode #hype-meter,
-body.run-mode #tap-hint,
 body.run-mode #event-banner,
+body.run-mode #nightbar,
+body.run-mode #loc-switch,
 body.run-mode #bottomnav { display: none !important; }
 
 /* ---------------- Nordstern (sichtbares Doppel-Ziel) ---------------- */
-#northstar {
-  position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
-  z-index: 4; display: flex; flex-direction: column; gap: 3px;
-  background: rgba(23,27,51,0.82); border: 2px solid rgba(255,255,255,0.14);
-  border-radius: 12px; padding: 6px 10px 5px; min-width: 190px; max-width: 74%;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.35); text-align: left;
-}
-#northstar:active { transform: translateX(-50%) scale(0.97); }
-#northstar.hidden { display: none; }
-.ns-row { display: flex; align-items: center; gap: 6px; }
-.ns-ic { font-size: 12px; width: 14px; text-align: center; }
-.ns-bar { flex: 1; height: 6px; border-radius: 999px; background: rgba(0,0,0,0.4); overflow: hidden; }
-.ns-fill { display: block; height: 100%; width: 0%; border-radius: 999px;
+
   background: linear-gradient(90deg, #ffd93c, #ff9f43); transition: width .5s ease; }
-.ns-fill.ns-crime { background: linear-gradient(90deg, #c56cf0, #8b5cf6); }
-.ns-label { color: #fff; font-size: 10px; font-weight: 800; text-shadow: 0 1px 2px rgba(0,0,0,0.6);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
 
 /* ---------------- Story-Beat-Karte ---------------- */
@@ -1463,3 +1437,81 @@ body.run-mode #bottomnav { display: none !important; }
 
 /* ---- Dev-Code-Eingabe: sauberer Rahmen statt undefinierter Fallback-Variable ---- */
 .dev-code-row input { border-color: var(--glass-line); background: rgba(255,255,255,0.05); color: var(--ink); }
+
+/* ============================================================
+   DIE NACHT — der Kern, immer sichtbar über dem Club
+   ============================================================ */
+#nightbar {
+  position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
+  z-index: 4; display: flex; flex-direction: column; gap: 4px;
+  background: linear-gradient(180deg, rgba(46,34,84,0.9), rgba(20,15,40,0.9));
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-line-hi); border-radius: 14px;
+  padding: 7px 12px 6px; min-width: 216px; max-width: 78%;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.4); text-align: left;
+}
+#nightbar:active { transform: translateX(-50%) scale(0.98); }
+#nightbar.hidden { display: none; }
+.nb-head { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 800; }
+#nb-clock { color: var(--neon-cyan); font-variant-numeric: tabular-nums; letter-spacing: .5px; }
+#nb-chapter { flex: 1; color: var(--ink-2); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#nb-rep { color: #ffd93c; font-variant-numeric: tabular-nums; }
+.nb-track { height: 7px; border-radius: 999px; background: rgba(0,0,0,0.45); overflow: hidden; }
+.nb-track i {
+  display: block; height: 100%; width: 0%; border-radius: 999px;
+  background: linear-gradient(90deg, #4fe0ff, #43d95e);
+  transition: width .4s ease;
+}
+#nightbar.goal-done .nb-track i { background: linear-gradient(90deg, #6ee787, #ffd93c); }
+.nb-goal { font-size: 9.5px; font-weight: 700; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+#nightbar.goal-done .nb-goal { color: #7cf49a; }
+
+/* ---- Vorfall-Karte: die eigentliche Entscheidung ---- */
+.modal-overlay.incident-pop { display: grid; place-items: center; }
+.inc-box {
+  background: linear-gradient(180deg, #2a2044, #17122c);
+  border: 2px solid var(--neon-pink); border-radius: 20px;
+  padding: 20px 18px 16px; max-width: 330px; margin: 0 18px; text-align: center;
+  box-shadow: 0 14px 44px rgba(0,0,0,0.65), 0 0 30px rgba(255,79,216,0.2);
+  transform: scale(0.85); transition: transform .22s;
+}
+.incident-pop.open .inc-box { transform: scale(1); }
+.inc-emoji { font-size: 42px; filter: drop-shadow(0 3px 0 rgba(0,0,0,0.4)); }
+.inc-title { color: #fff; font-size: 18px; font-weight: 900; margin: 6px 0 5px; }
+.inc-text { color: var(--ink-2); font-size: 13px; line-height: 1.45; margin-bottom: 12px; }
+.inc-timer { height: 4px; border-radius: 999px; background: rgba(0,0,0,0.4); overflow: hidden; margin-bottom: 12px; }
+.inc-timer i { display: block; height: 100%; background: linear-gradient(90deg, #ffd93c, #ff5e6c); }
+.inc-opt {
+  display: block; width: 100%; margin: 7px 0; padding: 10px 12px; border-radius: 13px;
+  background: linear-gradient(180deg, rgba(70,54,116,0.9), rgba(38,28,68,0.9));
+  border: 1.5px solid var(--glass-line-hi); color: var(--ink);
+  font-size: 13.5px; font-weight: 800; text-align: left; transition: transform .1s;
+}
+.inc-opt:active { transform: scale(0.97); }
+.inc-opt.disabled { opacity: 0.4; pointer-events: none; }
+.inc-cost { display: block; margin-top: 3px; font-size: 10.5px; font-weight: 700; color: var(--ink-3); }
+.inc-cost .c-money { color: #ff9aa5; } .inc-cost .c-gain { color: #7cf49a; }
+.inc-cost .c-rep-up { color: #7cf49a; } .inc-cost .c-rep-dn { color: #ff9aa5; }
+.inc-cost .c-heat { color: #ffb03a; }
+
+/* ---- Nacht-Report ---- */
+.night-box { border-color: var(--neon-cyan) !important; }
+.night-box.lost { border-color: #ff5e6c !important; }
+.nr-line { display: flex; justify-content: space-between; align-items: center;
+  padding: 7px 2px; font-size: 13px; font-weight: 700; color: var(--ink-2);
+  border-bottom: 1px solid rgba(255,255,255,0.07); }
+.nr-line:last-of-type { border-bottom: none; }
+.nr-line b { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+/* ---- Kapitel-Kopf im Ziele-Modal ---- */
+.chapter-head {
+  display: flex; gap: 12px; align-items: flex-start; padding: 13px 14px; margin-bottom: 8px;
+  border-radius: 16px; background: linear-gradient(180deg, rgba(60,44,104,0.9), rgba(28,20,54,0.9));
+  border: 1px solid var(--glass-line-hi);
+}
+.ch-icon { font-size: 32px; flex: none; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5)); }
+.ch-body { flex: 1; min-width: 0; }
+.ch-kap { font-size: 10px; font-weight: 800; color: var(--ink-3); letter-spacing: .6px; text-transform: uppercase; }
+.ch-name { font-size: 17px; font-weight: 900; color: #fff; margin: 1px 0 4px; }
+.ch-text { font-size: 12px; line-height: 1.45; color: var(--ink-2); }
+.ch-goal { font-size: 12px; font-weight: 800; color: #ffd93c; margin-top: 7px; }

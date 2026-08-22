@@ -581,3 +581,180 @@ export function milestoneMult(level) {
 export function nextMilestone(level) {
   return (Math.floor(level / MILESTONE_STEP) + 1) * MILESTONE_STEP;
 }
+
+// ============================================================
+//  DIE NACHT — der eigentliche Kern des Spiels
+// ============================================================
+// Eine Nacht läuft von 22:00 bis 04:00 und hat ein Umsatzziel. Wird es
+// erreicht, steigt der Ruf; wird es verfehlt, sinkt er. Damit hat jede
+// Sitzung einen Anfang, eine Spannungskurve und einen Ausgang — statt
+// eines endlosen Zahlenbalkens.
+export const NIGHT = {
+  startMin: 22 * 60,          // 22:00
+  endMin: 28 * 60,            // 04:00 (nächster Tag)
+  minutesPerSecond: 1.4,      // Spielminuten pro Echtsekunde → ~4,3 min echte Zeit je Nacht
+  goalSeconds: 200,           // Ziel = so viele Sekunden aktuelles Einkommen
+  goalGrowth: 1.02,           // pro geschaffter Nacht wird das Ziel etwas härter
+  goalGrowthCap: 20,          // ... aber gedeckelt, damit es nie unschaffbar wird
+  repWin: 5, repLose: 6,      // Ruf-Änderung bei Erfolg/Misserfolg (mild genug, um sich zu erholen)
+};
+
+// ---- Ruf: die zweite knappe Ressource ---------------------------
+// Ruf steht in Spannung zum schnellen Geld: Illegales bringt Umsatz,
+// kostet aber Ruf. Ruf wiederum bestimmt, wie gut der Laden läuft.
+export const REP = {
+  start: 50, min: 0, max: 100,
+  // Einkommens-Multiplikator: bei 0 Ruf nur 55 %, bei 100 Ruf 175 %
+  multAt(rep) { return 0.55 + (Math.max(0, Math.min(100, rep)) / 100) * 1.2; },
+  // Gäste-Multiplikator
+  guestsAt(rep) { return 0.6 + (Math.max(0, Math.min(100, rep)) / 100) * 0.9; },
+  tiers: [
+    { min: 0,  name: 'Verrufen',     icon: '💀' },
+    { min: 25, name: 'Geduldet',     icon: '😐' },
+    { min: 45, name: 'Angesagt',     icon: '🙂' },
+    { min: 65, name: 'Heiß',         icon: '🔥' },
+    { min: 85, name: 'Legendär',     icon: '👑' },
+  ],
+};
+export function repTier(rep) {
+  let t = REP.tiers[0];
+  for (const x of REP.tiers) if (rep >= x.min) t = x;
+  return t;
+}
+
+// ---- Vorfälle: die Entscheidungen, aus denen das Spiel besteht ----
+// Jede Option kostet und bringt etwas. `w` = Gewichtung beim Ziehen,
+// `need` = optionale Bedingung. Kosten in Sekunden Einkommen (skaliert
+// automatisch mit dem Fortschritt) statt fester Beträge.
+//   money: Sekunden Einkommen (negativ = Ausgabe)
+//   rep:   Ruf-Änderung
+//   heat:  Fahndungsdruck
+//   guests: kurzfristiger Gäste-Schub (Faktor für den Rest der Nacht)
+export const INCIDENTS = [
+  {
+    id: 'schlaegerei', icon: '🥊', w: 10,
+    title: 'Schlägerei an der Bar',
+    text: 'Zwei Gäste gehen aufeinander los. Die halbe Bar schaut zu.',
+    opts: [
+      { label: 'Security schickt sie raus', money: -12, rep: 4, txt: 'Sauber getrennt — die Gäste danken es dir.' },
+      { label: 'Selbst dazwischen gehen',   money: 0,  rep: -3, heat: 4, txt: 'Du kassierst einen Treffer. Kein guter Look.' },
+      { label: 'Laufen lassen',             money: 0,  rep: -8, txt: 'Die Eskalation steht am nächsten Tag im Netz.' },
+    ],
+  },
+  {
+    id: 'presse', icon: '📸', w: 8,
+    title: 'Blogger mit Kamera',
+    text: 'Eine bekannte Nightlife-Seite dreht heute bei dir.',
+    opts: [
+      { label: 'Freigetränke für die Crew', money: -25, rep: 10, txt: 'Der Beitrag geht steil — morgen ist die Schlange länger.' },
+      { label: 'Normal behandeln',          money: 0,   rep: 1,  txt: 'Kurze Erwähnung. Immerhin.' },
+      { label: 'Rauswerfen',                money: 0,   rep: -10, txt: 'Der Verriss trifft dich härter als erwartet.' },
+    ],
+  },
+  {
+    id: 'andrang', icon: '🚪', w: 10,
+    title: 'Schlange bis um den Block',
+    text: 'Draußen warten mehr Leute, als reinpassen.',
+    opts: [
+      { label: 'Überfüllen — alle rein', money: 45, rep: -6, txt: 'Volle Kassen, aber drinnen ist es unerträglich.' },
+      { label: 'Türpolitik durchziehen',  money: 0,  rep: 6, txt: 'Die Schlange wird zur Werbung.' },
+      { label: 'Eintritt verdoppeln',     money: 25, rep: -2, txt: 'Manche zahlen, manche gehen.' },
+    ],
+  },
+  {
+    id: 'kontrolle', icon: '🚓', w: 7, minLevel: 8,
+    title: 'Polizeikontrolle',
+    text: 'Zwei Streifenwagen vor der Tür. Sie wollen die Lizenz sehen.',
+    opts: [
+      { label: 'Voll kooperieren', money: -18, rep: 2, heat: -25, txt: 'Kostet Zeit und Umsatz, aber sie ziehen zufrieden ab.' },
+      { label: 'Hinhalten',        money: 0,   rep: 0, heat: 8,  txt: 'Sie kommen wieder. Bestimmt.' },
+      { label: 'Umschlag zustecken', money: -35, rep: 0, heat: -10, hidden: 'crime', txt: 'Diskret geregelt. Aber jemand hat es gesehen.' },
+    ],
+  },
+  {
+    id: 'dj_ausfall', icon: '🎛️', w: 8,
+    title: 'Der DJ fällt aus',
+    text: 'Dein Resident meldet sich 20 Minuten vor Set krank.',
+    opts: [
+      { label: 'Teuren Ersatz einfliegen', money: -40, rep: 8, txt: 'Das Set rettet die Nacht — und den Ruf.' },
+      { label: 'Playlist laufen lassen',    money: 0,  rep: -5, txt: 'Die Tanzfläche leert sich merklich.' },
+      { label: 'Selbst auflegen',           money: 0,  rep: -1, guests: 1.1, txt: 'Nicht perfekt, aber die Leute feiern den Mut.' },
+    ],
+  },
+  {
+    id: 'promi', icon: '🌟', w: 6, minLevel: 6,
+    title: 'Promi vor der Tür',
+    text: 'Ein bekanntes Gesicht will rein — mit acht Leuten Entourage.',
+    opts: [
+      { label: 'VIP-Tisch aufs Haus', money: -30, rep: 12, txt: 'Die Bilder gehen um die Stadt.' },
+      { label: 'Zahlen lassen wie alle', money: 20, rep: -4, txt: 'Er zahlt. Und kommt nie wieder.' },
+    ],
+  },
+  {
+    id: 'lieferung', icon: '📦', w: 7,
+    title: 'Die Lieferung fehlt',
+    text: 'Der Getränkegroßhändler hat die Hälfte vergessen.',
+    opts: [
+      { label: 'Teuer nachkaufen',   money: -22, rep: 2, txt: 'Die Bar bleibt voll. Die Marge nicht.' },
+      { label: 'Karte zusammenstreichen', money: 0, rep: -4, txt: 'Ausverkauft-Schilder sind kein guter Look.' },
+    ],
+  },
+  {
+    id: 'nachbarn', icon: '📢', w: 6,
+    title: 'Lärmbeschwerde',
+    text: 'Die Nachbarn haben das Ordnungsamt gerufen.',
+    opts: [
+      { label: 'Leiser drehen',        money: -15, rep: -2, txt: 'Die Stimmung sackt ab, aber Ruhe ist eingekehrt.' },
+      { label: 'Schalldämmung kaufen', money: -50, rep: 5, txt: 'Einmal zahlen, dauerhaft Ruhe.' },
+      { label: 'Ignorieren',           money: 0,  rep: -3, heat: 12, txt: 'Beim nächsten Mal wird es teuer.' },
+    ],
+  },
+  {
+    id: 'sabotage', icon: '🐀', w: 5, minLevel: 12, nemesis: true,
+    title: 'Sabotage',
+    text: 'Jemand hat Gerüchte gestreut, bei dir gäbe es gepanschte Drinks. Die Spur führt zur Konkurrenz.',
+    opts: [
+      { label: 'Öffentlich Labortest zeigen', money: -35, rep: 9, txt: 'Sauber widerlegt. Der Absender steht jetzt blöd da.' },
+      { label: 'Aussitzen',                    money: 0,  rep: -7, txt: 'Das Gerücht hält sich hartnäckig.' },
+      { label: 'Zurückschlagen',               money: -20, rep: -2, heat: 15, txt: 'Auge um Auge. Wird eskalieren.' },
+    ],
+  },
+];
+
+// ---- Kapitel: Story, die an Nächte und Ruf hängt ------------------
+// Jedes Kapitel hat eine echte Bedingung. Kein Text ohne Konsequenz:
+// mit dem Kapitel steigt auch der Anspruch (Nachtziel wächst).
+export const CHAPTERS = [
+  { id: 0, name: 'Die erste Nacht', icon: '🚪',
+    goal: 'Überlebe drei Nächte im Plus.',
+    text: 'Ein leeres Terminal, ein geliehener Kredit und ein Traum. Wenn die ersten Nächte nicht laufen, war es das.',
+    need: { nights: 0 } },
+  { id: 1, name: 'Es spricht sich rum', icon: '📈',
+    goal: 'Bring den Ruf auf 60.',
+    text: 'Die Leute reden über dich. Noch leise — aber sie reden.',
+    need: { nights: 3 } },
+  { id: 2, name: 'Der Laden brummt', icon: '🔥',
+    goal: 'Halte zehn Nächte durch.',
+    text: 'Volle Nächte, volle Kassen. Und die ersten, die neidisch werden.',
+    need: { nights: 6, rep: 55 } },
+  { id: 3, name: 'Der König wird aufmerksam', icon: '👑',
+    goal: 'Übersteh die Angriffe der Konkurrenz.',
+    text: 'Der König der Nacht hat deinen Namen gehört. Ab jetzt hast du einen Gegner, keinen Wettbewerb.',
+    need: { nights: 12, rep: 60 } },
+  { id: 4, name: 'Zwei Wege', icon: '🕶️',
+    goal: 'Sauber wachsen — oder den Hafen übernehmen.',
+    text: 'Du kannst der beste Laden der Stadt werden. Oder der mächtigste. Beides geht nicht ewig gut.',
+    need: { nights: 20, rep: 65 } },
+  { id: 5, name: 'Die Legende', icon: '🏆',
+    goal: 'Stoß den König vom Thron.',
+    text: 'Nur noch einer steht über dir. Und der weiß genau, wer du bist.',
+    need: { nights: 30 } },
+];
+export function chapterFor(st) {
+  let c = CHAPTERS[0];
+  for (const ch of CHAPTERS) {
+    const n = ch.need || {};
+    if ((st.nights || 0) >= (n.nights || 0) && (st.rep || 0) >= (n.rep || 0)) c = ch;
+  }
+  return c;
+}

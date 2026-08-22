@@ -46,18 +46,23 @@ export function updateHUD() {
   $('#hud-cash .pill-val').textContent = fmt(G.state.money);
   $('#income-rate').textContent = fmt(G.incomePerSec()) + ' €/s';
 
-  // Nordstern: sichtbares Doppel-Ziel (legal + Unterwelt)
-  if (G.northStar) {
-    const ns = G.northStar();
-    const lf = $('#ns-legal-fill'), cf = $('#ns-crime-fill'), nl = $('#ns-label');
-    if (lf) lf.style.width = Math.round(ns.legal.frac * 100) + '%';
-    if (cf) cf.style.width = Math.round(ns.crime.frac * 100) + '%';
-    if (nl) nl.textContent = ns.legal.label;
+  // Die Nacht: Uhrzeit, Ziel-Fortschritt, Ruf — der Kern, immer sichtbar
+  const nb = $('#nightbar');
+  if (nb) {
+    const ng = G.nightGoalInfo(), rep = G.repInfo(), ch = G.chapterInfo();
+    $('#nb-clock').textContent = G.clockLabel();
+    $('#nb-chapter').textContent = ch.name;
+    $('#nb-rep').textContent = `${rep.icon} ${rep.rep}`;
+    $('#nb-fill').style.width = Math.round(ng.frac * 100) + '%';
+    $('#nb-goal').textContent = ng.done
+      ? `✔ Ziel geschafft · ${fmt(ng.earned)} €`
+      : `${fmt(ng.earned)} / ${fmt(ng.goal)} € bis 04:00`;
+    nb.classList.toggle('goal-done', ng.done);
   }
 
-  // Phasen-Fortschritt (jetzt im Seiten-Button 📋)
-  const p = G.phaseInfo();
-  const rp = $('#rail-prog'); if (rp) rp.textContent = `${p.doneCount}/${p.total}`;
+  // Kapitel-Fortschritt im Story-Button
+  const ch2 = G.chapterInfo();
+  const rp = $('#rail-prog'); if (rp) rp.textContent = `${ch2.idx + 1}/${ch2.total}`;
 
   // Standort-Umschalter (Airport ↔ Das Boot)
   const locBtn = $('#loc-switch');
@@ -83,12 +88,13 @@ export function updateHUD() {
     banner.classList.add('show');
   } else banner.classList.remove('show');
 
-  // Seiten-Buttons: Badges & Show-Act-Sichtbarkeit
-  $('#badge-daily').classList.toggle('on', G.dailyDue());
+  // Seiten-Buttons: Badges. Alles Seltene steckt jetzt hinter „Mehr" —
+  // dessen Punkt zeigt an, ob dort etwas wartet.
   const claimable = G.achievementsInfo().some(a => a.done && !a.claimed);
-  const badgeAch = $('#badge-ach');
-  badgeAch.classList.toggle('on', claimable);
-  badgeAch.textContent = claimable ? '!' : '';
+  const moreWaiting = claimable || G.dailyDue();
+  const badgeMore = $('#badge-more');
+  badgeMore.classList.toggle('on', moreWaiting);
+  badgeMore.textContent = moreWaiting ? '!' : '';
   // Weltrangliste-Badge (neuer Überhol-Erfolg)
   $('#badge-rivals').classList.toggle('on', rivalUnseen);
   // Hinterzimmer: sichtbar ab Freischaltung; Badge bei fertigem Job
@@ -454,28 +460,37 @@ function openGoalsModal() {
     const wrap = el('div'); body.appendChild(wrap);
     function render() {
       wrap.innerHTML = '';
-      const head = el('div', 'goals-head');
-      head.innerHTML = `<span>Bisher verdient</span><b>${fmt(G.state.lifetime)} €</b>`;
+      // Das Kapitel führt — die Story ist jetzt an Nächte und Ruf gekoppelt
+      const ch = G.chapterInfo(), rep = G.repInfo(), ng = G.nightGoalInfo();
+      const head = el('div', 'chapter-head');
+      head.innerHTML = `
+        <div class="ch-icon">${ch.icon}</div>
+        <div class="ch-body">
+          <div class="ch-kap">Kapitel ${ch.idx + 1} von ${ch.total}</div>
+          <div class="ch-name">${ch.name}</div>
+          <div class="ch-text">${ch.text}</div>
+          <div class="ch-goal">🎯 ${ch.goal}</div>
+        </div>`;
       wrap.appendChild(head);
-      // Zwei-Wege-Nordstern
-      if (G.northStar) {
-        const ns = G.northStar(), ug = G.ugPhaseInfo ? G.ugPhaseInfo() : null;
-        const two = el('div', 'twopath');
-        two.innerHTML = `
-          <div class="tp-card legal">
-            <div class="tp-h">🏆 Club-Imperium</div>
-            <div class="tp-goal">${ns.legal.label}</div>
-            <div class="goal-bar"><i style="width:${Math.round(ns.legal.frac * 100)}%"></i></div>
-            <div class="tp-sub">Ziel: ${ns.nemesis.icon} ${ns.nemesis.name} vom Thron stoßen</div>
-          </div>
-          <div class="tp-card crime">
-            <div class="tp-h">🕶️ Unterwelt</div>
-            <div class="tp-goal">${ns.crime.label}</div>
-            <div class="goal-bar"><i class="crime" style="width:${Math.round(ns.crime.frac * 100)}%"></i></div>
-            <div class="tp-sub">${ug ? 'Kapitel: „' + ug.name + '" · ' + ug.done + '/' + ug.total : 'Ziel: Kingpin am Hafen'}</div>
-          </div>`;
-        wrap.appendChild(two);
-      }
+
+      const stats = el('div', 'twopath');
+      stats.innerHTML = `
+        <div class="tp-card legal">
+          <div class="tp-h">🌙 Nächte geschafft</div>
+          <div class="tp-goal">${G.state.nights}</div>
+          <div class="tp-sub">Serie: ${G.state.nightStreak || 0} in Folge</div>
+        </div>
+        <div class="tp-card crime">
+          <div class="tp-h">${rep.icon} Ruf</div>
+          <div class="tp-goal">${rep.rep} · ${rep.name}</div>
+          <div class="goal-bar"><i class="crime" style="width:${rep.rep}%"></i></div>
+          <div class="tp-sub">Bestimmt Gäste, Umsatz und wer bei dir auftaucht.</div>
+        </div>`;
+      wrap.appendChild(stats);
+
+      const nightRow = el('div', 'goals-head');
+      nightRow.innerHTML = `<span>Heute Nacht</span><b>${fmt(ng.earned)} / ${fmt(ng.goal)} €</b>`;
+      wrap.appendChild(nightRow);
       wrap.appendChild(el('div', 'list-caption', '🚀 Nächste große Freischaltungen'));
       const road = el('div', 'goal-list');
       for (const g of buildGoals()) {
@@ -1100,6 +1115,105 @@ function chestPopup(kind, gems, money) {
 }
 
 // ---- Story-Beat: kurze erzählte Karte (Kapitel/Erstereignis) -----------------------
+// ---- Vorfall: die eigentliche Entscheidung im Spiel ------------------------------
+let incidentOpen = null;
+function closeIncident() { if (incidentOpen) { incidentOpen.remove(); incidentOpen = null; } }
+function incidentPopup(inc) {
+  closeIncident();
+  const root = $('#modal-root');
+  const overlay = el('div', 'modal-overlay incident-pop');
+  const opts = inc.opts.map(o => {
+    const bits = [];
+    if (o.money < 0) bits.push(`<span class="c-money">−${fmt(-o.money)} €</span>`);
+    if (o.money > 0) bits.push(`<span class="c-gain">+${fmt(o.money)} €</span>`);
+    if (o.rep > 0) bits.push(`<span class="c-rep-up">+${o.rep} Ruf</span>`);
+    if (o.rep < 0) bits.push(`<span class="c-rep-dn">${o.rep} Ruf</span>`);
+    if (o.heat > 0) bits.push(`<span class="c-heat">+${o.heat} Heat</span>`);
+    if (o.heat < 0) bits.push(`<span class="c-gain">${o.heat} Heat</span>`);
+    return `<button class="inc-opt${o.affordable ? '' : ' disabled'}" data-i="${o.i}">${o.label}
+      <span class="inc-cost">${bits.join(' · ') || 'ohne Kosten'}</span></button>`;
+  }).join('');
+  overlay.innerHTML = `
+    <div class="inc-box">
+      <div class="inc-emoji">${inc.icon}</div>
+      <div class="inc-title">${inc.title}</div>
+      <div class="inc-text">${inc.text}</div>
+      <div class="inc-timer"><i style="width:100%"></i></div>
+      ${opts}
+    </div>`;
+  root.appendChild(overlay);
+  requestAnimationFrame(() => overlay.classList.add('open'));
+  const bar = overlay.querySelector('.inc-timer i');
+  const total = Math.max(1, inc.left);
+  const tick = setInterval(() => {
+    const cur = G.incidentInfo();
+    if (!cur) { clearInterval(tick); closeIncident(); return; }
+    bar.style.width = Math.max(0, Math.min(100, (cur.left / total) * 100)) + '%';
+  }, 200);
+  overlay.addEventListener('click', e => {
+    const b = e.target.closest('.inc-opt');
+    if (!b) return;
+    const r = G.resolveIncident(Number(b.dataset.i));
+    if (!r) return;                       // nicht bezahlbar → Karte bleibt offen
+    clearInterval(tick); closeIncident();
+  });
+  playSfx('quest');
+  incidentOpen = overlay;
+}
+
+// ---- Nacht-Report: der Ausgang der Nacht -----------------------------------------
+function nightEndPopup(r) {
+  closeIncident();
+  const root = $('#modal-root');
+  const overlay = el('div', 'modal-overlay chest-pop');
+  const rd = r.repDelta;
+  overlay.innerHTML = `
+    <div class="chest-box night-box${r.won ? '' : ' lost'}">
+      <div class="chest-emoji">${r.won ? '🌅' : '🌧️'}</div>
+      <h2>${r.won ? 'Nacht geschafft!' : 'Ziel verfehlt'}</h2>
+      <p class="modal-text">${r.won
+        ? 'Der Laden lief. Die Leute reden gut über dich.'
+        : 'Zu wenig Umsatz. Das spricht sich rum.'}</p>
+      <div class="nr-line"><span>Umsatz</span><b>${fmt(r.earned)} €</b></div>
+      <div class="nr-line"><span>Ziel</span><b>${fmt(r.goal)} €</b></div>
+      <div class="nr-line"><span>Ruf</span><b style="color:${rd >= 0 ? '#7cf49a' : '#ff9aa5'}">${rd >= 0 ? '+' : ''}${rd} → ${Math.round(r.rep)}</b></div>
+      ${r.bonus ? `<div class="nr-line"><span>Bonus (Serie ${r.streak})</span><b style="color:#7cf49a">+${fmt(r.bonus)} €</b></div>` : ''}
+      ${r.gems ? `<div class="nr-line"><span>Diamanten</span><b>+${r.gems} 💎</b></div>` : ''}
+      <button class="btn-big">Nächste Nacht ›</button>
+    </div>`;
+  root.appendChild(overlay);
+  requestAnimationFrame(() => overlay.classList.add('open'));
+  overlay.querySelector('.btn-big').addEventListener('click', () => overlay.remove());
+  playSfx(r.won ? 'chest' : 'click');
+  if (r.won) confetti(30);
+}
+
+// ---- „Mehr": alles Seltene an einem Ort statt sieben Buttons ---------------------
+function openMoreModal() {
+  openModal('⋯ Mehr', body => {
+    const list = el('div', 'station-list');
+    body.appendChild(list);
+    const entries = [
+      { icon: '📋', name: 'Aufgaben', desc: 'Laufende Ziele & Truhen', fn: openQuestModal },
+      { icon: '🎁', name: 'Täglicher Bonus', desc: 'Glücksrad & Streak', fn: openDailyModal, badge: () => G.dailyDue() },
+      { icon: '🏆', name: 'Erfolge', desc: 'Meilensteine & Diamanten', fn: openAchievementsModal,
+        badge: () => G.achievementsInfo().some(a => a.done && !a.claimed) },
+      { icon: '💎', name: 'Diamanten-Shop', desc: 'Boosts & Geldpakete', fn: openShopModal },
+      { icon: '📸', name: 'Foto-Modus', desc: 'Club als Bild teilen', fn: openPhotoModal },
+      { icon: '⚙️', name: 'Einstellungen', desc: 'Musik, Sound, Spielstand', fn: openSettingsModal },
+    ];
+    for (const e of entries) {
+      const row = el('div', 'station-row');
+      row.innerHTML = `<div class="st-icon">${e.icon}</div>
+        <div class="st-info"><div class="st-name">${e.name}${e.badge && e.badge() ? ' <span style="color:#ff5e6c">●</span>' : ''}</div>
+          <div class="st-desc">${e.desc}</div></div>
+        <button class="btn-buy"><b>›</b></button>`;
+      row.addEventListener('click', () => { playSfx('click'); e.fn(); });
+      list.appendChild(row);
+    }
+  });
+}
+
 function storyPopup(beat) {
   const root = $('#modal-root');
   const overlay = el('div', 'modal-overlay story-pop');
@@ -1119,27 +1233,6 @@ function storyPopup(beat) {
 }
 
 // ---- Nacht-Report (02:00 — Club-Nacht geschafft) -----------------------------------
-function nightReportPopup({ night, earned, bonus, gems }) {
-  const root = $('#modal-root');
-  const overlay = el('div', 'modal-overlay chest-pop');
-  overlay.innerHTML = `
-    <div class="chest-box">
-      <div class="chest-emoji">🌙</div>
-      <h2>Nacht ${night} geschafft!</h2>
-      <p class="modal-text small">Der Club hat bis 02:00 durchgezogen.<br>Einnahmen der Nacht: <b>${fmt(earned)} €</b></p>
-      <div class="chest-rewards">
-        <span>+${fmt(bonus)} € Bonus</span>
-        ${gems ? `<span>+${gems} 💎</span>` : ''}
-      </div>
-      <p class="modal-text small">🔥 Nacht-Serie: ${night} — je länger die Serie, desto fetter der Bonus!</p>
-      <button class="btn-big">Weiter feiern!</button>
-    </div>`;
-  root.appendChild(overlay);
-  requestAnimationFrame(() => overlay.classList.add('open'));
-  overlay.querySelector('.btn-big').addEventListener('click', () => overlay.remove());
-  playSfx('chest');
-  confetti(24);
-}
 
 // ---- Offline-Popup -----------------------------------------------------------------
 export function offlinePopup(away, money) {
@@ -1178,8 +1271,6 @@ export function offlinePopup(away, money) {
 // ------------------------------------------------------------------
 export function initUI() {
   $('#btn-settings').addEventListener('click', openSettingsModal);
-  $('#btn-quests').addEventListener('click', openQuestModal);
-  $('#btn-shop').addEventListener('click', openShopModal);
   $('#btn-staff').addEventListener('click', openStaffModal);
   $('#btn-rooms').addEventListener('click', openRoomsModal);
   $('#btn-stations').addEventListener('click', openStationsModal);
@@ -1193,11 +1284,9 @@ export function initUI() {
   });
   // Schwebende Seiten-Buttons
   $('#btn-goals').addEventListener('click', openGoalsModal);
-  $('#northstar').addEventListener('click', openGoalsModal);
-  $('#btn-daily').addEventListener('click', openDailyModal);
-  $('#btn-ach').addEventListener('click', openAchievementsModal);
+  $('#nightbar').addEventListener('click', openGoalsModal);
+  $('#btn-more').addEventListener('click', openMoreModal);
   $('#btn-rivals').addEventListener('click', () => { rivalUnseen = false; openRivalsModal(); });
-  $('#btn-photo').addEventListener('click', openPhotoModal);
   $('#loc-switch').addEventListener('click', () => {
     G.setLocation(G.state.location === 'boot' ? 'airport' : 'boot');
     playSfx('click'); updateHUD();
@@ -1234,6 +1323,15 @@ export function initUI() {
   G.on('roofunlocked', () => { playSfx('chest'); confetti(50); toast('🌃 Rooftop eröffnet — Sky Lounge über den Dächern!'); });
   G.on('bootunlocked', () => { updateHUD(); });
   G.on('story', beat => storyPopup(beat));
+  G.on('incident', inc => incidentPopup(inc));
+  G.on('incidentDone', r => {
+    if (r.ignored) { playSfx('alarm'); addShake(4); }
+    toast(`${r.icon} ${r.txt}`);
+    updateHUD();
+  });
+  G.on('nightEnd', r => nightEndPopup(r));
+  G.on('chapter', ch => { playSfx('level'); confetti(26);
+    storyPopup({ icon: ch.icon, title: ch.name, text: ch.text + '\n\n🎯 ' + ch.goal }); });
   G.on('ugPhase', ({ name }) => { playSfx('quest'); toast(`🕶️ Unterwelt-Kapitel: „${name}"`); updateHUD(); });
   G.on('performer', () => {});
   G.on('autocollect', () => {});
@@ -1257,7 +1355,6 @@ export function initUI() {
       ? `🚨 Die Leiche wurde gefunden — RAZZIA! Club ${left}s dicht.`
       : `🚨 RAZZIA! Der Club ist ${left}s fast geschlossen — die Gäste sind weg.`); updateHUD(); });
   G.on('combo', ({ n, mult }) => { playSfx('coin', 1 + Math.min(12, n) * 0.06); if (n === 2 || n % 3 === 0) { addShake(2); toast(`🔥 COMBO ×${n} — ${Math.round((mult - 1) * 100)} % Bonus!`); } });
-  G.on('nightReport', r => nightReportPopup(r));
   G.on('boost', () => {});
 
   updateHUD();
