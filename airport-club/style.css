@@ -1551,3 +1551,34 @@ body.run-mode #bottomnav { display: none !important; }
 .sc-choice { margin-top: 10px; cursor: default; }
 .sc-choice.hidden { display: none; }
 .sc-q { color: #ffd93c; font-size: 12.5px; font-weight: 800; margin-bottom: 7px; }
+
+/* ============================================================
+   ICON-SET — gezeichnete SVGs statt System-Emoji
+   Ein Strichgewicht, ein Raster, überall identisch.
+   ============================================================ */
+[data-ic] { display: inline-flex; align-items: center; justify-content: center; }
+.ic { width: 1em; height: 1em; display: block; flex: none; overflow: visible; }
+#btn-settings .ic { width: 20px; height: 20px; color: var(--ink-2); }
+.pill-icon { display: inline-flex; }
+.pill-icon .ic { width: 15px; height: 15px; }
+#hud-level .pill-icon { color: var(--gold); }
+#hud-gems .pill-icon { color: #f2a9ff; }
+#hud-cash .pill-icon { color: #9dedaa; }
+.nav-icon .ic { width: 23px; height: 23px; color: #fff; filter: drop-shadow(0 2px 2px rgba(0,0,0,0.35)); }
+.rail-btn .ic { width: 21px; height: 21px; color: #fff; }
+#hype-label .ic { width: 13px; height: 13px; color: #ff9f43; margin-right: 3px; vertical-align: -2px; display: inline-block; }
+#loc-switch .ic { width: 14px; height: 14px; color: var(--neon-cyan); margin-right: 5px; vertical-align: -2px; }
+#loc-switch { display: inline-flex; align-items: center; }
+.splash-logo .ic { width: 62px; height: 62px; color: #b79bff; }
+.splash-logo { display: flex; justify-content: center; }
+#nb-rep { display: inline-flex; align-items: center; gap: 4px; }
+#nb-rep .ic { width: 15px; height: 15px; }
+.st-icon .ic { width: 22px; height: 22px; color: var(--ink); }
+.inc-box .ic, .chest-box .ic { color: currentColor; }
+.up-title { gap: 5px; }
+.up-ic { display: inline-flex; flex: none; }
+.up-ic .ic { width: 15px; height: 15px; color: var(--ink-2); }
+.room-emoji .ic { width: 26px; height: 26px; color: var(--ink); }
+/* Hype-Label: Icon und Text in einer Zeile */
+#hype-label { display: flex; align-items: center; justify-content: center; gap: 5px; }
+#hype-label .ic { width: 13px; height: 13px; margin: 0; display: block; }

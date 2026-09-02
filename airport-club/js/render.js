@@ -287,10 +287,12 @@ function setupCamera() {
     projRaw(RM.t2.x + RM.t2.w + 0.6, RM.t2.y - 0.6, WALL_H),
     projRaw(RM.roof.x + RM.roof.w + 0.6, RM.roof.y + RM.roof.d + 0.6, 0),
     projRaw(RM.t1.x - 1.4, RM.t1.y + RM.t1.d + 0.6, 0),
-    projRaw(ENTRY_OUT.x + 3.2, ENTRY_OUT.y + 1.4, 0),
-    projRaw(ENTRY_OUT.x - 3.2, ENTRY_OUT.y + 1.4, 0),
+    projRaw(ENTRY_OUT.x + 2.4, ENTRY_OUT.y - 1.2, 0),
+    projRaw(ENTRY_OUT.x - 2.4, ENTRY_OUT.y - 1.2, 0),
   ];
-  camOver = fitTransform(overPts, W * 0.03, H * 0.03, 1.12, H * 0.03);
+  // Die Szene ist breiten-begrenzt: ohne Zoom bliebe fast die halbe Höhe leer.
+  // Etwas näher heran füllt das Bild, ohne Räume abzuschneiden.
+  camOver = fitTransform(overPts, W * 0.02, H * 0.02, 1.34, H * 0.13);
 
   // Raum-Detail: einzelnen Raum groß einpassen (Nachbarn dürfen am Rand bleiben)
   camRooms = {};

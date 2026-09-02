@@ -10,6 +10,7 @@ import {
   autoCollectInterval, MILESTONE_STEP, fmt, fmtTime, costOf, milestoneMult, nextMilestone,
 } from './data.js';
 import { playSfx, setMusic, cycleMusicStyle, currentMusicStyleName, setMusicStyle } from './sfx.js';
+import { icon, repIcon, hydrateIcons, iconFor } from './icons.js';
 import { drawPortrait, enterRoom, exitRoom, detailBack, nextRoom, prevRoom, currentRoom, devSetClock, addShake, coinBurst, exportShareImage } from './render.js';
 
 const ROOM_META = {
@@ -52,7 +53,7 @@ export function updateHUD() {
     const ng = G.nightGoalInfo(), rep = G.repInfo(), ch = G.chapterInfo();
     $('#nb-clock').textContent = G.clockLabel();
     $('#nb-chapter').textContent = ch.name;
-    $('#nb-rep').textContent = `${rep.icon} ${rep.rep}`;
+    $('#nb-rep').innerHTML = repIcon(rep.rep, repColor(rep.rep)) + `<span>${rep.rep}</span>`;
     $('#nb-fill').style.width = Math.round(ng.frac * 100) + '%';
     $('#nb-goal').textContent = ng.done
       ? `✔ Ziel geschafft · ${fmt(ng.earned)} €`
@@ -74,9 +75,9 @@ export function updateHUD() {
   // Hype
   const hypePct = G.dropActive() ? 100 : G.state.hype;
   $('#hype-fill').style.width = hypePct + '%';
-  $('#hype-label').textContent = G.dropActive()
-    ? '🔊 DROP! x3'
-    : `🔥 Hype ${Math.floor(G.state.hype)}%`;
+  $('#hype-label').innerHTML = icon('flame') + (G.dropActive()
+    ? ' DROP! ×3'
+    : ` Hype ${Math.floor(G.state.hype)}%`);
   $('#hype-meter').classList.toggle('dropping', G.dropActive());
 
   // Live-Event-Banner
@@ -100,14 +101,14 @@ export function updateHUD() {
   // Hinterzimmer: sichtbar ab Freischaltung; Badge bei fertigem Job
   const ugUnlocked = G.undergroundUnlocked();
   $('#btn-underground').classList.toggle('hidden', !ugUnlocked);
-  if (ugUnlocked && !ugWasUnlocked) { ugWasUnlocked = true; toast('🕶️ Das Hinterzimmer hat geöffnet…'); }
+  if (ugUnlocked && !ugWasUnlocked) { ugWasUnlocked = true; toast('Das Hinterzimmer hat geöffnet…'); }
   const ugBadge = $('#badge-ug');
   ugBadge.classList.toggle('on', ugUnseen || !!G.activeJob());
   ugBadge.textContent = G.activeJob() ? '⏳' : (ugUnseen ? '!' : '');
   // „Das Boot"-Endgame: einmalige Ankündigung, wenn erreichbar
   if (G.bootProgress().ready && !G.state.bootTeased) {
     G.state.bootTeased = true; playSfx('chest'); confetti(40);
-    toast('🚢 „Das Boot" ist bereit — das große Franchise-Endgame wartet!');
+    toast('„Das Boot"ist bereit — das große Franchise-Endgame wartet!');
   }
 
   // Boost-Button
@@ -179,8 +180,9 @@ function fillCard(card, st) {
   const target = nextMilestone(lvl);
   const cost = costOf(st, lvl);
   const afford = G.state.money >= cost;
-  card.querySelector('.up-title').textContent =
-    lvl === 0 ? `${st.icon} ${st.name} eröffnen` : `${st.icon} ${st.name} auf Stufe ${target}`;
+  card.querySelector('.up-title').innerHTML =
+    `<span class="up-ic">${iconFor(st.id, st.icon)}</span>` +
+    (lvl === 0 ? `${st.name} eröffnen` : `${st.name} auf Stufe ${target}`);
   card.querySelector('.up-fill').style.width = (lvl % MILESTONE_STEP) / MILESTONE_STEP * 100 + '%';
   card.querySelector('.up-count').textContent = `${lvl}/${target}`;
   card.querySelector('.up-cost').textContent = fmt(cost) + ' €';
@@ -286,7 +288,7 @@ function openStationsModal() {
             ${maxed ? '<b>MAX</b>' : `<span>Ausbauen</span><b>${fmt(cost)} €</b>`}
           </button>`;
         if (!maxed) row.querySelector('.btn-buy').addEventListener('click', () => {
-          if (G.buyClubExpand()) { playSfx('chest'); confetti(30); renderRows(); updateHUD(); toast('🏗️ Der Club ist gewachsen!'); }
+          if (G.buyClubExpand()) { playSfx('chest'); confetti(30); renderRows(); updateHUD(); toast('Der Club ist gewachsen!'); }
         });
         list.appendChild(row);
       }
@@ -306,7 +308,7 @@ function openStationsModal() {
             ${maxed ? '<b>MAX</b>' : `<span>Bewerben</span><b>${fmt(cost)} €</b>`}
           </button>`;
         if (!maxed) row.querySelector('.btn-buy').addEventListener('click', () => {
-          if (G.buyMarketing()) { playSfx('buy'); renderRows(); updateHUD(); toast('📣 Mehr Andrang! Der Laden füllt sich.'); }
+          if (G.buyMarketing()) { playSfx('buy'); renderRows(); updateHUD(); toast('Mehr Andrang! Der Laden füllt sich.'); }
         });
         list.appendChild(row);
       }
@@ -343,7 +345,7 @@ function openStationsModal() {
               </div>
               <button class="btn-buy${ready ? '' : ' disabled'}"><span>Franchise</span><b>Eröffnen!</b></button>`;
             row.querySelector('.btn-buy').addEventListener('click', () => {
-              if (G.unlockBoot()) { playSfx('chest'); confetti(50); renderRows(); updateHUD(); toast('🚢 „Das Boot" ist eröffnet!'); }
+              if (G.unlockBoot()) { playSfx('chest'); confetti(50); renderRows(); updateHUD(); toast('„Das Boot"ist eröffnet!'); }
             });
             list.appendChild(row);
             continue;
@@ -367,7 +369,7 @@ function openStationsModal() {
           row.querySelector('.btn-buy').addEventListener('click', () => {
             if (isRoof ? G.unlockRoof() : G.unlockT2()) {
               playSfx('chest'); confetti(40); renderRows(); updateHUD();
-              toast(`🎉 ${roomDef.name} ist eröffnet!`);
+              toast(`${roomDef.name} ist eröffnet!`);
             }
           });
           list.appendChild(row);
@@ -380,7 +382,7 @@ function openStationsModal() {
           const row = el('div', 'station-row' + (info.affordable ? '' : ' dim'));
           const barExtra = st.id === 'bar' ? ` · 🍸 ${G.currentDrink().e} ${G.currentDrink().name}` : '';
           row.innerHTML = `
-            <div class="st-icon">${st.icon}</div>
+            <div class="st-icon">${iconFor(st.id, st.icon)}</div>
             <div class="st-info">
               <div class="st-name">${st.name} <span class="st-lvl">Stufe ${lvl}</span></div>
               <div class="st-desc">${lvl > 0 ? '💶 ' + fmt(income) + ' €/s' : st.desc}
@@ -421,7 +423,7 @@ function openDjModal() {
           <div class="room-info"><b>${active ? '🔊 ' : ''}${dj.name}</b><span>${dj.desc}</span></div>${btn}`;
         if (!active) card.querySelector('button').addEventListener('click', () => {
           if (owned) { G.setActiveDj(dj.id); playSfx('click'); }
-          else { if (!G.hireDj(dj.id)) return; playSfx('chest'); confetti(30); toast(`🎧 ${dj.name} legt jetzt auf!`); }
+          else { if (!G.hireDj(dj.id)) return; playSfx('chest'); confetti(30); toast(`${dj.name} legt jetzt auf!`); }
           if (dj.style) setMusicStyle(dj.style);
           render(); updateHUD();
         });
@@ -521,7 +523,7 @@ function openGoalsModal() {
         card.innerHTML = `${ribbon}<div class="theme-sw">${sw}</div><div class="theme-name">${th.name}</div><div class="theme-desc">${th.desc}</div>${btn}`;
         if (!active) card.addEventListener('click', () => {
           if (owned) { G.setTheme(th.id); playSfx('click'); }
-          else if (can) { if (!G.unlockTheme(th.id)) return; confetti(30); playSfx('chest'); toast(`🎨 Theme „${th.name}" freigeschaltet!`); }
+          else if (can) { if (!G.unlockTheme(th.id)) return; confetti(30); playSfx('chest'); toast(`Theme „${th.name}"freigeschaltet!`); }
           else return;
           render();
         });
@@ -585,7 +587,7 @@ function openStaffModal() {
         const afford = !maxed && G.state.money >= cost;
         const row = el('div', 'station-row' + (afford ? '' : ' dim'));
         row.innerHTML = `
-          <div class="st-icon">${s.icon}</div>
+          <div class="st-icon">${iconFor(s.id, s.icon)}</div>
           <div class="st-info">
             <div class="st-name">${s.name} <span class="st-lvl">${lvl > 0 ? 'Stufe ' + lvl : 'Nicht eingestellt'}</span></div>
             <div class="st-desc">${s.desc}</div>
@@ -618,7 +620,7 @@ function openShopModal() {
         const afford = G.state.gems >= item.gems;
         const row = el('div', 'station-row' + (afford ? '' : ' dim'));
         row.innerHTML = `
-          <div class="st-icon">${item.icon}</div>
+          <div class="st-icon">${iconFor(item.id, item.icon)}</div>
           <div class="st-info">
             <div class="st-name">${item.name}</div>
             <div class="st-desc">${item.desc}</div>
@@ -640,7 +642,7 @@ function unlockedRoomCard(id) {
   const m = ROOM_META[id];
   const card = el('div', 'room-card unlocked clickable');
   const isPerf = G.state.performer.unlocked && G.state.performer.room === id;
-  card.innerHTML = `<div class="room-emoji">${m.icon}</div>
+  card.innerHTML = `<div class="room-emoji">${iconFor(id, m.icon)}</div>
     <div class="room-info"><b>${m.name}</b><span>${m.sub} · ${fmt(G.roomIncome(id))} €/s${isPerf ? ' · 💃 Show-Act' : ''}</span></div>
     <div class="room-emoji enter-arrow">→</div>`;
   card.addEventListener('click', () => { closeModal(); openRoomView(id); });
@@ -660,7 +662,7 @@ function lockedRoomCard(id, req, canUnlock, doUnlock, extraHint) {
   card.querySelector('button').addEventListener('click', () => {
     if (doUnlock()) {
       playSfx('chest'); confetti(40); updateHUD();
-      toast(`🎉 ${m.name} ist eröffnet!`);
+      toast(`${m.name} ist eröffnet!`);
     }
   });
   return card;
@@ -678,7 +680,7 @@ function bootRoomCard(refresh) {
       <div class="room-info"><b>Das Boot</b><span>${hint}</span></div>
       <button class="btn-buy${ready ? '' : ' disabled'}"><span>Franchise</span><b>Eröffnen!</b></button>`;
     card.querySelector('button').addEventListener('click', () => {
-      if (G.unlockBoot()) { playSfx('chest'); confetti(50); updateHUD(); refresh(); toast('🚢 „Das Boot" ist eröffnet!'); }
+      if (G.unlockBoot()) { playSfx('chest'); confetti(50); updateHUD(); refresh(); toast('„Das Boot"ist eröffnet!'); }
     });
     return card;
   }
@@ -716,7 +718,7 @@ function openRoomsModal() {
         const hc = el('div', 'room-card ' + (jailed ? 'locked' : 'unlocked clickable'));
         const n = G.stockCount ? G.stockCount() : 0;
         const sub = jailed ? `🔒 Festgenommen — noch ${Math.ceil(G.jailLeft())}s` : (n > 0 ? '📦 ' + n + ' Ware im Lager' : m.sub);
-        hc.innerHTML = `<div class="room-emoji">${m.icon}</div>
+        hc.innerHTML = `<div class="room-emoji">${iconFor(id, m.icon)}</div>
           <div class="room-info"><b>${m.name}</b><span>${sub}</span></div>
           <div class="room-emoji enter-arrow">${jailed ? '🔒' : '→'}</div>`;
         if (!jailed) hc.addEventListener('click', () => { closeModal(); openRoomView('hinter'); });
@@ -756,7 +758,7 @@ function performerCard(refresh) {
         <span>${lvlOk ? `Boostet ihren Raum um x${PERFORMER.roomMult}!` : 'Ab Level ' + PERFORMER.level + ' (du: ' + G.state.level + ')'}</span></div>
       <button class="btn-buy${ready ? '' : ' disabled'}"><span>Engagieren</span><b>${fmt(PERFORMER.cost)} €</b></button>`;
     card.querySelector('button').addEventListener('click', () => {
-      if (G.unlockPerformer()) { playSfx('chest'); confetti(24); refresh(); updateHUD(); toast('💃 Show-Act engagiert! Stell sie in einen Raum.'); }
+      if (G.unlockPerformer()) { playSfx('chest'); confetti(24); refresh(); updateHUD(); toast('Show-Act engagiert! Stell sie in einen Raum.'); }
     });
   } else {
     card.innerHTML = `<div class="room-emoji">💃</div>
@@ -781,12 +783,12 @@ function openPerformerModal() {
         const m = ROOM_META[id];
         const here = G.state.performer.room === id;
         const row = el('div', 'station-row' + (here ? ' active-row' : ''));
-        row.innerHTML = `<div class="st-icon">${m.icon}</div>
+        row.innerHTML = `<div class="st-icon">${iconFor(id, m.icon)}</div>
           <div class="st-info"><div class="st-name">${m.name}</div>
             <div class="st-desc">${fmt(G.roomIncome(id))} €/s${here ? ' · 💃 hier!' : ''}</div></div>
           <button class="btn-buy${here ? ' disabled' : ''}"><b>${here ? '✔ hier' : 'Hierhin'}</b></button>`;
         if (!here) row.querySelector('button').addEventListener('click', () => {
-          if (G.setPerformerRoom(id)) { playSfx('buy'); render(); updateHUD(); toast(`💃 Show-Act ist jetzt in ${m.name}!`); }
+          if (G.setPerformerRoom(id)) { playSfx('buy'); render(); updateHUD(); toast(`Show-Act ist jetzt in ${m.name}!`); }
         });
         list.appendChild(row);
       }
@@ -808,7 +810,7 @@ function openPrestigeConfirm(pi) {
     body.querySelector('#btn-prestige-go').addEventListener('click', () => {
       if (G.doPrestige()) {
         playSfx('chest'); confetti(60); closeModal(); updateHUD();
-        toast('⭐ Neueröffnung! Dein Ruf eilt dir voraus …');
+        toast('Neueröffnung! Dein Ruf eilt dir voraus …');
       }
     });
     body.querySelector('#btn-prestige-no').addEventListener('click', closeModal);
@@ -879,7 +881,7 @@ function openDailyModal() {
         playSfx('chest'); confetti(46);
         let msg = '🎁';
         if (r) { if (r.money) msg = '+' + fmt(r.money) + ' €'; else if (r.gems) msg = '+' + r.gems + ' 💎'; else if (r.boost) msg = '⚡ x2 Boost!'; else if (r.drop) msg = '🔊 DROP!'; }
-        toast(`🎁 Gewonnen: ${msg}${r ? ' · Streak ' + r.streak + '🔥' : ''}`);
+        toast(`Gewonnen: ${msg}${r ? '· Streak '+ r.streak + '': ''}`);
         updateHUD();
         btn.textContent = '✔ Eingesammelt — bis morgen!';
       }, 3700);
@@ -1044,7 +1046,7 @@ function openSettingsModal() {
       const name = cycleMusicStyle();
       G.save();
       e.target.textContent = '🎚️ Stil: ' + name;
-      toast('🎶 Musik: ' + name);
+      toast('Musik: '+ name);
     });
     body.querySelector('#set-sound').addEventListener('click', e => {
       G.state.settings.sound = !G.state.settings.sound;
@@ -1059,8 +1061,8 @@ function openSettingsModal() {
     const codeOk = body.querySelector('#dev-code-ok');
     if (codeOk) codeOk.addEventListener('click', () => {
       const val = body.querySelector('#dev-code').value;
-      if (G.enterDevCode(val)) { playSfx('chest'); toast('🧪 Dev-Modus freigeschaltet!'); closeModal(); openDevModal(); }
-      else { playSfx('click'); toast('❌ Falscher Code'); }
+      if (G.enterDevCode(val)) { playSfx('chest'); toast('Dev-Modus freigeschaltet!'); closeModal(); openDevModal(); }
+      else { playSfx('click'); toast('Falscher Code'); }
     });
   });
 }
@@ -1088,7 +1090,7 @@ function openDevModal() {
     act('dev-club', 'maxClub', '🏗️ Club maximal ausgebaut');
     act('dev-st', 'stations10', '📈 Stationen +10');
     body.querySelector('#dev-night').addEventListener('click', () => {
-      devSetClock(25.97 * 60); playSfx('click'); toast('🌙 Gleich ist die Nacht rum …');
+      devSetClock(25.97 * 60); playSfx('click'); toast('Gleich ist die Nacht rum …');
     });
   });
 }
@@ -1264,17 +1266,17 @@ function openMoreModal() {
     const list = el('div', 'station-list');
     body.appendChild(list);
     const entries = [
-      { icon: '📋', name: 'Aufgaben', desc: 'Laufende Ziele & Truhen', fn: openQuestModal },
-      { icon: '🎁', name: 'Täglicher Bonus', desc: 'Glücksrad & Streak', fn: openDailyModal, badge: () => G.dailyDue() },
-      { icon: '🏆', name: 'Erfolge', desc: 'Meilensteine & Diamanten', fn: openAchievementsModal,
+      { ic: 'book', name: 'Aufgaben', desc: 'Laufende Ziele & Truhen', fn: openQuestModal },
+      { ic: 'gift', name: 'Täglicher Bonus', desc: 'Glücksrad & Streak', fn: openDailyModal, badge: () => G.dailyDue() },
+      { ic: 'trophy', name: 'Erfolge', desc: 'Meilensteine & Diamanten', fn: openAchievementsModal,
         badge: () => G.achievementsInfo().some(a => a.done && !a.claimed) },
-      { icon: '💎', name: 'Diamanten-Shop', desc: 'Boosts & Geldpakete', fn: openShopModal },
-      { icon: '📸', name: 'Foto-Modus', desc: 'Club als Bild teilen', fn: openPhotoModal },
-      { icon: '⚙️', name: 'Einstellungen', desc: 'Musik, Sound, Spielstand', fn: openSettingsModal },
+      { ic: 'gem', name: 'Diamanten-Shop', desc: 'Boosts & Geldpakete', fn: openShopModal },
+      { ic: 'camera', name: 'Foto-Modus', desc: 'Club als Bild teilen', fn: openPhotoModal },
+      { ic: 'gear', name: 'Einstellungen', desc: 'Musik, Sound, Spielstand', fn: openSettingsModal },
     ];
     for (const e of entries) {
       const row = el('div', 'station-row');
-      row.innerHTML = `<div class="st-icon">${e.icon}</div>
+      row.innerHTML = `<div class="st-icon">${icon(e.ic)}</div>
         <div class="st-info"><div class="st-name">${e.name}${e.badge && e.badge() ? ' <span style="color:#ff5e6c">●</span>' : ''}</div>
           <div class="st-desc">${e.desc}</div></div>
         <button class="btn-buy"><b>›</b></button>`;
@@ -1339,7 +1341,11 @@ export function offlinePopup(away, money) {
 // ------------------------------------------------------------------
 //  Initialisierung & Event-Verdrahtung
 // ------------------------------------------------------------------
+const REP_COLORS = ['#ff5e6c', '#ff9f43', '#ffd93c', '#7cf49a', '#4fe0ff'];
+function repColor(rep) { return REP_COLORS[Math.min(4, Math.floor(rep / 21))]; }
+
 export function initUI() {
+  hydrateIcons();
   $('#btn-settings').addEventListener('click', openSettingsModal);
   $('#btn-staff').addEventListener('click', openStaffModal);
   $('#btn-rooms').addEventListener('click', openRoomsModal);
@@ -1347,9 +1353,9 @@ export function initUI() {
   $('#btn-boost').addEventListener('click', () => {
     if (G.startBoost()) {
       playSfx('boost');
-      toast('⚡ x2 Einkommen für 5 Minuten!');
+      toast('x2 Einkommen für 5 Minuten!');
     } else if (G.boostState().st === 'cooldown') {
-      toast('Boost lädt noch … (oder ⚡ im Shop sofort starten)');
+      toast('Boost lädt noch … (oder  im Shop sofort starten)');
     }
   });
   // Schwebende Seiten-Buttons
@@ -1373,24 +1379,24 @@ export function initUI() {
   G.on('levelup', ({ level, gems }) => {
     playSfx('level');
     confetti(24); addShake(6);
-    toast(`⭐ Level ${level}!` + (gems ? ` +${gems} 💎` : ''));
+    toast(`Level ${level}!`+ (gems ? `+${gems} `: ''));
   });
   G.on('milestone', ({ id, level }) => {
     const st = STATION_MAP[id];
     playSfx('milestone');
     confetti(20); addShake(8);
-    toast(`🚀 ${st.icon} ${st.name} Stufe ${level}: Einkommen x2!`);
+    toast(`${st.icon} ${st.name} Stufe ${level}: Einkommen x2!`);
   });
   G.on('quest', ({ txt }) => {
     playSfx('quest');
-    toast('✅ Aufgabe geschafft: ' + txt);
+    toast('Aufgabe geschafft: '+ txt);
   });
   G.on('chest', ({ kind, gems, money }) => chestPopup(kind, gems, money));
-  G.on('phase', ({ idx, name }) => toast(`🏁 Phase ${idx + 1} erreicht: „${name}“`));
-  G.on('drop', () => { playSfx('drop'); addShake(12); toast('🔊 DROP! Alle rasten aus — x3 Einkommen!'); });
-  G.on('celebSpawn', () => toast('🌟 Ein Promi ist im Club! Tipp ihn an!'));
+  G.on('phase', ({ idx, name }) => toast(`Phase ${idx + 1} erreicht: „${name}“`));
+  G.on('drop', () => { playSfx('drop'); addShake(12); toast('DROP! Alle rasten aus — x3 Einkommen!'); });
+  G.on('celebSpawn', () => toast('Ein Promi ist im Club! Tipp ihn an!'));
   G.on('t2unlocked', () => {});
-  G.on('roofunlocked', () => { playSfx('chest'); confetti(50); toast('🌃 Rooftop eröffnet — Sky Lounge über den Dächern!'); });
+  G.on('roofunlocked', () => { playSfx('chest'); confetti(50); toast('Rooftop eröffnet — Sky Lounge über den Dächern!'); });
   G.on('bootunlocked', () => { updateHUD(); });
   G.on('story', beat => storyPopup(beat));
   G.on('scene', sc => {
@@ -1410,29 +1416,29 @@ export function initUI() {
   G.on('nightEnd', r => nightEndPopup(r));
   G.on('chapter', ch => { playSfx('level'); confetti(26);
     storyPopup({ icon: ch.icon, title: ch.name, text: ch.text + '\n\n🎯 ' + ch.goal }); });
-  G.on('ugPhase', ({ name }) => { playSfx('quest'); toast(`🕶️ Unterwelt-Kapitel: „${name}"`); updateHUD(); });
+  G.on('ugPhase', ({ name }) => { playSfx('quest'); toast(`Unterwelt-Kapitel: „${name}"`); updateHUD(); });
   G.on('performer', () => {});
   G.on('autocollect', () => {});
   G.on('event', def => { playSfx('boost'); toast(`${def.icon} ${def.name}! ${def.txt}`); });
   G.on('eventEnd', () => {});
-  G.on('achievement', a => { playSfx('level'); toast(`🏆 Erfolg: ${a.name} · +${a.gems} 💎`); });
+  G.on('achievement', a => { playSfx('level'); toast(`Erfolg: ${a.name} · +${a.gems} `); });
   G.on('rivalBeaten', ({ name, gems, count }) => { rivalUnseen = true; playSfx('chest'); confetti(24);
-    toast(`🌍 Rivale überholt: ${name}${count > 1 ? ` +${count - 1}` : ''} · +${gems} 💎`); updateHUD(); });
+    toast(`Rivale überholt: ${name}${count > 1 ? `+${count - 1}`: ''} · +${gems} `); updateHUD(); });
   G.on('ugDone', r => { ugUnseen = true; playSfx(r.ok ? 'chest' : 'click');
-    toast(r.ok ? `🕶️ Job durchgezogen: +${fmt(r.gain)} €` : `🚨 Erwischt: −${fmt(r.lost)} €`); updateHUD(); });
+    toast(r.ok ? `Job durchgezogen: +${fmt(r.gain)} €`: `Erwischt: −${fmt(r.lost)} €`); updateHUD(); });
   // Schwarzmarkt: Run-Modus blendet die Club-Bedienelemente aus
   G.on('runStart', () => { document.body.classList.add('run-mode'); });
   const endRun = () => { document.body.classList.remove('run-mode'); updateHUD(); };
-  G.on('runDone', ({ qty }) => { endRun(); playSfx('chest'); confetti(16); toast(`📦 Run erfolgreich — ${qty} Ware im Lager!`); });
-  G.on('runAbort', ({ busted }) => { endRun(); if (!busted) toast('🏃 Run abgebrochen — Einsatz futsch.'); });
+  G.on('runDone', ({ qty }) => { endRun(); playSfx('chest'); confetti(16); toast(`Run erfolgreich — ${qty} Ware im Lager!`); });
+  G.on('runAbort', ({ busted }) => { endRun(); if (!busted) toast('Run abgebrochen — Einsatz futsch.'); });
   G.on('runBust', b => { playSfx('milestone');
-    toast(`🚨 ERWISCHT! Kaution −${fmt(b.bail)} €, ${b.seized} Ware weg, 🔒 ${b.jail}s gesperrt`); updateHUD(); });
+    toast(`ERWISCHT! Kaution −${fmt(b.bail)} €, ${b.seized} Ware weg,  ${b.jail}s gesperrt`); updateHUD(); });
   G.on('dealDone', r => { updateHUD(); });
   G.on('raid', ({ left, reason }) => { playSfx('milestone');
     toast(reason === 'body'
-      ? `🚨 Die Leiche wurde gefunden — RAZZIA! Club ${left}s dicht.`
-      : `🚨 RAZZIA! Der Club ist ${left}s fast geschlossen — die Gäste sind weg.`); updateHUD(); });
-  G.on('combo', ({ n, mult }) => { playSfx('coin', 1 + Math.min(12, n) * 0.06); if (n === 2 || n % 3 === 0) { addShake(2); toast(`🔥 COMBO ×${n} — ${Math.round((mult - 1) * 100)} % Bonus!`); } });
+      ? `Die Leiche wurde gefunden — RAZZIA! Club ${left}s dicht.`
+      : `RAZZIA! Der Club ist ${left}s fast geschlossen — die Gäste sind weg.`); updateHUD(); });
+  G.on('combo', ({ n, mult }) => { playSfx('coin', 1 + Math.min(12, n) * 0.06); if (n === 2 || n % 3 === 0) { addShake(2); toast(`COMBO ×${n} — ${Math.round((mult - 1) * 100)} % Bonus!`); } });
   G.on('boost', () => {});
 
   updateHUD();
