@@ -10,7 +10,7 @@ import {
   autoCollectInterval, MILESTONE_STEP, fmt, fmtTime, costOf, milestoneMult, nextMilestone,
 } from './data.js';
 import { playSfx, setMusic, cycleMusicStyle, currentMusicStyleName, setMusicStyle } from './sfx.js';
-import { enterRoom, exitRoom, detailBack, nextRoom, prevRoom, currentRoom, devSetClock, addShake, coinBurst, exportShareImage } from './render.js';
+import { drawPortrait, enterRoom, exitRoom, detailBack, nextRoom, prevRoom, currentRoom, devSetClock, addShake, coinBurst, exportShareImage } from './render.js';
 
 const ROOM_META = {
   t1:   { icon: '🪩', name: 'Terminal 1',        sub: 'Mainfloor' },
@@ -1115,6 +1115,76 @@ function chestPopup(kind, gems, money) {
 }
 
 // ---- Story-Beat: kurze erzählte Karte (Kapitel/Erstereignis) -----------------------
+// ---- Dialogszenen: die erzählte Ebene ------------------------------------------
+// Mehrere Beats nacheinander, Portrait links, Weitertippen überall.
+// Am Ende kann eine Entscheidung stehen, die im Spiel etwas ändert.
+function scenePopup(scene) {
+  const root = $('#modal-root');
+  const overlay = el('div', 'modal-overlay scene-pop');
+  overlay.innerHTML = `
+    <div class="scene-box">
+      <div class="sc-stage">
+        <canvas class="sc-portrait" width="96" height="96"></canvas>
+        <div class="sc-who"><b class="sc-name"></b><span class="sc-role"></span></div>
+      </div>
+      <div class="sc-text"></div>
+      <div class="sc-foot"><span class="sc-dots"></span><span class="sc-next">Weiter ›</span></div>
+      <div class="sc-choice hidden"></div>
+    </div>`;
+  root.appendChild(overlay);
+  requestAnimationFrame(() => overlay.classList.add('open'));
+  const cvs = overlay.querySelector('.sc-portrait');
+  const nameEl = overlay.querySelector('.sc-name'), roleEl = overlay.querySelector('.sc-role');
+  const textEl = overlay.querySelector('.sc-text'), dotsEl = overlay.querySelector('.sc-dots');
+  const footEl = overlay.querySelector('.sc-foot'), choiceEl = overlay.querySelector('.sc-choice');
+  let i = 0;
+
+  const render = () => {
+    const ln = scene.lines[i];
+    const isYou = ln.who === 'you';
+    overlay.querySelector('.scene-box').classList.toggle('you', isYou);
+    if (isYou) { cvs.style.visibility = 'hidden'; }
+    else { cvs.style.visibility = 'visible'; drawPortrait(cvs, ln.who, 96); }
+    nameEl.textContent = ln.char ? ln.char.name : '';
+    roleEl.textContent = ln.char && ln.char.role ? ln.char.role : '';
+    textEl.textContent = ln.text;
+    dotsEl.textContent = scene.lines.map((_, k) => k === i ? '●' : '·').join(' ');
+    playSfx('click');
+  };
+  const showChoice = () => {
+    footEl.classList.add('hidden');
+    choiceEl.classList.remove('hidden');
+    choiceEl.innerHTML = `<div class="sc-q">${scene.choice.q}</div>` +
+      scene.choice.opts.map((o, k) => {
+        const bits = [];
+        if (o.rep > 0) bits.push(`<span class="c-rep-up">+${o.rep} Ruf</span>`);
+        if (o.rep < 0) bits.push(`<span class="c-rep-dn">${o.rep} Ruf</span>`);
+        if (o.heat) bits.push(`<span class="c-heat">+${o.heat} Heat</span>`);
+        if (o.unlockUg) bits.push(`<span class="c-heat">Hinterzimmer öffnet</span>`);
+        return `<button class="inc-opt" data-k="${k}">${o.label}
+          <span class="inc-cost">${bits.join(' · ') || '—'}</span></button>`;
+      }).join('');
+    choiceEl.addEventListener('click', e => {
+      const b = e.target.closest('.inc-opt'); if (!b) return;
+      const r = G.resolveScene(scene.id, Number(b.dataset.k));
+      overlay.remove();
+      if (r && r.txt) toast(r.txt);
+      updateHUD();
+    });
+  };
+  const advance = () => {
+    i++;
+    if (i < scene.lines.length) { render(); return; }
+    if (scene.choice) { showChoice(); return; }
+    overlay.remove();
+  };
+  overlay.addEventListener('click', e => {
+    if (choiceEl.contains(e.target)) return;
+    advance();
+  });
+  render();
+}
+
 // ---- Vorfall: die eigentliche Entscheidung im Spiel ------------------------------
 let incidentOpen = null;
 function closeIncident() { if (incidentOpen) { incidentOpen.remove(); incidentOpen = null; } }
@@ -1323,6 +1393,14 @@ export function initUI() {
   G.on('roofunlocked', () => { playSfx('chest'); confetti(50); toast('🌃 Rooftop eröffnet — Sky Lounge über den Dächern!'); });
   G.on('bootunlocked', () => { updateHUD(); });
   G.on('story', beat => storyPopup(beat));
+  G.on('scene', sc => {
+    // Nicht über ein offenes Modal legen — erst zeigen, wenn der Bildschirm frei ist
+    const show = () => {
+      if ($('#modal-root').children.length) { setTimeout(show, 400); return; }
+      scenePopup(sc);
+    };
+    show();
+  });
   G.on('incident', inc => incidentPopup(inc));
   G.on('incidentDone', r => {
     if (r.ignored) { playSfx('alarm'); addShake(4); }

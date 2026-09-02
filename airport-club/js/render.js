@@ -21,6 +21,7 @@ import {
   rivalRank, playerWorth,
 } from './game.js';
 import { fmt, CASH_STATIONS, DRINKS, drinkTier, UNDERGROUND_JOBS, HEAT_MAX, UG_STEALTH,
+  CHARS,
   DEAL_CATS, DEAL_GOODS, goodById, CUSTOMER_ARCHETYPES, DEAL_CFG, SOURCING, SHOOTER, BUST_PENALTY } from './data.js';
 import { musicBpm } from './sfx.js';
 
@@ -3659,4 +3660,103 @@ export function renderFrame(now) {
   ctx.globalAlpha = 1;
 
   if (dropActive()) { ctx.fillStyle = `rgba(255,255,255,${0.04 + 0.05 * Math.abs(Math.sin(t * 20))})`; ctx.fillRect(0, 0, W, H); }
+}
+
+// ============================================================
+//  Charakter-Portraits — gezeichnet statt Emoji.
+//  Emoji rendern auf jedem Gerät anders; das ist das deutlichste
+//  „selbstgebaut"-Signal. Diese Büsten sehen überall gleich aus.
+// ============================================================
+export function drawPortrait(cv, charId, size = 96) {
+  const c = CHARS[charId];
+  const g = cv.getContext('2d');
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  cv.width = size * dpr; cv.height = size * dpr;
+  cv.style.width = size + 'px'; cv.style.height = size + 'px';
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, size, size);
+  const S = size / 96;                      // alles relativ zu 96px entworfen
+  const cx = size / 2;
+
+  // Hintergrund-Scheibe im Akzent der Figur
+  const bg = g.createRadialGradient(cx, size * 0.42, 4 * S, cx, size * 0.5, size * 0.55);
+  bg.addColorStop(0, (c && c.accent ? c.accent : '#8b5cf6') + '44');
+  bg.addColorStop(1, 'rgba(20,14,40,0)');
+  g.fillStyle = bg; g.beginPath(); g.arc(cx, size * 0.5, size * 0.5, 0, 7); g.fill();
+  if (!c) return;
+
+  const ink = 'rgba(12,8,24,0.85)';
+  const line = (w) => { g.strokeStyle = ink; g.lineWidth = w * S; g.lineJoin = 'round'; };
+
+  // Schultern / Oberkörper
+  g.fillStyle = c.shirt;
+  g.beginPath();
+  g.moveTo(cx - 30 * S, size);
+  g.quadraticCurveTo(cx - 30 * S, 66 * S, cx - 14 * S, 60 * S);
+  g.lineTo(cx + 14 * S, 60 * S);
+  g.quadraticCurveTo(cx + 30 * S, 66 * S, cx + 30 * S, size);
+  g.closePath(); g.fill();
+  line(2.5); g.stroke();
+  if (c.suit) {                              // Revers + Hemd für Viktor
+    g.fillStyle = '#f2efe6';
+    g.beginPath(); g.moveTo(cx, 60 * S); g.lineTo(cx - 7 * S, size); g.lineTo(cx + 7 * S, size); g.closePath(); g.fill();
+    g.fillStyle = c.accent;
+    g.beginPath(); g.moveTo(cx, 64 * S); g.lineTo(cx - 3.5 * S, size); g.lineTo(cx + 3.5 * S, size); g.closePath(); g.fill();
+  }
+
+  // Hals
+  g.fillStyle = c.skin;
+  g.fillRect(cx - 7 * S, 50 * S, 14 * S, 14 * S);
+
+  // Kopf
+  g.fillStyle = c.skin;
+  g.beginPath(); g.ellipse(cx, 38 * S, 19 * S, 22 * S, 0, 0, 7); g.fill();
+  line(2.5); g.stroke();
+
+  // Haare je nach Stil
+  g.fillStyle = c.hair;
+  if (c.hairStyle === 'bob') {
+    g.beginPath(); g.ellipse(cx, 32 * S, 21 * S, 20 * S, 0, Math.PI, 0); g.fill();
+    g.beginPath(); g.ellipse(cx - 19 * S, 40 * S, 6 * S, 14 * S, 0, 0, 7); g.fill();
+    g.beginPath(); g.ellipse(cx + 19 * S, 40 * S, 6 * S, 14 * S, 0, 0, 7); g.fill();
+  } else if (c.hairStyle === 'buzz') {
+    g.beginPath(); g.ellipse(cx, 30 * S, 19 * S, 14 * S, 0, Math.PI, 0); g.fill();
+  } else {                                   // slick — nach hinten gekämmt
+    g.beginPath(); g.ellipse(cx, 30 * S, 20 * S, 15 * S, 0, Math.PI, 0); g.fill();
+    g.strokeStyle = 'rgba(255,255,255,0.25)'; g.lineWidth = 1.5 * S;
+    for (let i = -2; i <= 2; i++) {
+      g.beginPath(); g.moveTo(cx + i * 6 * S, 18 * S); g.quadraticCurveTo(cx + i * 7 * S, 26 * S, cx + i * 8 * S, 30 * S); g.stroke();
+    }
+  }
+  if (c.beard) {
+    g.fillStyle = c.hair;
+    g.beginPath(); g.ellipse(cx, 48 * S, 14 * S, 10 * S, 0, 0, Math.PI); g.fill();
+    g.fillStyle = c.skin;
+    g.beginPath(); g.ellipse(cx, 45 * S, 6 * S, 4 * S, 0, 0, 7); g.fill();
+  }
+
+  // Augen + Brauen — geben der Figur den Ausdruck
+  g.fillStyle = '#1a1420';
+  g.beginPath(); g.ellipse(cx - 7 * S, 38 * S, 2.4 * S, 2.8 * S, 0, 0, 7); g.fill();
+  g.beginPath(); g.ellipse(cx + 7 * S, 38 * S, 2.4 * S, 2.8 * S, 0, 0, 7); g.fill();
+  line(2);
+  g.beginPath();
+  if (charId === 'viktor') {                 // hochgezogene Braue = herablassend
+    g.moveTo(cx - 11 * S, 31 * S); g.lineTo(cx - 3 * S, 32.5 * S);
+    g.moveTo(cx + 3 * S, 31.5 * S); g.lineTo(cx + 11 * S, 28 * S);
+  } else if (charId === 'ozan') {            // gerade, ruhig
+    g.moveTo(cx - 11 * S, 31 * S); g.lineTo(cx - 3 * S, 31 * S);
+    g.moveTo(cx + 3 * S, 31 * S); g.lineTo(cx + 11 * S, 31 * S);
+  } else {                                   // leicht schräg = wach, direkt
+    g.moveTo(cx - 11 * S, 30 * S); g.lineTo(cx - 3 * S, 32 * S);
+    g.moveTo(cx + 3 * S, 32 * S); g.lineTo(cx + 11 * S, 30 * S);
+  }
+  g.stroke();
+
+  // Mund
+  line(2);
+  g.beginPath();
+  if (charId === 'viktor') { g.moveTo(cx - 5 * S, 47 * S); g.lineTo(cx + 5 * S, 46 * S); }
+  else if (charId === 'mara') { g.moveTo(cx - 5 * S, 46 * S); g.quadraticCurveTo(cx, 49 * S, cx + 5 * S, 46 * S); }
+  g.stroke();
 }

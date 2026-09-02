@@ -758,3 +758,126 @@ export function chapterFor(st) {
   }
   return c;
 }
+
+// ============================================================
+//  FIGUREN & SZENEN — die erzählte Ebene
+// ============================================================
+// Drei wiederkehrende Figuren begleiten den ganzen Verlauf. Sie sind
+// keine Deko: Mara steht für den sauberen Weg, Ozan für den schnellen,
+// Viktor ist der Gegner, der auf deinen Aufstieg reagiert.
+export const CHARS = {
+  mara: {
+    name: 'Mara', role: 'Barchefin',
+    skin: '#e8b98d', hair: '#2b1c10', hairStyle: 'bob', shirt: '#0e5e73', accent: '#4fe0ff',
+  },
+  ozan: {
+    name: 'Ozan', role: 'Türsteher',
+    skin: '#c68a53', hair: '#1a1a22', hairStyle: 'buzz', shirt: '#2b2f3a', accent: '#95e04a', beard: true,
+  },
+  viktor: {
+    name: 'Viktor Kranz', role: 'König der Nacht',
+    skin: '#f0d6bd', hair: '#d9d0c0', hairStyle: 'slick', shirt: '#1b1420', accent: '#ffd93c', suit: true,
+  },
+};
+
+// Eine Szene besteht aus mehreren Beats (Sprecher + Text) und kann am Ende
+// eine Entscheidung stellen, die sich im Spielzustand niederschlägt.
+//   when: Bedingung, wann die Szene fällig ist (wird in game.js geprüft)
+//   once: true → nur einmal
+export const SCENES = [
+  {
+    id: 'intro', when: { nights: 0 },
+    lines: [
+      { who: 'mara', text: 'Also. Das ist er.' },
+      { who: 'mara', text: 'Ein leeres Terminal, ein geliehener Kredit und ein Typ, der glaubt, er macht daraus den heißesten Laden der Stadt.' },
+      { who: 'mara', text: 'Ich hab in fünf Clubs gearbeitet. Vier davon gibt es nicht mehr. Zeig mir, dass deiner anders wird.' },
+      { who: 'you', text: 'Und wenn nicht?' },
+      { who: 'mara', text: 'Dann bin ich weg, bevor das Licht ausgeht. Aber bis dahin: Ich mach die Bar. Du machst die Nacht.' },
+    ],
+  },
+  {
+    id: 'firstWin', when: { nights: 1 },
+    lines: [
+      { who: 'mara', text: 'Vier Uhr. Letzter Gast raus, Kasse stimmt.' },
+      { who: 'mara', text: 'Ich sag nicht, dass ich beeindruckt bin. Ich sag, dass ich mich geirrt hab. Für heute.' },
+      { who: 'mara', text: 'Morgen kommen mehr. Sorg dafür, dass sie einen Grund haben zu bleiben.' },
+    ],
+  },
+  {
+    id: 'firstLoss', when: { lostNight: true },
+    lines: [
+      { who: 'mara', text: 'Das war nichts.' },
+      { who: 'mara', text: 'Halbleer um eins, und die, die da waren, haben mehr geschaut als bestellt.' },
+      { who: 'mara', text: 'Ich hab das oft genug gesehen. Erst wird es leer, dann wird geredet, dann kommt keiner mehr. In der Reihenfolge.' },
+      { who: 'mara', text: 'Also: Was änderst du bis morgen?' },
+    ],
+  },
+  {
+    id: 'ozanOffer', when: { nights: 4 },
+    lines: [
+      { who: 'ozan', text: 'Chef. Kurz.' },
+      { who: 'ozan', text: 'Ich kenn Leute. Aus dem Viertel. Die können dafür sorgen, dass dein Laden nie Ärger kriegt — und dass bestimmte Sachen hinten rum reinkommen.' },
+      { who: 'ozan', text: 'Kostet nichts. Erstmal.' },
+      { who: 'you', text: 'Und dann?' },
+      { who: 'ozan', text: 'Dann schuldest du was. So läuft das. Ich sag dir das ehrlich, weil ich nicht will, dass du dumm reinstolperst.' },
+    ],
+    choice: {
+      q: 'Ozans Kontakte annehmen?',
+      opts: [
+        { label: 'Annehmen — ich brauch jeden Vorteil', rep: -8, heat: 10, unlockUg: true,
+          txt: 'Ozan nickt knapp. „Dann bis später. Hinterzimmer."' },
+        { label: 'Ablehnen — der Laden bleibt sauber', rep: 8,
+          txt: 'Ozan zuckt mit den Schultern. „Respekt. Halt durch."' },
+      ],
+    },
+  },
+  {
+    id: 'viktorIntro', when: { nights: 8 },
+    lines: [
+      { who: 'viktor', text: 'Sie müssen der Neue sein.' },
+      { who: 'viktor', text: 'Viktor Kranz. Mir gehören sieben Läden in dieser Stadt. Der achte wäre Ihrer, wenn Sie klug sind.' },
+      { who: 'you', text: 'Er steht nicht zum Verkauf.' },
+      { who: 'viktor', text: 'Alles steht zum Verkauf. Manche Dinge wissen es nur noch nicht.' },
+      { who: 'viktor', text: 'Machen Sie weiter. Ich schaue zu. Das tue ich meistens, kurz bevor etwas zumacht.' },
+    ],
+  },
+  {
+    id: 'maraWarn', when: { repBelow: 25 },
+    lines: [
+      { who: 'mara', text: 'Wir müssen reden.' },
+      { who: 'mara', text: 'Die Leute reden über uns. Nicht so, wie man will, dass über einen geredet wird.' },
+      { who: 'mara', text: 'Ich hab dir gesagt, was passiert, wenn der Ruf kippt. Erst bleiben die Guten weg. Dann kommen die Falschen.' },
+      { who: 'mara', text: 'Ich bin noch da. Aber nicht für immer.' },
+    ],
+  },
+  {
+    id: 'viktorAttack', when: { nights: 14 },
+    lines: [
+      { who: 'ozan', text: 'Chef, draußen stehen zwei Typen und fotografieren die Schlange.' },
+      { who: 'ozan', text: 'Und im Netz steht seit heute früh, bei uns gäbe es gepanschte Drinks.' },
+      { who: 'mara', text: 'Das kommt von Kranz. Das ist genau seine Handschrift — er macht sich nie die Hände schmutzig.' },
+      { who: 'mara', text: 'Ab jetzt ist das kein Wettbewerb mehr. Ab jetzt hast du einen Gegner.' },
+    ],
+  },
+  {
+    id: 'maraProud', when: { repAbove: 85 },
+    lines: [
+      { who: 'mara', text: 'Weißt du, was heute passiert ist?' },
+      { who: 'mara', text: 'Ein Mädchen an der Bar hat gesagt, sie ist zwei Stunden gefahren. Für uns. Nicht für die Stadt — für uns.' },
+      { who: 'mara', text: 'Fünf Läden, hab ich gesagt. Vier zu. Der fünfte hier ist der erste, bei dem ich denke: der bleibt.' },
+    ],
+  },
+  {
+    id: 'finale', when: { rank1: true },
+    lines: [
+      { who: 'viktor', text: 'Ich habe Ihre Zahlen gesehen.' },
+      { who: 'viktor', text: 'Sieben Läden. Und trotzdem steht heute Ihr Name über meinem. Wissen Sie, wie lange das her ist?' },
+      { who: 'you', text: 'Sie haben gesagt, Sie schauen zu.' },
+      { who: 'viktor', text: 'Das habe ich. Und ich habe mich geirrt — das passiert mir selten genug, dass ich es zugebe.' },
+      { who: 'viktor', text: 'Die Stadt gehört Ihnen. Passen Sie besser darauf auf als ich.' },
+      { who: 'mara', text: 'Und? Wie fühlt sich der Thron an?' },
+      { who: 'you', text: 'Zugig.' },
+      { who: 'mara', text: 'Dann mach die Tür zu. Morgen ist wieder Nacht.' },
+    ],
+  },
+];

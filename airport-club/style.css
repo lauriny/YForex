@@ -1515,3 +1515,39 @@ body.run-mode #bottomnav { display: none !important; }
 .ch-name { font-size: 17px; font-weight: 900; color: #fff; margin: 1px 0 4px; }
 .ch-text { font-size: 12px; line-height: 1.45; color: var(--ink-2); }
 .ch-goal { font-size: 12px; font-weight: 800; color: #ffd93c; margin-top: 7px; }
+
+/* ============================================================
+   DIALOGSZENEN — die erzählte Ebene
+   ============================================================ */
+.modal-overlay.scene-pop { display: grid; place-items: end center; padding-bottom: 12px; }
+.scene-box {
+  width: min(94vw, 360px);
+  background: linear-gradient(180deg, rgba(42,32,68,0.97), rgba(20,15,40,0.97));
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border: 1.5px solid var(--glass-line-hi); border-radius: 20px;
+  padding: 14px 16px 12px;
+  box-shadow: 0 16px 46px rgba(0,0,0,0.66);
+  transform: translateY(18px); transition: transform .24s cubic-bezier(.34,1.4,.64,1);
+  cursor: pointer;
+}
+.scene-pop.open .scene-box { transform: translateY(0); }
+.sc-stage { display: flex; align-items: center; gap: 11px; margin-bottom: 9px; }
+.sc-portrait { flex: none; width: 60px; height: 60px; }
+.sc-who { display: flex; flex-direction: column; line-height: 1.25; }
+.sc-name { color: #fff; font-size: 15.5px; font-weight: 900; }
+.sc-role { color: var(--ink-3); font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; }
+.scene-box.you .sc-stage { justify-content: flex-end; }
+.scene-box.you .sc-who { align-items: flex-end; }
+.scene-box.you .sc-name { color: var(--neon-cyan); }
+.sc-text {
+  color: var(--ink); font-size: 14.5px; line-height: 1.5; font-weight: 600;
+  min-height: 66px; border-left: 2px solid var(--glass-line-hi); padding-left: 11px;
+}
+.scene-box.you .sc-text { border-left: none; border-right: 2px solid var(--neon-cyan); padding-left: 0; padding-right: 11px; text-align: right; }
+.sc-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; }
+.sc-foot.hidden { display: none; }
+.sc-dots { color: var(--ink-3); font-size: 11px; letter-spacing: 1px; }
+.sc-next { color: var(--neon-pink); font-size: 12.5px; font-weight: 800; animation: hintfade 1.8s ease-in-out infinite; }
+.sc-choice { margin-top: 10px; cursor: default; }
+.sc-choice.hidden { display: none; }
+.sc-q { color: #ffd93c; font-size: 12.5px; font-weight: 800; margin-bottom: 7px; }

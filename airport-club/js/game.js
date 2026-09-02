@@ -11,7 +11,7 @@ import {
   RIVALS, RIVAL_OVERTAKE_MULT, UNDERGROUND_JOBS, UNDERGROUND_REQ, HEAT_MAX, HEAT_DECAY, BOOT_REQ, RAID_DUR, TAKEDOWN_CD, BODY_RAID_DELAY, BRIBE_MULT,
   DEAL_CATS, DEAL_GOODS, DEAL_GOODS_FLAT, goodById, CUSTOMER_ARCHETYPES, DEAL_CFG, SOURCING,
   SHOOTER, BUST_PENALTY, NEMESIS, UNDERWORLD_PHASES, getUgPhase, STORY,
-  NIGHT, REP, repTier, INCIDENTS, CHAPTERS, chapterFor,
+  NIGHT, REP, repTier, INCIDENTS, CHAPTERS, chapterFor, SCENES, CHARS,
 } from './data.js';
 
 const SAVE_KEY = 'airportClub.save.v1';
@@ -76,6 +76,8 @@ export const state = {
   nextIncidentAt: 0,       // Uhrzeit (Nacht-Minuten) des nächsten Vorfalls
   incidentsHandled: 0,
   chapter: 0,              // erreichtes Story-Kapitel
+  scenesSeen: {},          // gespielte Dialogszenen (id -> true)
+  lostAnyNight: false,     // schon mal eine Nacht verfehlt?
   rivals: { beaten: [], seeded: false },  // ids überholter Rivalen (dauerhafter Einkommens-Bonus)
   underground: { unlocked: false, job: null, heat: 0, done: 0, lastResult: null, takedownCdUntil: 0, pendingRaidAt: 0 },
   dealer: { rep: 0, stock: [], served: 0, runsDone: 0, catsRun: {}, lastDeal: null, run: null, customer: null, jailUntil: 0, lastBust: null },   // Schwarzmarkt
@@ -1320,6 +1322,7 @@ export function startNightIfNeeded() { if (!state.nightGoal) rollNightGoal(); }
 function endNight() {
   const info = nightGoalInfo();
   const won = info.done;
+  if (!won) state.lostAnyNight = true;
   const before = state.rep;
   addRep(won ? NIGHT.repWin : -NIGHT.repLose);
   if (won) state.nights++;
@@ -1335,6 +1338,7 @@ function endNight() {
   checkChapter();
   saveNow();
   emit('nightEnd', out);
+  setTimeout(checkScenes, 30);      // Szene erst nach dem Report zeigen
   return out;
 }
 
@@ -1354,7 +1358,7 @@ function advanceClock(dt) {
 export function addRep(d) {
   const before = state.rep;
   state.rep = Math.max(REP.min, Math.min(REP.max, state.rep + d));
-  if (state.rep !== before) emit('rep', { rep: state.rep, delta: state.rep - before });
+  if (state.rep !== before) { emit('rep', { rep: state.rep, delta: state.rep - before }); checkScenes(); }
   return state.rep;
 }
 export function repMult() { return REP.multAt(state.rep); }
@@ -1449,4 +1453,50 @@ function checkChapter() {
 
 export function devSetNightClock(min) {
   state.clock = Math.max(NIGHT.startMin, Math.min(NIGHT.endMin - 0.5, min));
+}
+
+// ============================================================
+//  SZENEN — die erzählte Ebene, an den Spielzustand gekoppelt
+// ============================================================
+export function sceneChar(id) { return id === 'you' ? { name: 'Du', role: '', you: true } : CHARS[id]; }
+
+function sceneDue(sc) {
+  if (state.scenesSeen[sc.id]) return false;
+  const w = sc.when || {};
+  if (w.nights !== undefined && state.nights < w.nights) return false;
+  if (w.lostNight && !state.lostAnyNight) return false;
+  if (w.repBelow !== undefined && state.rep >= w.repBelow) return false;
+  if (w.repAbove !== undefined && state.rep <= w.repAbove) return false;
+  if (w.rank1 && rivalRank() > 1) return false;
+  return true;
+}
+// Nach jedem Nachtende und bei Ruf-Sprüngen prüfen, ob eine Szene fällig ist
+export function checkScenes() {
+  for (const sc of SCENES) {
+    if (!sceneDue(sc)) continue;
+    state.scenesSeen[sc.id] = true;
+    save();
+    emit('scene', sceneInfo(sc));
+    return sc.id;
+  }
+  return null;
+}
+function sceneInfo(sc) {
+  return {
+    id: sc.id,
+    lines: sc.lines.map(l => ({ who: l.who, char: sceneChar(l.who), text: l.text })),
+    choice: sc.choice || null,
+  };
+}
+// Entscheidung am Ende einer Szene anwenden
+export function resolveScene(sceneId, idx) {
+  const sc = SCENES.find(x => x.id === sceneId);
+  if (!sc || !sc.choice || !sc.choice.opts[idx]) return null;
+  const o = sc.choice.opts[idx];
+  if (o.rep) addRep(o.rep);
+  if (o.heat) state.underground.heat = Math.max(0, Math.min(HEAT_MAX, state.underground.heat + o.heat));
+  if (o.unlockUg) state.underground.unlocked = true;
+  save();
+  emit('sceneChoice', { sceneId, ...o });
+  return o;
 }
