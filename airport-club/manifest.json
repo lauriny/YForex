@@ -1,0 +1,19 @@
+{
+  "name": "Airport – Club Simulator",
+  "short_name": "Airport Club",
+  "description": "Idle-Club-Simulator: Baue den Club „Airport“ zum Kult-Club aus — von Terminal 1 bis zur VIP-Etage!",
+  "lang": "de",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#171b33",
+  "theme_color": "#171b33",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
